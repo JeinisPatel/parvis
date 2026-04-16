@@ -1,0 +1,85 @@
+PARVIS — GitHub + Streamlit Cloud Deployment Guide
+====================================================
+J.S. Patel | Ethical AI Initiative | University of London
+
+STEP 1 — PREPARE YOUR FILES
+─────────────────────────────
+Your parvis/ folder should contain:
+  app.py
+  model.py
+  quantum_diagnostics.py
+  requirements.txt
+  README.md
+  ethical_ai_logo.png
+  .streamlit/
+    config.toml
+
+STEP 2 — CREATE GITHUB REPOSITORY
+───────────────────────────────────
+1. Go to https://github.com and sign in (or create an account)
+2. Click the "+" icon → "New repository"
+3. Name it: parvis
+4. Set to Public (required for free Streamlit Cloud)
+5. Do NOT initialise with README (we already have one)
+6. Click "Create repository"
+
+STEP 3 — PUSH YOUR FILES TO GITHUB
+────────────────────────────────────
+On your Mac terminal, navigate to your parvis folder:
+
+  cd /path/to/parvis
+  git init
+  git add .
+  git commit -m "Initial PARVIS commit — pgmpy Variable Elimination + QBism diagnostics"
+  git branch -M main
+  git remote add origin https://github.com/YOUR_USERNAME/parvis.git
+  git push -u origin main
+
+Replace YOUR_USERNAME with your GitHub username.
+
+STEP 4 — DEPLOY ON STREAMLIT CLOUD
+────────────────────────────────────
+1. Go to https://share.streamlit.io
+2. Sign in with your GitHub account
+3. Click "New app"
+4. Select:
+     Repository: YOUR_USERNAME/parvis
+     Branch:     main
+     Main file:  app.py
+5. Click "Deploy"
+
+Streamlit Cloud will automatically:
+  - Install requirements.txt dependencies
+  - Launch the app
+  - Give you a public URL: https://YOUR_USERNAME-parvis.streamlit.app
+
+STEP 5 — UPDATING THE APP
+───────────────────────────
+Any time you push changes to GitHub, Streamlit Cloud auto-redeploys:
+
+  git add .
+  git commit -m "Update: [description]"
+  git push
+
+TROUBLESHOOTING
+────────────────
+- If pgmpy install fails: check requirements.txt has pgmpy>=0.1.25
+- If logo not found: ensure ethical_ai_logo.png is in the root of the repo
+- Memory issues: Streamlit Cloud free tier has 1GB RAM — pgmpy may be slow
+  on first load. The @st.cache_resource decorator caches the model after first run.
+- Private repo: requires a paid Streamlit Cloud plan
+
+NOTES ON THE INFERENCE ENGINE
+───────────────────────────────
+PARVIS uses pgmpy Variable Elimination for Nodes 1-19 (genuine Bayesian 
+inference). Node 20 is computed post-VE via a calibrated formula that 
+correctly models distortion nodes as REDUCING DO designation risk — not 
+increasing it. This matches the thesis argument precisely: systemic 
+distortion corrections reduce the evidentiary weight of upstream risk 
+signals rather than adding to dangerousness.
+
+The Quantum Bayesianism (QBism) diagnostic layer (Appendix Q) runs 
+alongside VE and flags epistemic pressure points without altering the 
+classical posterior.
+
+For questions: contact J.S. Patel, Ethical AI Initiative
