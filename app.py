@@ -578,7 +578,7 @@ with tabs[4]:
     st.caption("Manual fine-tuning of node probabilities. Values driven by Case Profile and Gladue/SCE tabs are shown with source tags.")
 
     col_r, col_d = st.columns(2)
-    evN = [n for n in NODE_META if NODE_META[n]["ev"] if True else False]
+    evN = [n for n in NODE_META if NODE_META[n].get("ev", False)]
     risk_nodes = [n for n in NODE_META if NODE_META[n]["type"] in ("risk",)]
     dst_nodes  = [n for n in NODE_META if NODE_META[n]["type"] not in ("risk","output") and n != 20]
 
