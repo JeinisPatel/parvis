@@ -23,6 +23,13 @@ import numpy as np
 #   DO risk = f(risk factors) × (1 - distortion correction weight)
 EDGES_VE = [(f, t) for f, t in [
     (1, 2), (1, 3), (1, 4), (1, 6), (1, 9),
+    # Edge (7, 2): bail-denial cascade is a parent of violent history.
+    # Ch.3 (thesis): coercive guilty pleas under bail denial produce criminal records
+    # that overstate violent propensity. Node 2 is conditioned on Node 7 to encode
+    # that the violent history's evidentiary reliability depends on the procedural
+    # integrity under which those convictions were entered.
+    # Topological order: 1 → 6 → 7 → 2 (no cycle — 2 does not lead back to 1/6/7).
+    (7, 2),
     (2, 5), (2, 15),
     (3, 5), (3, 13),
     (4, 5),
@@ -147,9 +154,19 @@ def build_model():
     # P(High | 1=High): reflects serious violence in record
     # Prior for serious violence: ~0.65 from thesis
     # But this encodes the evidence threshold structure
-    cpd2 = _cpt('2', ['1'], [
-        [0.50, 0.35],   # P(Low | 1=Low, 1=High)
-        [0.50, 0.65],   # P(High | 1=Low, 1=High)
+    # Node 2: Violent history — parents: Node 1 (burden) AND Node 7 (bail-denial cascade)
+    # Ch.3 thesis: bail-denial + coercive plea = criminal record has reduced evidentiary
+    # reliability as indicator of genuine violent propensity. CPT encodes this directly.
+    #
+    # Column order: (N1=0,N7=0), (N1=0,N7=1), (N1=1,N7=0), (N1=1,N7=1)
+    #                 base          cascade        reliable       cascade+threshold
+    #
+    # Key: P(N2=High | N1=High, N7=Low)  = 0.65 — reliable contested conviction
+    #      P(N2=High | N1=High, N7=High) = 0.45 — coercive plea; record inflated
+    #      Tolppanen Report; Feeley (1979); thesis Ch.3 §3.4.1–3.4.5
+    cpd2 = _cpt('2', ['1', '7'], [
+        [0.50, 0.55, 0.35, 0.55],   # P(Low)
+        [0.50, 0.45, 0.65, 0.45],   # P(High)
     ])
 
     # ── Node 3: Psychopathy PCL-R (parent: Node 1) ───────────────────────────
@@ -286,22 +303,41 @@ def compute_do_risk(posteriors: dict) -> float:
     """
     Compute Node 20 (DO designation risk) post-VE using calibrated formula.
 
-    Architecture per thesis:
-    - Raw risk = weighted sum of risk factor posteriors (Nodes 2, 3, 4, 18)
-    - Distortion correction = weighted sum of distortion node posteriors
-      (Nodes 5, 6, 12, 14, 15, 16, 17) — HIGH distortion REDUCES DO risk
-      because it flags that the evidentiary record is contaminated.
-    - DO risk = raw_risk × (1 − 0.68 × distortion) + base
+    Architecture per thesis (updated with record reliability correction):
 
-    This correctly models the thesis argument: systemic distortion corrections
-    do not increase dangerousness — they reduce the evidentiary weight of
-    upstream risk signals.
+    Step 1 — Record reliability multiplier (thesis Ch.3 §3.4.1–3.4.5):
+      Where bail-denial cascade (Node 7) or ineffective counsel (Node 6) is High,
+      the violent history in the criminal record carries reduced evidentiary weight
+      as an indicator of genuine violent propensity. Coercive guilty pleas produce
+      convictions that may overstate actual violence.
+      record_reliability ∈ [0.40, 1.0] — applied only to Node 2 contribution.
+
+    Step 2 — Raw risk = weighted risk posteriors, with Node 2 discounted by
+      record_reliability. Remaining risk nodes (3, 4, 18) unaffected because
+      PCL-R, Static-99R, and dynamic risk are not record-dependent in the same way.
+
+    Step 3 — Distortion correction: HIGH distortion REDUCES DO risk because it
+      flags evidentiary contamination. Operationalises thesis central argument.
+
+    References: Tolppanen Report (2018); Feeley (1979) The Process Is the Punishment;
+    thesis Ch.3; R v Antic [2017] SCC 27; s.493.2 Criminal Code.
     """
+    p = posteriors
+
+    # Record reliability: bail-denial cascade + ineffective counsel reduce the
+    # evidentiary weight of violent history as indicator of genuine propensity
+    # Node 7 = bail-denial cascade (weight 0.35)
+    # Node 6 = ineffective counsel (weight 0.15) — partial effect mediated via N7 CPT
+    record_reliability = float(np.clip(
+        1.0 - 0.35 * p.get(7, 0.5) - 0.15 * p.get(6, 0.5),
+        0.40, 1.0
+    ))
+
     raw = (
-        0.30 * posteriors.get(2, 0.5) +
-        0.25 * posteriors.get(3, 0.5) +
-        0.20 * posteriors.get(4, 0.5) +
-        0.25 * posteriors.get(18, 0.5)
+        0.30 * p.get(2, 0.5) * record_reliability +   # Node 2 discounted by reliability
+        0.25 * p.get(3, 0.5) +                        # PCL-R — independent
+        0.20 * p.get(4, 0.5) +                        # Static-99R — independent
+        0.25 * p.get(18, 0.5)                         # Dynamic risk — independent
     )
     dst = (
         0.22 * posteriors.get(5, 0.5) +
