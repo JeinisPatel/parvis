@@ -1,780 +1,619 @@
 """
-PARVIS — Streamlit Application
-Probabilistic and Analytical Reasoning Virtual Intelligence System
-J.S. Patel | University of London (QMUL & LSE) | Ethical AI Initiative
-
-Full Streamlit UI with:
-- pgmpy Variable Elimination Bayesian inference engine
-- Quantum Bayesianism (QBism) diagnostic layer (Appendix Q)
-- Case Profile, Gladue Factors, Morris/Ellis SCE inputs
-- Interactive DAG visualisation
-- Audit report with export
+PARVIS — Streamlit Application v Xavier 7
+Jeinis Patel, PhD Candidate and Barrister | University of London | Ethical AI Initiative
 """
 
 import streamlit as st
-import networkx as nx
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
-import io
-import base64
+import base64, os
 from datetime import datetime
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 from model import build_model, get_inference_engine, query_do_risk, NODE_META, EDGES_VE as EDGES
 from quantum_diagnostics import diagnose, format_report
+from bloch_sphere import draw_bloch_sphere, draw_comparison_chart
 
-# ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="PARVIS — Bayesian Sentencing Network",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-    menu_items={"About": "PARVIS v1.0 — Research use only. Not for live proceedings."}
-)
+st.set_page_config(page_title="PARVIS", layout="wide", initial_sidebar_state="collapsed",
+    menu_items={"About":"PARVIS Xavier 7 — Research use only"})
 
-# ── Load Ethical AI logo ──────────────────────────────────────────────────────
 @st.cache_data
-def load_logo():
-    try:
-        with open("ethical_ai_logo.png", "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except FileNotFoundError:
-        return None
+def get_logo_b64():
+    for p in ["ethical_ai_logo.png","parvis/ethical_ai_logo.png"]:
+        if os.path.exists(p):
+            with open(p,"rb") as f: return base64.b64encode(f.read()).decode()
+    return None
 
-# ── Styling ───────────────────────────────────────────────────────────────────
-st.markdown("""
+logo_b64 = get_logo_b64()
+wm = f"""<style>.stApp::before{{content:'';position:fixed;bottom:30px;right:30px;
+width:160px;height:160px;background-image:url('data:image/png;base64,{logo_b64}');
+background-size:contain;background-repeat:no-repeat;opacity:0.10;pointer-events:none;
+z-index:0;filter:invert(1) brightness(0.4);}}</style>""" if logo_b64 else ""
+
+st.markdown(wm + """
 <style>
-  .main-header {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    padding: 0.5rem 0 1rem 0; border-bottom: 1px solid rgba(0,0,0,0.1);
-    margin-bottom: 1rem;
-  }
-  .parvis-title { font-size: 2rem; font-weight: 700; letter-spacing: 4px; margin: 0; }
-  .parvis-sub { font-size: 0.75rem; color: #888; margin-top: 2px; }
-  .do-card {
-    background: linear-gradient(135deg, #f8f9fa, #fff);
-    border: 1px solid #dee2e6; border-radius: 12px;
-    padding: 1.2rem; text-align: center;
-  }
-  .do-label { font-size: 0.75rem; color: #888; margin-bottom: 0.3rem; }
-  .do-pct { font-size: 2.5rem; font-weight: 700; font-family: monospace; }
-  .do-band { font-size: 0.85rem; font-weight: 600; margin-top: 0.2rem; }
-  .type-badge {
-    display: inline-block; font-size: 0.65rem; padding: 1px 8px;
-    border-radius: 20px; font-weight: 600; margin-left: 4px;
-  }
-  .qbism-flag-high { background: #FCEBEB; color: #A32D2D; border-left: 3px solid #A32D2D;
-    padding: 0.5rem 0.75rem; border-radius: 6px; margin: 0.3rem 0; }
-  .qbism-flag-moderate { background: #FAEEDA; color: #BA7517; border-left: 3px solid #BA7517;
-    padding: 0.5rem 0.75rem; border-radius: 6px; margin: 0.3rem 0; }
-  .qbism-flag-none { background: #EAF3DE; color: #3B6D11; border-left: 3px solid #3B6D11;
-    padding: 0.5rem 0.75rem; border-radius: 6px; margin: 0.3rem 0; }
-  .node-info { background: #f8f9fa; border-radius: 8px; padding: 0.8rem; margin-top: 0.5rem; }
-  hr { border: none; border-top: 1px solid rgba(0,0,0,0.1); margin: 1rem 0; }
-  .section-header { font-size: 0.75rem; font-weight: 700; color: #888;
-    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; }
-</style>
-""", unsafe_allow_html=True)
+.pt{font-size:2rem;font-weight:800;letter-spacing:5px;margin:0}
+.ps{font-size:.72rem;color:#888;margin-top:3px}
+.dc{border-radius:14px;padding:.9rem 1.1rem;text-align:center}
+.dp{font-size:2.4rem;font-weight:700;font-family:monospace;line-height:1}
+.dl{font-size:.72rem;margin-bottom:3px}
+.db{font-size:.82rem;font-weight:600;margin-top:3px}
+.sh{font-size:.68rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:.4rem}
+.qh{padding:.5rem .75rem;border-radius:6px;margin:.3rem 0;font-size:.85rem}
+.at{font-family:'Courier New',monospace;font-size:.78rem;line-height:1.75;
+    background:#f7f6f3;border-radius:10px;padding:1.2rem;border:1px solid #e0dfd9;white-space:pre-wrap}
+footer{visibility:hidden}#MainMenu{visibility:hidden}
+</style>""", unsafe_allow_html=True)
 
-# ── Node colours ──────────────────────────────────────────────────────────────
-TYPE_COLORS = {
-    "constraint": "#BA7517",
-    "risk":       "#A32D2D",
-    "distortion": "#185FA5",
-    "mitigation": "#3B6D11",
-    "dual":       "#534AB7",
-    "special":    "#0F6E56",
-    "output":     "#993C1D",
-}
-TYPE_LABELS = {
-    "constraint": "Evidentiary constraint",
-    "risk":       "Risk factor",
-    "distortion": "Systemic distortion",
-    "mitigation": "Mitigating factor",
-    "dual":       "Dual factor",
-    "special":    "Causal detector",
-    "output":     "Structural output",
-}
+TC = {"constraint":"#BA7517","risk":"#A32D2D","distortion":"#185FA5",
+      "mitigation":"#3B6D11","dual":"#534AB7","special":"#0F6E56","output":"#993C1D"}
+TL = {"constraint":"Evidentiary constraint","risk":"Risk factor","distortion":"Systemic distortion",
+      "mitigation":"Mitigating factor","dual":"Dual factor","special":"Causal detector","output":"Structural output"}
 
-def risk_band(p):
-    if p < 0.20: return "Very low",  "#3B6D11"
-    if p < 0.40: return "Low",       "#3B6D11"
-    if p < 0.55: return "Moderate",  "#BA7517"
-    if p < 0.70: return "Elevated",  "#BA7517"
-    if p < 0.85: return "High",      "#A32D2D"
-    return "Very high", "#A32D2D"
+def rb(p):
+    if p<.20: return "Very low","#3B6D11","#EAF3DE"
+    if p<.40: return "Low","#3B6D11","#EAF3DE"
+    if p<.55: return "Moderate","#BA7517","#FAEEDA"
+    if p<.70: return "Elevated","#BA7517","#FAEEDA"
+    if p<.85: return "High","#A32D2D","#FCEBEB"
+    return "Very high","#A32D2D","#FCEBEB"
 
-# ── Session state initialisation ──────────────────────────────────────────────
-def init_state():
-    defaults = {
-        "model": None, "engine": None,
-        "evidence": {},         # {node_str: 0|1}
-        "profile_ev": {},       # {node_id: float}
-        "gladue_checked": set(),
-        "sce_checked": set(),
-        "posteriors": {},
-        "qbism_diags": {},
-        "connection_strength": "moderate",
-        "ellis_nexus": "relevant",
-        "sce_framework": "morris",
-        "ev_sources": {},
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+def dobar(p, label="DO designation risk"):
+    bl,bc,bg = rb(p)
+    return f"""<div style="background:{bg};border:1px solid {bc}44;border-radius:12px;
+    padding:.8rem 1.2rem;margin-bottom:1rem;display:flex;align-items:center;gap:1.5rem">
+    <div style="text-align:center;min-width:80px">
+      <div style="font-size:.7rem;color:{bc};margin-bottom:2px">Node 20</div>
+      <div style="font-size:2rem;font-weight:700;font-family:monospace;color:{bc}">{p*100:.1f}%</div>
+      <div style="font-size:.8rem;font-weight:600;color:{bc}">{bl}</div>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:.82rem;font-weight:500;margin-bottom:6px">{label} — posterior probability</div>
+      <div style="height:5px;background:rgba(0,0,0,.08);border-radius:3px">
+        <div style="width:{p*100:.0f}%;height:100%;background:{bc};border-radius:3px"></div>
+      </div>
+    </div></div>"""
 
-init_state()
+# ── Session state ─────────────────────────────────────────────────────────────
+def _init():
+    defs = {"model":None,"engine":None,"profile_ev":{},"gladue_checked":set(),
+            "sce_checked":set(),"manual_ev":{},"doc_adj":{},"posteriors":{},
+            "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[]}
+    for k,v in defs.items():
+        if k not in st.session_state: st.session_state[k]=v
+_init()
 
-# ── Load model (cached) ───────────────────────────────────────────────────────
-@st.cache_resource
-def load_model():
-    m = build_model()
-    e = get_inference_engine(m)
-    return m, e
+@st.cache_resource(show_spinner="Building Bayesian network...")
+def _load():
+    m=build_model(); return m, get_inference_engine(m)
 
 if st.session_state.model is None:
-    with st.spinner("Initialising Bayesian network (Variable Elimination)..."):
-        m, e = load_model()
-        st.session_state.model = m
-        st.session_state.engine = e
+    st.session_state.model, st.session_state.engine = _load()
 
-# ── Inference runner ──────────────────────────────────────────────────────────
-def run_inference():
-    """Merge all evidence sources and run Variable Elimination."""
-    combined_ev = {}
-    # Profile evidence → convert to binary observations
-    for nid, prob in st.session_state.profile_ev.items():
-        combined_ev[str(nid)] = 1 if prob >= 0.5 else 0
-    # Manual binary evidence overrides
-    combined_ev.update(st.session_state.evidence)
-    # Remove Node 20 from evidence (it's our query target)
-    combined_ev.pop('20', None)
-
-    posteriors = query_do_risk(st.session_state.engine, combined_ev)
-
-    # Apply continuous SCE / Gladue adjustments on top of VE output
-    # (VE handles binary evidence; continuous deltas are post-processed)
-    gl_delta = compute_gladue_delta()
-    sce_delta = compute_sce_delta()
-    for nid, delta in {**gl_delta, **sce_delta}.items():
-        if nid in posteriors and str(nid) not in combined_ev:
-            posteriors[nid] = float(np.clip(posteriors[nid] + delta, 0.05, 0.95))
-
-    # Recompute Node 20 with corrected inputs
-    do_raw = (
-        0.30 * posteriors.get(2, 0.5) +
-        0.25 * posteriors.get(3, 0.5) +
-        0.20 * posteriors.get(4, 0.5) +
-        0.25 * posteriors.get(18, 0.5)
-    )
-    dst = (
-        0.22 * posteriors.get(5, 0.5) +
-        0.18 * posteriors.get(6, 0.5) +
-        0.22 * posteriors.get(12, 0.5) +
-        0.15 * posteriors.get(14, 0.5) +
-        0.10 * posteriors.get(15, 0.5) +
-        0.08 * posteriors.get(17, 0.5) +
-        0.05 * posteriors.get(16, 0.5)
-    )
-    posteriors[20] = float(np.clip(do_raw * (1 - 0.68 * dst) + 0.03, 0.05, 0.93))
-
-    st.session_state.posteriors = posteriors
-
-    # Run QBism diagnostics
-    diags = diagnose(
-        posteriors=posteriors,
-        evidence=combined_ev,
-        gladue_checked=list(st.session_state.gladue_checked),
-        sce_checked=list(st.session_state.sce_checked),
-        profile_ev=st.session_state.profile_ev,
-        connection_strength=st.session_state.connection_strength,
-    )
-    st.session_state.qbism_diags = diags
-
-# ── Gladue / SCE delta computation ───────────────────────────────────────────
-GLADUE_FACTORS = [
-    {"id": "g_res1",    "label": "Residential school — direct",          "node": 10, "weight": 0.18, "col": 1, "section": "Intergenerational & historical trauma"},
-    {"id": "g_res2",    "label": "Residential school — familial",         "node": 10, "weight": 0.14, "col": 1, "section": "Intergenerational & historical trauma"},
-    {"id": "g_sixties", "label": "Sixties Scoop / child welfare removal", "node": 10, "weight": 0.14, "col": 1, "section": "Intergenerational & historical trauma"},
-    {"id": "g_disp",    "label": "Community displacement / relocation",   "node": 10, "weight": 0.10, "col": 1, "section": "Intergenerational & historical trauma"},
-    {"id": "g_cult",    "label": "Loss of language and cultural identity","node": 12, "weight": 0.10, "col": 1, "section": "Cultural disconnection"},
-    {"id": "g_spirit",  "label": "Absence of spiritual / ceremonial access","node": 11,"weight": 0.08,"col": 1,"section": "Cultural disconnection"},
-    {"id": "g_fv",      "label": "Family violence / domestic abuse",      "node": 10, "weight": 0.12, "col": 1, "section": "Childhood & family"},
-    {"id": "g_foster",  "label": "Foster care / group home placement",    "node": 10, "weight": 0.10, "col": 1, "section": "Childhood & family"},
-    {"id": "g_pov",     "label": "Chronic poverty",                       "node": 10, "weight": 0.08, "col": 2, "section": "Socioeconomic"},
-    {"id": "g_house",   "label": "Unstable housing / homelessness",       "node": 18, "weight": 0.08, "col": 2, "section": "Socioeconomic"},
-    {"id": "g_emp",     "label": "Structural employment barriers",        "node": 18, "weight": 0.07, "col": 2, "section": "Socioeconomic"},
-    {"id": "g_edu",     "label": "Disrupted or denied education",         "node": 10, "weight": 0.07, "col": 2, "section": "Socioeconomic"},
-    {"id": "g_sub",     "label": "Substance use linked to trauma",        "node": 18, "weight": 0.09, "col": 2, "section": "Substance use & mental health"},
-    {"id": "g_mh",      "label": "Untreated mental health conditions",    "node": 18, "weight": 0.08, "col": 2, "section": "Substance use & mental health"},
-    {"id": "g_grief",   "label": "Chronic grief and loss",                "node": 10, "weight": 0.08, "col": 2, "section": "Substance use & mental health"},
-    {"id": "g_op",      "label": "Over-policed community of origin",      "node": 14, "weight": 0.14, "col": 2, "section": "Systemic justice"},
-    {"id": "g_yj",      "label": "Young offender system involvement",     "node": 14, "weight": 0.09, "col": 2, "section": "Systemic justice"},
-    {"id": "g_prior",   "label": "Prior sentencing without Gladue analysis","node": 12,"weight": 0.12,"col": 2,"section": "Systemic justice"},
+# ── Factor data ───────────────────────────────────────────────────────────────
+GF=[
+  {"id":"g_r1","l":"Residential school — direct","n":10,"w":.18,"col":1,"sec":"Intergenerational trauma"},
+  {"id":"g_r2","l":"Residential school — familial","n":10,"w":.14,"col":1,"sec":"Intergenerational trauma"},
+  {"id":"g_sc","l":"Sixties Scoop / child welfare removal","n":10,"w":.14,"col":1,"sec":"Intergenerational trauma"},
+  {"id":"g_dp","l":"Community displacement / relocation","n":10,"w":.10,"col":1,"sec":"Intergenerational trauma"},
+  {"id":"g_cu","l":"Loss of language and cultural identity","n":12,"w":.10,"col":1,"sec":"Cultural disconnection"},
+  {"id":"g_sp","l":"Absence of spiritual/ceremonial access","n":11,"w":.08,"col":1,"sec":"Cultural disconnection"},
+  {"id":"g_fv","l":"Family violence / domestic abuse","n":10,"w":.12,"col":1,"sec":"Childhood & family"},
+  {"id":"g_fo","l":"Foster care / group home placement","n":10,"w":.10,"col":1,"sec":"Childhood & family"},
+  {"id":"g_pv","l":"Chronic poverty","n":10,"w":.08,"col":2,"sec":"Socioeconomic"},
+  {"id":"g_ho","l":"Unstable housing / homelessness","n":18,"w":.08,"col":2,"sec":"Socioeconomic"},
+  {"id":"g_em","l":"Structural employment barriers","n":18,"w":.07,"col":2,"sec":"Socioeconomic"},
+  {"id":"g_ed","l":"Disrupted or denied education","n":10,"w":.07,"col":2,"sec":"Socioeconomic"},
+  {"id":"g_sb","l":"Substance use linked to trauma","n":18,"w":.09,"col":2,"sec":"Substance & mental health"},
+  {"id":"g_mh","l":"Untreated mental health conditions","n":18,"w":.08,"col":2,"sec":"Substance & mental health"},
+  {"id":"g_gr","l":"Chronic grief and loss","n":10,"w":.08,"col":2,"sec":"Substance & mental health"},
+  {"id":"g_op","l":"Over-policed community of origin","n":14,"w":.14,"col":2,"sec":"Systemic justice"},
+  {"id":"g_yj","l":"Young offender system involvement","n":14,"w":.09,"col":2,"sec":"Systemic justice"},
+  {"id":"g_pr","l":"Prior sentencing without Gladue analysis","n":12,"w":.12,"col":2,"sec":"Systemic justice"},
 ]
 
-SCE_FACTORS = [
-    {"id": "s_racism",      "label": "Anti-Black / anti-racialized racism documented", "node": 12, "weight": 0.16, "fw": "morris", "section": "Structural racism"},
-    {"id": "s_nbhd",        "label": "Neighbourhood-level structural disadvantage",     "node": 14, "weight": 0.14, "fw": "morris", "section": "Structural racism"},
-    {"id": "s_cviol",       "label": "Community violence exposure",                     "node": 10, "weight": 0.12, "fw": "morris", "section": "Structural racism"},
-    {"id": "s_rprofil",     "label": "Documented racial profiling",                     "node": 14, "weight": 0.15, "fw": "morris", "section": "Structural racism"},
-    {"id": "s_irca",        "label": "IRCA filed and before the court",                "node": 12, "weight": 0.20, "fw": "morris", "section": "IRCA"},
-    {"id": "s_irca_rej",    "label": "IRCA filed but disregarded by court",            "node": 12, "weight": 0.18, "fw": "morris", "section": "IRCA"},
-    {"id": "s_blk_inc",     "label": "Anti-Black systemic incarceration patterns",     "node": 14, "weight": 0.13, "fw": "morris", "section": "Black offender patterns"},
-    {"id": "s_blk_bail",    "label": "Anti-Black bail practices documented",           "node": 7,  "weight": 0.12, "fw": "morris", "section": "Black offender patterns"},
-    {"id": "s_blk_edu",     "label": "Racialized educational exclusion",               "node": 10, "weight": 0.10, "fw": "morris", "section": "Black offender patterns"},
-    {"id": "s_state_care",  "label": "State care involvement (non-racialized)",        "node": 10, "weight": 0.14, "fw": "ellis",  "section": "Ellis — socio-economic"},
-    {"id": "s_e_pov",       "label": "Chronic poverty / economic deprivation",         "node": 18, "weight": 0.10, "fw": "ellis",  "section": "Ellis — socio-economic"},
-    {"id": "s_e_trauma",    "label": "Trauma history without racialized component",    "node": 10, "weight": 0.11, "fw": "ellis",  "section": "Ellis — socio-economic"},
-    {"id": "s_e_geog",      "label": "Geographic marginalization",                     "node": 11, "weight": 0.09, "fw": "ellis",  "section": "Ellis — socio-economic"},
-    {"id": "s_e_edu",       "label": "Educational deprivation",                        "node": 10, "weight": 0.08, "fw": "ellis",  "section": "Ellis — socio-economic"},
-    {"id": "s_parity",      "label": "Parity principle misapplied",                   "node": 12, "weight": 0.12, "fw": "both",   "section": "Judicial errors"},
-    {"id": "s_seqerr",      "label": "Sequencing error — SCE applied downstream",     "node": 12, "weight": 0.14, "fw": "both",   "section": "Judicial errors"},
-    {"id": "s_belief_stasis","label": "Belief stasis — SCE acknowledged but inert",   "node": 12, "weight": 0.16, "fw": "both",   "section": "Judicial errors"},
+SF=[
+  {"id":"s_ra","l":"Anti-Black / racialized racism documented","n":12,"w":.16,"fw":"morris","sec":"Structural racism"},
+  {"id":"s_nb","l":"Neighbourhood structural disadvantage","n":14,"w":.14,"fw":"morris","sec":"Structural racism"},
+  {"id":"s_cv","l":"Community violence exposure","n":10,"w":.12,"fw":"morris","sec":"Structural racism"},
+  {"id":"s_rp","l":"Documented racial profiling","n":14,"w":.15,"fw":"morris","sec":"Structural racism"},
+  {"id":"s_ir","l":"IRCA filed and before the court","n":12,"w":.20,"fw":"morris","sec":"IRCA"},
+  {"id":"s_ij","l":"IRCA filed but disregarded by court","n":12,"w":.18,"fw":"morris","sec":"IRCA"},
+  {"id":"s_bi","l":"Anti-Black systemic incarceration patterns","n":14,"w":.13,"fw":"morris","sec":"Black offender"},
+  {"id":"s_bb","l":"Anti-Black bail practices documented","n": 7,"w":.12,"fw":"morris","sec":"Black offender"},
+  {"id":"s_be","l":"Racialized educational exclusion","n":10,"w":.10,"fw":"morris","sec":"Black offender"},
+  {"id":"s_sc","l":"State care involvement (non-racialized)","n":10,"w":.14,"fw":"ellis","sec":"Ellis — deprivation"},
+  {"id":"s_ep","l":"Chronic poverty / economic deprivation","n":18,"w":.10,"fw":"ellis","sec":"Ellis — deprivation"},
+  {"id":"s_et","l":"Trauma history without racialized component","n":10,"w":.11,"fw":"ellis","sec":"Ellis — deprivation"},
+  {"id":"s_eg","l":"Geographic marginalization","n":11,"w":.09,"fw":"ellis","sec":"Ellis — deprivation"},
+  {"id":"s_ee","l":"Educational deprivation","n":10,"w":.08,"fw":"ellis","sec":"Ellis — deprivation"},
+  {"id":"s_pa","l":"Parity principle misapplied","n":12,"w":.12,"fw":"both","sec":"Judicial errors"},
+  {"id":"s_se","l":"Sequencing error — SCE applied downstream","n":12,"w":.14,"fw":"both","sec":"Judicial errors"},
+  {"id":"s_bs","l":"Belief stasis — SCE acknowledged but inert","n":12,"w":.16,"fw":"both","sec":"Judicial errors"},
 ]
 
-def connection_mult():
-    return {"none": 0, "absent": 0, "weak": 0.30, "moderate": 0.65, "strong": 0.90, "direct": 1.0}.get(st.session_state.connection_strength, 0.65)
+def cmult(): return {"none":0,"absent":0,"weak":.30,"moderate":.65,"strong":.90,"direct":1.0}.get(st.session_state.conn,.65)
+def emult(): return {"none":0,"peripheral":.35,"relevant":.70,"central":1.0}.get(st.session_state.enex,.70)
 
-def ellis_mult():
-    return {"none": 0, "peripheral": 0.35, "relevant": 0.70, "central": 1.0}.get(st.session_state.ellis_nexus, 0.70)
+def gdelta():
+    d={}
+    for f in GF:
+        if f["id"] in st.session_state.gladue_checked: d[f["n"]]=d.get(f["n"],0)+f["w"]
+    return d
 
-def compute_gladue_delta():
-    delta = {}
-    for f in GLADUE_FACTORS:
-        if f["id"] in st.session_state.gladue_checked:
-            nid = f["node"]
-            delta[nid] = delta.get(nid, 0) + f["weight"]
-    return delta
-
-def compute_sce_delta():
-    delta = {}
-    fw = st.session_state.sce_framework
-    mult = connection_mult() if fw != "ellis" else ellis_mult()
-    for f in SCE_FACTORS:
+def sdelta():
+    d={}; fw=st.session_state.scefw; m=cmult() if fw!="ellis" else emult()
+    for f in SF:
         if f["id"] in st.session_state.sce_checked:
-            show = (fw == "both") or (fw == "morris" and f["fw"] != "ellis") or (fw == "ellis" and f["fw"] != "morris")
-            if show:
-                nid = f["node"]
-                delta[nid] = delta.get(nid, 0) + f["weight"] * mult
-    return delta
+            show=fw=="both" or (fw=="morris" and f["fw"]!="ellis") or (fw=="ellis" and f["fw"]!="morris")
+            if show: d[f["n"]]=d.get(f["n"],0)+f["w"]*m
+    return d
 
-# ── DAG visualisation ─────────────────────────────────────────────────────────
-NODE_POS = {
-    1: (0.50, 0.92), 2: (0.15, 0.75), 3: (0.50, 0.75), 4: (0.85, 0.75),
-    5: (0.08, 0.57), 6: (0.25, 0.57), 9: (0.42, 0.57), 13: (0.58, 0.57), 15: (0.75, 0.57),
-    7: (0.08, 0.40), 10: (0.25, 0.40), 11: (0.42, 0.40), 14: (0.58, 0.40), 17: (0.75, 0.40),
-    8: (0.08, 0.23), 12: (0.25, 0.23), 16: (0.42, 0.23), 18: (0.58, 0.23), 19: (0.75, 0.23),
-    20: (0.50, 0.05),
-}
+# ── Inference ─────────────────────────────────────────────────────────────────
+def run_inf():
+    bev={}
+    for nid,prob in st.session_state.profile_ev.items(): bev[str(nid)]=1 if prob>=.5 else 0
+    for nid,prob in st.session_state.manual_ev.items(): bev[str(nid)]=1 if prob>=.5 else 0
+    bev.pop("20",None)
+    post=query_do_risk(st.session_state.engine,bev)
+    for nid,d in {**gdelta(),**sdelta(),**st.session_state.doc_adj}.items():
+        if nid in post and str(nid) not in bev: post[nid]=float(np.clip(post[nid]+d,.05,.95))
+    raw=.30*post.get(2,.5)+.25*post.get(3,.5)+.20*post.get(4,.5)+.25*post.get(18,.5)
+    dst=.22*post.get(5,.5)+.18*post.get(6,.5)+.22*post.get(12,.5)+.15*post.get(14,.5)+.10*post.get(15,.5)+.08*post.get(17,.5)+.05*post.get(16,.5)
+    post[20]=float(np.clip(raw*(1-.68*dst)+.03,.05,.93))
+    st.session_state.posteriors=post
+    st.session_state.qdiags=diagnose(post,bev,list(st.session_state.gladue_checked),
+        list(st.session_state.sce_checked),st.session_state.profile_ev,st.session_state.conn)
 
-def draw_dag(posteriors, selected_node=None):
-    fig, ax = plt.subplots(1, 1, figsize=(11, 8.5))
-    ax.set_xlim(-0.05, 1.05); ax.set_ylim(-0.05, 1.05)
-    ax.axis('off')
-    ax.set_facecolor('#fafafa')
-    fig.patch.set_facecolor('#fafafa')
-
-    # Layer bands
-    for y, h, label in [(0.82, 0.14, "Layer I — Substantive risk"),
-                         (0.17, 0.63, "Layer II — Systemic distortion & doctrinal fidelity"),
-                         (0.00, 0.14, "Layer III — Structural output")]:
-        ax.add_patch(plt.Rectangle((0, y), 1.0, h, color='#f0f0f0', alpha=0.5, zorder=0))
-        ax.text(0.01, y + h - 0.02, label, fontsize=7, color='#aaa', fontweight='bold', va='top')
-
-    # Edges
-    G = nx.DiGraph()
-    G.add_nodes_from([str(i) for i in range(1, 21)])
-    G.add_edges_from([(str(f), str(t)) for f, t in EDGES])
-
-    for f, t in EDGES:
-        x1, y1 = NODE_POS[f]; x2, y2 = NODE_POS[t]
-        hl = selected_node and (f == selected_node or t == selected_node)
-        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-            arrowprops=dict(arrowstyle="-|>", color='#aaa' if not hl else '#444',
-                            lw=0.8 if not hl else 1.5, alpha=0.5 if not hl else 0.9))
-
-    # Nodes
-    for nid, (x, y) in NODE_POS.items():
-        meta = NODE_META[nid]
-        col = TYPE_COLORS[meta["type"]]
-        p = posteriors.get(nid, 0.5)
-        is_sel = selected_node == nid
-
-        # Node circle — size reflects posterior
-        radius = 0.038 + 0.012 * p
-        circle = plt.Circle((x, y), radius,
-                             color=col if is_sel else col + '33',
-                             ec=col, lw=2 if is_sel else 1, zorder=3)
-        ax.add_patch(circle)
-        ax.text(x, y, str(nid), ha='center', va='center',
-                fontsize=8, fontweight='bold',
-                color='white' if is_sel else col, zorder=4)
-
-        # Label below
-        short = meta["short"]
-        if len(short) > 12: short = short[:11] + "…"
-        ax.text(x, y - radius - 0.03, short, ha='center', va='top',
-                fontsize=6, color='#666', zorder=4)
-
-        # Probability arc
-        theta = np.linspace(0, 2 * np.pi * p, 50)
-        arc_x = x + (radius + 0.008) * np.cos(theta - np.pi / 2)
-        arc_y = y + (radius + 0.008) * np.sin(theta - np.pi / 2)
-        ax.plot(arc_x, arc_y, color=col, lw=2.5, alpha=0.85, zorder=5)
-
-    # Legend
-    legend_items = [mpatches.Patch(color=c, label=TYPE_LABELS[t])
-                    for t, c in TYPE_COLORS.items()]
-    ax.legend(handles=legend_items, loc='lower right', fontsize=7,
-              framealpha=0.9, edgecolor='#ddd')
-
-    plt.tight_layout()
-    return fig
+run_inf()
+P=st.session_state.posteriors
+dp=P[20]; bl,bc,bg=rb(dp)
 
 # ── Header ────────────────────────────────────────────────────────────────────
-run_inference()  # ensure posteriors are current
-posteriors = st.session_state.posteriors
-do_p = posteriors.get(20, 0.5)
-band_label, band_color = risk_band(do_p)
+ct,cd=st.columns([3,1])
+with ct:
+    st.markdown(f"""<div style="border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:.6rem;margin-bottom:.5rem">
+    <div class="pt">PARVIS</div>
+    <div class="ps">Probabilistic and Analytical Reasoning Virtual Intelligence System &nbsp;·&nbsp;
+    University of London &nbsp;·&nbsp; Ethical AI Initiative</div></div>""",unsafe_allow_html=True)
+with cd:
+    st.markdown(f"""<div class="dc" style="background:{bg};border:1px solid {bc}44;margin-top:4px">
+    <div class="dl" style="color:{bc}">Node 20 · DO risk</div>
+    <div class="dp" style="color:{bc}">{dp*100:.1f}%</div>
+    <div class="db" style="color:{bc}">{bl}</div></div>""",unsafe_allow_html=True)
 
-col_title, col_do = st.columns([3, 1])
-with col_title:
-    st.markdown("""
-    <div style="padding-bottom:0.5rem;border-bottom:1px solid rgba(0,0,0,0.1)">
-      <div style="font-size:1.8rem;font-weight:700;letter-spacing:4px">PARVIS</div>
-      <div style="font-size:0.72rem;color:#888;margin-top:2px">
-        Probabilistic and Analytical Reasoning Virtual Intelligence System &nbsp;·&nbsp;
-        University of London &nbsp;·&nbsp; Ethical AI Initiative
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-with col_do:
-    st.markdown(f"""
-    <div style="background:{band_color}18;border:1px solid {band_color}44;border-radius:12px;
-         padding:0.8rem;text-align:center;margin-top:0.3rem">
-      <div style="font-size:0.7rem;color:{band_color};margin-bottom:2px">Node 20 — DO risk</div>
-      <div style="font-size:2rem;font-weight:700;font-family:monospace;color:{band_color}">{do_p*100:.1f}%</div>
-      <div style="font-size:0.8rem;font-weight:600;color:{band_color}">{band_label}</div>
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown("<br>",unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
+# ── Node positions ────────────────────────────────────────────────────────────
+NP={1:(.50,.92),2:(.12,.73),3:(.50,.73),4:(.88,.73),
+    5:(.07,.55),6:(.23,.55),9:(.40,.55),13:(.57,.55),15:(.73,.55),
+    7:(.07,.38),10:(.23,.38),11:(.40,.38),14:(.57,.38),17:(.73,.38),
+    8:(.07,.20),12:(.23,.20),16:(.40,.20),18:(.57,.20),19:(.73,.20),
+    20:(.50,.03)}
+
+def draw_dag(post,sel=None):
+    fig,ax=plt.subplots(figsize=(13,9),facecolor='#fafafa')
+    ax.set_xlim(-.02,1.02);ax.set_ylim(-.08,1.02);ax.axis('off');ax.set_facecolor('#fafafa')
+    for y,h,lbl,lx in [(.83,.10,"Layer I — Substantive risk",.52),
+                        (.29,.53,"Layer II — Systemic distortion & doctrinal fidelity",.52),
+                        (-.04,.09,"Layer III — Structural output",.52)]:
+        ax.add_patch(plt.Rectangle((0,y),1.0,h,color='#f0f0f0',alpha=.55,zorder=0))
+        ax.text(lx,y+h-.015,lbl,fontsize=8,color='#bbb',fontweight='bold',va='top',ha='center',zorder=1)
+    for f,t in EDGES:
+        if f not in NP or t not in NP: continue
+        x1,y1=NP[f];x2,y2=NP[t];hi=sel and (f==sel or t==sel)
+        ax.annotate("",xy=(x2,y2),xytext=(x1,y1),
+            arrowprops=dict(arrowstyle="-|>",color='#888' if hi else '#ccc',lw=1.2 if hi else .6,
+            connectionstyle="arc3,rad=0.05"))
+    NR={1:.055,20:.055}
+    for nid,(x,y) in NP.items():
+        m=NODE_META[nid];col=TC[m["type"]];p=post.get(nid,.5);iS=sel==nid
+        r=NR.get(nid,.040)
+        ax.add_patch(plt.Circle((x,y),r,color=col if iS else col+'28',ec=col,lw=2 if iS else 1,zorder=3))
+        th=np.linspace(-np.pi/2,-np.pi/2+2*np.pi*p,60)
+        ax.plot(x+(r+.010)*np.cos(th),y+(r+.010)*np.sin(th),color=col,lw=2.5,alpha=.85,zorder=4)
+        ax.text(x,y,str(nid),ha='center',va='center',fontsize=8 if nid<10 else 7,
+                fontweight='bold',color='white' if iS else col,zorder=5)
+        lbl=m["short"][:14]+("…" if len(m["short"])>14 else "")
+        ax.text(x,y-r-.025,lbl,ha='center',va='top',fontsize=6.5,color='#555',zorder=5)
+        ax.text(x,y-r-.050,f'{p*100:.0f}%',ha='center',va='top',fontsize=6,color=col,fontweight='bold',zorder=5,alpha=.8)
+    handles=[plt.Line2D([0],[0],marker='o',color='w',markerfacecolor=c,markeredgecolor=c,
+             markersize=8,label=TL[t]) for t,c in TC.items()]
+    ax.legend(handles=handles,loc='upper right',fontsize=7.5,framealpha=.92,edgecolor='#ddd')
+    plt.tight_layout(pad=.5);return fig
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tabs = st.tabs([
-    "🕸️ Architecture",
-    "📋 Case profile",
-    "🦅 Gladue factors",
-    "⚖️ Morris / Ellis SCE",
-    "🔬 Evidence review",
-    "📊 Inference",
-    "⚛️ QBism diagnostics",
-    "📄 Audit report",
-])
+TABS=st.tabs(["🕸️ Architecture","📋 Case profile","🦅 Gladue factors",
+              "⚖️ Morris / Ellis SCE","🔬 Evidence review","📊 Inference",
+              "⚛️ QBism diagnostics","📂 Document analysis","📄 Audit report"])
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 1: ARCHITECTURE
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[0]:
-    col_dag, col_det = st.columns([3, 1])
-    with col_dag:
-        st.markdown("**20-node Bayesian Directed Acyclic Graph** — click a node ID to inspect")
-        selected = st.selectbox("Select node", [None] + list(range(1, 21)),
-                                 format_func=lambda x: "— none —" if x is None else f"Node {x}: {NODE_META[x]['short']}")
-        fig = draw_dag(posteriors, selected_node=selected)
-        st.pyplot(fig, use_container_width=True)
-
-    with col_det:
-        if selected:
-            meta = NODE_META[selected]
-            col = TYPE_COLORS[meta["type"]]
-            p = posteriors.get(selected, 0.5)
-            st.markdown(f"""
-            <div style="background:{col}18;border:1px solid {col}44;border-radius:10px;padding:1rem;margin-bottom:1rem">
-              <div style="font-size:0.7rem;color:{col};font-weight:600">{TYPE_LABELS[meta['type']]}</div>
-              <div style="font-size:1rem;font-weight:600;margin-top:4px">Node {selected}: {meta['name']}</div>
-              <div style="font-size:1.8rem;font-weight:700;font-family:monospace;color:{col};margin-top:8px">{p*100:.1f}%</div>
-            </div>
-            """, unsafe_allow_html=True)
+# ── T1: Architecture ──────────────────────────────────────────────────────────
+with TABS[0]:
+    cl,cr=st.columns([3,1])
+    with cl:
+        opts={None:"— none —"};opts.update({n:f"N{n}: {NODE_META[n]['name']}" for n in range(1,21)})
+        sel=st.selectbox("Inspect node",list(opts.keys()),format_func=lambda x:opts[x])
+        st.pyplot(draw_dag(P,sel),use_container_width=True)
+    with cr:
+        if sel:
+            m=NODE_META[sel];col=TC[m["type"]];p=P.get(sel,.5)
+            st.markdown(f"""<div style="background:{col}18;border:1px solid {col}55;border-radius:12px;padding:1rem">
+            <div style="font-size:.68rem;color:{col};font-weight:700">{TL[m['type']]}</div>
+            <div style="font-size:1rem;font-weight:700;margin-top:4px">N{sel}: {m['name']}</div>
+            <div style="font-size:2rem;font-weight:700;font-family:monospace;color:{col};margin:8px 0">{p*100:.1f}%</div>
+            <div style="height:5px;background:#eee;border-radius:3px">
+              <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:3px"></div>
+            </div></div>""",unsafe_allow_html=True)
         else:
-            st.markdown("**Node types**")
-            for t, c in TYPE_COLORS.items():
-                st.markdown(f"<span style='color:{c}'>●</span> {TYPE_LABELS[t]}", unsafe_allow_html=True)
+            st.markdown("<div class='sh'>Node types</div>",unsafe_allow_html=True)
+            for t,c in TC.items(): st.markdown(f"<span style='color:{c}'>●</span>&nbsp;{TL[t]}",unsafe_allow_html=True)
+            st.markdown("---")
+            st.markdown(dobar(dp),unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2: CASE PROFILE
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[1]:
+# ── T2: Case profile ──────────────────────────────────────────────────────────
+with TABS[1]:
     st.markdown("### Case profile")
-    st.caption("Quantitative case characteristics. Each field maps to network nodes and drives Variable Elimination.")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
+    st.caption("Each field maps to network nodes and drives Variable Elimination.")
+    st.markdown(dobar(P[20]),unsafe_allow_html=True)
+    c1,c2=st.columns(2);pev={}
+    with c1:
         st.markdown("##### Offender characteristics")
-        age = st.slider("Age at sentencing", 18, 80, 35, help="Node 15 — temporal distortion / burnout effect")
-        identity = st.selectbox("Identity background", [
-            "Not recorded / unknown", "Indigenous — s.718.2(e) + Gladue",
-            "Black — Morris IRCA framework", "Other racialized — Morris",
-            "Non-racialized, socially disadvantaged — Ellis", "No identified systemic disadvantage"
-        ])
-        pclr = st.slider("PCL-R score", 0, 40, 20, help="Node 3. ≥30 = high psychopathy (Ewert/Larsen caveats apply)")
-        static99 = st.slider("Static-99R score", 0, 12, 3, help="Node 4. ≥6 = high sexual recidivism risk")
-        violence = st.selectbox("Serious violence history", ["None", "Minor/historical", "Moderate", "Serious", "Established pattern"])
-        fasd = st.selectbox("FASD diagnosis", ["None / not assessed", "Suspected, undiagnosed", "Confirmed diagnosis"])
+        age=st.slider("Age at sentencing",18,80,35,key="age")
+        st.caption(f"Node 15 — age {age}: {'strong burnout attenuation' if age>=55 else 'moderate' if age>=45 else 'minimal'}")
+        identity=st.selectbox("Identity background",["Not recorded / unknown",
+            "Indigenous — s.718.2(e) + Gladue applies","Black — Morris IRCA framework",
+            "Other racialized — Morris framework","Non-racialized, socially disadvantaged — Ellis",
+            "No identified systemic disadvantage"],key="id_bg")
+        pclr=st.slider("PCL-R score",0,40,20,key="pclr")
+        st.caption(f"N3: {'High ≥30 — Ewert/Larsen caveat APPLIES' if pclr>=30 else 'Moderate' if pclr>=20 else 'Low'}")
+        s99=st.slider("Static-99R score",0,12,3,key="s99")
+        st.caption(f"N4: {'High ≥6' if s99>=6 else 'Moderate' if s99>=4 else 'Low'} — Ewert validation caveat")
+        violence=st.selectbox("Serious violence history",["None","Minor/historical","Moderate","Serious","Established pattern"],key="viol")
+        fasd=st.selectbox("FASD diagnosis",["None / not assessed","Suspected, undiagnosed","Confirmed diagnosis"],key="fasd")
+        st.markdown("##### Dynamic risk · Node 18")
+        sub=st.selectbox("Substance use",["None / in remission","Low","Moderate","High — dependency"],key="sub")
+        peers=st.selectbox("Antisocial peer associations",["None identified","Some — limited","Strong — primary network"],key="peers")
+        stab=st.selectbox("Employment / housing stability",["Stable","Marginal","Unstable / homeless"],key="stab")
+    with c2:
+        st.markdown("##### Procedural integrity · Distortion nodes")
+        det=st.slider("Pre-trial detention (days)",0,730,60,key="det")
+        st.caption(f"N7: {'HIGH — coercive plea cascade risk' if det>90 else 'Moderate' if det>30 else 'Low'} ({det} days)")
+        counsel=st.selectbox("Quality of defence counsel",["Adequate","Marginal",
+            "Inadequate — no cultural investigation","Ineffective — constitutional breach"],key="counsel")
+        gr=st.selectbox("Gladue / SCE report commissioned",["Yes — full report before court",
+            "Partial / summary only","No report commissioned","Report commissioned, disregarded"],key="gr")
+        tools=st.selectbox("Risk tools applied",["Culturally validated only","Mix — partially qualified",
+            "Standard, no cultural qualification","No actuarial tools"],key="tools")
+        pol=st.selectbox("Over-policing indicator",["No evidence","Some — marginal",
+            "Strong — documented over-surveillance"],key="pol")
+        prov=st.selectbox("Province of prosecution",["Low DO designation rate","Medium rate",
+            "High DO designation rate"],key="prov")
+        st.markdown("##### Rehabilitative context · Nodes 11, 19")
+        prog=st.selectbox("Indigenous / cultural programming",["Yes — full culturally grounded",
+            "Limited availability","No culturally appropriate programming"],key="prog")
+        st.caption("Natomagan 2022 ABCA 48: absence is systemic failure, not offender characteristic")
+        rehab=st.selectbox("Rehabilitation engagement",["Strong — consistent","Moderate","Minimal",
+            "None — apparent refusal","Anomalously positive (gaming risk)"],key="rehab")
 
-        st.markdown("##### Dynamic risk (Node 18)")
-        substance = st.selectbox("Substance use (active)", ["None / in remission", "Low", "Moderate", "High — dependency"])
-        peers = st.selectbox("Antisocial peer associations", ["None identified", "Some — limited", "Strong — primary network"])
-        stability = st.selectbox("Employment / housing stability", ["Stable", "Marginal", "Unstable / homeless"])
+    ir=identity in ["Indigenous — s.718.2(e) + Gladue applies","Black — Morris IRCA framework","Other racialized — Morris framework"]
+    pev[2]={"None":.08,"Minor/historical":.25,"Moderate":.50,"Serious":.78,"Established pattern":.90}[violence]
+    pev[3]=.82 if pclr>=30 else .55 if pclr>=20 else .30 if pclr>=10 else .12
+    pev[4]=.82 if s99>=6 else .55 if s99>=4 else .32 if s99>=2 else .12
+    pev[5]={"Culturally validated only":.10,"Mix — partially qualified":.45,"Standard, no cultural qualification":.85 if ir else .40,"No actuarial tools":.15}[tools]
+    pev[6]={"Adequate":.15,"Marginal":.45,"Inadequate — no cultural investigation":.72,"Ineffective — constitutional breach":.90}[counsel]
+    pev[7]=.85 if det>180 else .70 if det>90 else .40 if det>30 else .15
+    pev[9]={"None / not assessed":.15,"Suspected, undiagnosed":.50,"Confirmed diagnosis":.88}[fasd]
+    pev[10]=min(.90,.45+(.20 if "Indigenous" in identity else 0))
+    pev[11]={"Yes — full culturally grounded":.10,"Limited availability":.55,"No culturally appropriate programming":.85}[prog]
+    pev[12]={"Yes — full report before court":.15,"Partial / summary only":.50,"No report commissioned":.82,"Report commissioned, disregarded":.92}[gr]
+    pev[13]=.75 if rehab=="Anomalously positive (gaming risk)" else .22
+    pev[14]={"No evidence":.15,"Some — marginal":.50,"Strong — documented over-surveillance":.85}[pol]
+    pev[15]=.85 if age>=55 else .70 if age>=45 else .40 if age>=35 else .20
+    pev[16]={"Low DO designation rate":.20,"Medium rate":.45,"High DO designation rate":.72}[prov]
+    sv={"None / in remission":.15,"Low":.35,"Moderate":.60,"High — dependency":.80}[sub]
+    pv={"None identified":.10,"Some — limited":.35,"Strong — primary network":.65}[peers]
+    stv={"Stable":.10,"Marginal":.40,"Unstable / homeless":.70}[stab]
+    pev[18]=float(np.clip((sv+pv+stv)/3+.05,.05,.92))
+    rv={"Strong — consistent":.10,"Moderate":.35,"Minimal":.60,"None — apparent refusal":.80,"Anomalously positive (gaming risk)":.30}[rehab]
+    pev[19]=float(np.clip(rv+(.12 if prog=="No culturally appropriate programming" else 0),.05,.90))
+    st.session_state.profile_ev=pev
+    run_inf();P=st.session_state.posteriors
+    bl2,bc2,_=rb(P[20])
+    st.success(f"Node 20 — DO designation risk: **{P[20]*100:.1f}%** · {bl2}")
 
-    with col2:
-        st.markdown("##### Procedural integrity")
-        detention = st.slider("Pre-trial detention (days)", 0, 730, 60, help="Node 7. >90 days triggers coercive plea cascade")
-        counsel = st.selectbox("Quality of defence counsel", ["Adequate", "Marginal", "Inadequate — no cultural investigation", "Ineffective — constitutional breach"])
-        gladue_report = st.selectbox("Gladue / SCE report commissioned", ["Yes — full report before court", "Partial / summary only", "No report commissioned", "Report commissioned, disregarded"])
-        tools = st.selectbox("Risk tools applied", ["Culturally validated only", "Mix — partially qualified", "Standard, no cultural qualification", "No actuarial tools"])
-        policing = st.selectbox("Over-policing indicator", ["No evidence", "Some — marginal", "Strong — documented over-surveillance"])
-        province = st.selectbox("Province of prosecution", ["Low DO designation rate", "Medium rate", "High DO designation rate"])
+# ── T3: Gladue ────────────────────────────────────────────────────────────────
+with TABS[2]:
+    st.markdown("### Gladue factors")
+    st.caption("*R v Gladue* [1999] · *R v Ipeelee* [2012] · No causation requirement")
+    st.markdown(dobar(P[20]),unsafe_allow_html=True)
+    secs={}
+    for f in GF: secs.setdefault(f["sec"],[]).append(f)
+    cg=set()
+    c1,c2=st.columns(2)
+    for sec,facs in secs.items():
+        t=c1 if facs[0]["col"]==1 else c2
+        with t:
+            st.markdown(f"<div class='sh'>{sec}</div>",unsafe_allow_html=True)
+            for f in facs:
+                if st.checkbox(f"{f['l']} · N{f['n']} (+{f['w']*100:.0f}%)",key=f"gl_{f['id']}",
+                               value=f["id"] in st.session_state.gladue_checked): cg.add(f["id"])
+    st.session_state.gladue_checked=cg
+    run_inf();P=st.session_state.posteriors
+    st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
 
-        st.markdown("##### Rehabilitative context")
-        programming = st.selectbox("Indigenous / cultural programming available", ["Yes — full culturally grounded", "Limited availability", "No culturally appropriate programming"])
-        rehab = st.selectbox("Rehabilitation engagement", ["Strong — consistent", "Moderate", "Minimal", "None — apparent refusal", "Anomalously positive (gaming risk)"])
-
-    # Map profile inputs to node probabilities
-    is_racialized = identity in ["Indigenous — s.718.2(e) + Gladue", "Black — Morris IRCA framework", "Other racialized — Morris"]
-    pev = {}
-    pev[2] = {"None":0.08,"Minor/historical":0.25,"Moderate":0.50,"Serious":0.78,"Established pattern":0.90}[violence]
-    pev[3] = 0.82 if pclr>=30 else 0.55 if pclr>=20 else 0.30 if pclr>=10 else 0.12
-    pev[4] = 0.82 if static99>=6 else 0.55 if static99>=4 else 0.32 if static99>=2 else 0.12
-    pev[5] = {"Culturally validated only":0.10,"Mix — partially qualified":0.45,"Standard, no cultural qualification":0.85 if is_racialized else 0.40,"No actuarial tools":0.15}[tools]
-    pev[6] = {"Adequate":0.15,"Marginal":0.45,"Inadequate — no cultural investigation":0.72,"Ineffective — constitutional breach":0.90}[counsel]
-    pev[7] = 0.85 if detention>180 else 0.70 if detention>90 else 0.40 if detention>30 else 0.15
-    pev[9] = {"None / not assessed":0.15,"Suspected, undiagnosed":0.50,"Confirmed diagnosis":0.88}[fasd]
-    pev[10] = min(0.90, 0.45 + (0.20 if "Indigenous" in identity else 0))
-    pev[11] = {"Yes — full culturally grounded":0.10,"Limited availability":0.55,"No culturally appropriate programming":0.85}[programming]
-    pev[12] = {"Yes — full report before court":0.15,"Partial / summary only":0.50,"No report commissioned":0.82,"Report commissioned, disregarded":0.92}[gladue_report]
-    pev[13] = 0.75 if rehab == "Anomalously positive (gaming risk)" else 0.22
-    pev[14] = {"No evidence":0.15,"Some — marginal":0.50,"Strong — documented over-surveillance":0.85}[policing]
-    pev[15] = 0.85 if age>=55 else 0.70 if age>=45 else 0.40 if age>=35 else 0.20
-    pev[16] = {"Low DO designation rate":0.20,"Medium rate":0.45,"High DO designation rate":0.72}[province]
-    sub_v = {"None / in remission":0.15,"Low":0.35,"Moderate":0.60,"High — dependency":0.80}[substance]
-    peer_v = {"None identified":0.10,"Some — limited":0.35,"Strong — primary network":0.65}[peers]
-    stab_v = {"Stable":0.10,"Marginal":0.40,"Unstable / homeless":0.70}[stability]
-    pev[18] = float(np.clip((sub_v+peer_v+stab_v)/3+0.05, 0.05, 0.92))
-    rehab_v = {"Strong — consistent":0.10,"Moderate":0.35,"Minimal":0.60,"None — apparent refusal":0.80,"Anomalously positive (gaming risk)":0.30}[rehab]
-    pev[19] = float(np.clip(rehab_v + (0.12 if programming=="No culturally appropriate programming" else 0), 0.05, 0.90))
-
-    st.session_state.profile_ev = pev
-    run_inference()
-
-    band_label2, band_color2 = risk_band(st.session_state.posteriors.get(20, 0.5))
-    st.markdown(f"""
-    <div style="background:{band_color2}18;border:1px solid {band_color2}44;border-radius:10px;
-         padding:0.8rem;text-align:center;margin-top:1rem">
-      <b>Node 20 — DO designation risk</b> &nbsp;
-      <span style="font-size:1.5rem;font-weight:700;font-family:monospace;color:{band_color2}">
-        {st.session_state.posteriors.get(20,0.5)*100:.1f}%
-      </span>
-      <span style="color:{band_color2};font-weight:600"> {band_label2}</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3: GLADUE FACTORS
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[2]:
-    st.markdown("### Gladue factors checklist")
-    st.caption("*R v Gladue* [1999] 1 SCR 688 · *R v Ipeelee* [2012] SCC 13 · Does not require proof of causation between factors and offence")
-
-    sections = {}
-    for f in GLADUE_FACTORS:
-        sections.setdefault(f["section"], []).append(f)
-
-    col1, col2 = st.columns(2)
-    col_map = {1: col1, 2: col2}
-
-    for f in GLADUE_FACTORS:
-        col = col_map[f["col"]]
-
-    checked_gladue = set()
-    for section, factors in sections.items():
-        col = col_map[factors[0]["col"]]
-        with col:
-            st.markdown(f"<div class='section-header'>{section}</div>", unsafe_allow_html=True)
-            for f in factors:
-                node_col = TYPE_COLORS[NODE_META[f["node"]]["type"]]
-                checked = st.checkbox(
-                    f"**{f['label']}** — N{f['node']} (+{f['weight']*100:.0f}%)",
-                    key=f"gl_{f['id']}",
-                    value=f["id"] in st.session_state.gladue_checked
-                )
-                if checked:
-                    checked_gladue.add(f["id"])
-
-    st.session_state.gladue_checked = checked_gladue
-    run_inference()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4: MORRIS / ELLIS SCE
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[3]:
-    st.markdown("### Morris / Ellis — Social context evidence")
+# ── T4: Morris/Ellis SCE ──────────────────────────────────────────────────────
+with TABS[3]:
+    st.markdown("### Morris / Ellis SCE")
     st.caption("*R v Morris* 2021 ONCA 680 · *R v Ellis* 2022 BCCA 278")
-
-    col_fw, col_gate = st.columns([1, 2])
-    with col_fw:
-        fw = st.radio("Applicable framework", ["Morris", "Ellis", "Both"],
-                       index=["morris","ellis","both"].index(st.session_state.sce_framework))
-        st.session_state.sce_framework = fw.lower()
-
-    with col_gate:
-        if st.session_state.sce_framework != "ellis":
+    st.markdown(dobar(P[20]),unsafe_allow_html=True)
+    c1,c2=st.columns([1,2])
+    with c1:
+        fw=st.radio("Framework",["Morris","Ellis","Both"],
+                    index=["morris","ellis","both"].index(st.session_state.scefw),key="scefw_r")
+        st.session_state.scefw=fw.lower()
+    with c2:
+        if st.session_state.scefw!="ellis":
             st.markdown("**Morris para 97 — connection gate**")
-            st.caption("Discernible nexus to offence / moral culpability — not a causation requirement")
-            conn = st.select_slider("Connection strength",
-                options=["none","absent","weak","moderate","strong","direct"],
-                value=st.session_state.connection_strength)
-            st.session_state.connection_strength = conn
-            mult_display = connection_mult()
-            st.markdown(f"Weight multiplier applied to all Morris SCE: **{mult_display:.0%}**")
-
-        if st.session_state.sce_framework != "morris":
-            st.markdown("**Ellis deprivation nexus**")
-            nexus = st.selectbox("Deprivation nexus", ["none","peripheral","relevant","central"],
-                                  index=["none","peripheral","relevant","central"].index(st.session_state.ellis_nexus))
-            st.session_state.ellis_nexus = nexus
-
+            conn=st.select_slider("Connection strength",["none","absent","weak","moderate","strong","direct"],
+                                  value=st.session_state.conn,key="conn_s")
+            st.session_state.conn=conn
+            st.info(f"Weight multiplier: **{cmult():.0%}** — {'full belief revision obligation' if cmult()>=.9 else 'partial' if cmult()>=.6 else 'limited'}")
+        if st.session_state.scefw!="morris":
+            nx_v=st.selectbox("Ellis deprivation nexus",["none","peripheral","relevant","central"],
+                              index=["none","peripheral","relevant","central"].index(st.session_state.enex),key="enex_s")
+            st.session_state.enex=nx_v
     st.markdown("---")
-    checked_sce = set()
-    sce_sections = {}
-    fw_filter = st.session_state.sce_framework
-    for f in SCE_FACTORS:
-        show = fw_filter=="both" or (fw_filter=="morris" and f["fw"]!="ellis") or (fw_filter=="ellis" and f["fw"]!="morris")
-        if show:
-            sce_sections.setdefault(f["section"], []).append(f)
+    ss={}
+    for f in SF:
+        fw2=st.session_state.scefw
+        show=fw2=="both" or (fw2=="morris" and f["fw"]!="ellis") or (fw2=="ellis" and f["fw"]!="morris")
+        if show: ss.setdefault(f["sec"],[]).append(f)
+    cs=set()
+    cols3=st.columns(3)
+    for i,(sec,facs) in enumerate(ss.items()):
+        with cols3[i%3]:
+            st.markdown(f"<div class='sh'>{sec}</div>",unsafe_allow_html=True)
+            for f in facs:
+                if st.checkbox(f"{f['l']} · N{f['n']}",key=f"sce_{f['id']}",
+                               value=f["id"] in st.session_state.sce_checked): cs.add(f["id"])
+    st.session_state.sce_checked=cs
+    run_inf();P=st.session_state.posteriors
+    st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
 
-    cols = st.columns(3)
-    for i, (section, factors) in enumerate(sce_sections.items()):
-        with cols[i % 3]:
-            st.markdown(f"<div class='section-header'>{section}</div>", unsafe_allow_html=True)
-            for f in factors:
-                checked = st.checkbox(
-                    f"**{f['label']}** — N{f['node']}",
-                    key=f"sce_{f['id']}",
-                    value=f["id"] in st.session_state.sce_checked
-                )
-                if checked:
-                    checked_sce.add(f["id"])
-
-    st.session_state.sce_checked = checked_sce
-    run_inference()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 5: EVIDENCE REVIEW
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[4]:
+# ── T5: Evidence review ───────────────────────────────────────────────────────
+with TABS[4]:
     st.markdown("### Evidence review")
-    st.caption("Manual fine-tuning of node probabilities. Values driven by Case Profile and Gladue/SCE tabs are shown with source tags.")
-
-    col_r, col_d = st.columns(2)
-    evN = [n for n in NODE_META if NODE_META[n].get("ev", False)]
-    risk_nodes = [n for n in NODE_META if NODE_META[n]["type"] in ("risk",)]
-    dst_nodes  = [n for n in NODE_META if NODE_META[n]["type"] not in ("risk","output") and n != 20]
-
-    def render_slider_group(nodes, container):
-        with container:
+    st.caption("Fine-tune node probabilities. Values auto-set from Case Profile and Gladue/SCE tabs.")
+    st.markdown(dobar(P[20]),unsafe_allow_html=True)
+    ev_nodes=[n for n in NODE_META if NODE_META[n]["ev"]]
+    rn=[n for n in ev_nodes if NODE_META[n]["type"]=="risk"]
+    dn=[n for n in ev_nodes if NODE_META[n]["type"]!="risk"]
+    man=dict(st.session_state.manual_ev)
+    c1,c2=st.columns(2)
+    def slgrp(nodes,cont,label):
+        with cont:
+            st.markdown(f"##### {label}")
             for nid in nodes:
-                if nid == 20: continue
-                meta = NODE_META[nid]
-                col = TYPE_COLORS[meta["type"]]
-                current = st.session_state.posteriors.get(nid, 0.5)
-                src = st.session_state.ev_sources.get(nid, "prior")
-                label = f"N{nid} — {meta['short']}"
-                new_val = st.slider(label, 0.0, 1.0, float(current), 0.01,
-                                     key=f"ev_slider_{nid}", format="%.2f")
-                if abs(new_val - current) > 0.01:
-                    st.session_state.evidence[str(nid)] = 1 if new_val >= 0.5 else 0
-
-    with col_r:
-        st.markdown("##### Risk factor nodes")
-        render_slider_group(risk_nodes, col_r)
-    with col_d:
-        st.markdown("##### Systemic distortion nodes")
-        render_slider_group(dst_nodes, col_d)
-
-    if st.button("Reset all to priors"):
-        st.session_state.evidence = {}
-        st.session_state.profile_ev = {}
-        st.session_state.gladue_checked = set()
-        st.session_state.sce_checked = set()
+                m=NODE_META[nid];col=TC[m["type"]];cur=P.get(nid,.5)
+                v=st.slider(f"N{nid} — {m['short']}",0.0,1.0,float(cur),.01,key=f"ev_{nid}",format="%.2f")
+                st.markdown(f"<div style='font-size:.72rem;color:{col};margin-top:-12px;margin-bottom:6px'>P(High) = {v*100:.0f}%</div>",unsafe_allow_html=True)
+                if abs(v-st.session_state.profile_ev.get(nid,.5))>.015: man[nid]=v
+    slgrp(rn,c1,"Risk factor nodes"); slgrp(dn,c2,"Systemic distortion nodes")
+    st.session_state.manual_ev=man
+    if st.button("Reset all to priors",key="rst"):
+        for k in ["profile_ev","manual_ev","doc_adj"]: st.session_state[k]={}
+        st.session_state.gladue_checked=set();st.session_state.sce_checked=set()
         st.rerun()
+    run_inf()
 
-    run_inference()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 6: INFERENCE
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[5]:
+# ── T6: Inference ─────────────────────────────────────────────────────────────
+with TABS[5]:
+    P=st.session_state.posteriors;dp6=P[20];bl6,bc6,bg6=rb(dp6)
     st.markdown("### Inference — posterior distribution")
-    st.caption("Variable Elimination posteriors across all 20 nodes. Arc on DAG visualisation reflects P(High).")
+    st.caption("Variable Elimination posteriors (pgmpy). Arc on DAG reflects P(High).")
+    st.markdown(f"""<div style="background:{bg6};border:1px solid {bc6}44;border-radius:14px;
+    padding:1rem 1.5rem;text-align:center;margin-bottom:1.2rem">
+    <div style="font-size:.75rem;color:{bc6}">Node 20 — Dangerous Offender designation risk</div>
+    <div style="font-size:2.8rem;font-weight:700;font-family:monospace;color:{bc6}">{dp6*100:.1f}%</div>
+    <div style="font-size:.9rem;font-weight:600;color:{bc6}">{bl6}</div></div>""",unsafe_allow_html=True)
+    cols4=st.columns(4)
+    for i,nid in enumerate(n for n in range(1,21) if n!=20):
+        m=NODE_META[nid];col=TC[m["type"]];p=P.get(nid,.5)
+        with cols4[i%4]:
+            st.markdown(f"""<div style="background:{col}18;border:1px solid {col}33;border-radius:8px;
+            padding:.55rem .7rem;margin-bottom:.4rem">
+            <div style="font-size:.65rem;color:{col};font-weight:700">N{nid} — {m['short']}</div>
+            <div style="font-size:1.1rem;font-weight:700;font-family:monospace;color:{col}">{p*100:.1f}%</div>
+            <div style="height:4px;background:#eee;border-radius:2px;margin-top:3px">
+              <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:2px"></div>
+            </div></div>""",unsafe_allow_html=True)
 
-    do_p2 = st.session_state.posteriors.get(20, 0.5)
-    bl2, bc2 = risk_band(do_p2)
-    st.markdown(f"""
-    <div style="background:{bc2}18;border:1px solid {bc2}44;border-radius:12px;
-         padding:1rem 1.5rem;text-align:center;margin-bottom:1.5rem">
-      <div style="font-size:0.75rem;color:{bc2}">Node 20 — Dangerous Offender designation risk</div>
-      <div style="font-size:2.5rem;font-weight:700;font-family:monospace;color:{bc2}">{do_p2*100:.1f}%</div>
-      <div style="font-size:0.9rem;font-weight:600;color:{bc2}">{bl2}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    cols = st.columns(4)
-    for i, nid in enumerate([n for n in range(1, 21) if n != 20]):
-        meta = NODE_META[nid]
-        col = TYPE_COLORS[meta["type"]]
-        p = st.session_state.posteriors.get(nid, 0.5)
-        with cols[i % 4]:
-            st.markdown(f"""
-            <div style="background:{col}18;border:1px solid {col}33;border-radius:8px;
-                 padding:0.6rem;margin-bottom:0.5rem">
-              <div style="font-size:0.65rem;color:{col};font-weight:600">N{nid} — {meta['short']}</div>
-              <div style="font-size:1.1rem;font-weight:700;font-family:monospace;color:{col}">{p*100:.1f}%</div>
-              <div style="height:4px;background:#eee;border-radius:2px;margin-top:4px">
-                <div style="width:{p*100}%;height:100%;background:{col};border-radius:2px"></div>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 7: QBISM DIAGNOSTICS
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[6]:
+# ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
+with TABS[6]:
     st.markdown("### Quantum Bayesianism (QBism) diagnostic layer")
     st.caption("Appendix Q: *The Limits of Classical Bayesian Inference in Legally Distorted Systems* · Busemeyer & Bruza (2012) · Wojciechowski (2023)")
-
-    st.info("This diagnostic layer does **not** alter the Variable Elimination posterior. "
-            "It identifies epistemic conditions under which classical probabilistic outputs "
-            "may require heightened scrutiny — per AQ.4: QBism as epistemic audit mechanism, not replacement inferential engine.")
-
-    diags = st.session_state.qbism_diags
-    if not diags:
-        st.warning("Run inference first (adjust any evidence input).")
-    else:
-        overall = diags.get("overall_flag", "none")
-        flag_class = {"high": "qbism-flag-high", "moderate": "qbism-flag-moderate", "none": "qbism-flag-none"}.get(overall, "qbism-flag-none")
-        st.markdown(f"<div class='{flag_class}'><b>Overall flag: {overall.upper()}</b> — {diags.get('summary','')}</div>", unsafe_allow_html=True)
-
-        si = diags.get("superposition_index", 0.5)
+    st.info("This layer does **not** alter the VE posterior. It identifies epistemic conditions requiring heightened scrutiny.")
+    diags=st.session_state.qdiags
+    if diags:
+        ov=diags.get("overall_flag","none")
+        cls={"high":"qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
+             "moderate":"qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
+             "none":"qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(ov,"qh")
+        st.markdown(f"<div class='{cls}'><b>Overall: {ov.upper()}</b> — {diags.get('summary','')}</div>",unsafe_allow_html=True)
+        si=diags.get("superposition_index",.5);dn7=P[20]
+        rw=sum(P.get(n,.5) for n in [2,3,4,18])/4
+        mw=sum(P.get(n,.5) for n in [5,6,10,12,14])/5
         st.markdown("---")
-        st.markdown(f"**Superposition index:** {si:.2f} / 1.0")
-        st.progress(si)
-        st.caption(diags.get("superposition_note", ""))
+        st.markdown("#### Bloch sphere — quantum belief state |ψ⟩")
+        st.caption("State vector on Bloch sphere. Equator (θ=90°) = maximum superposition. Poles = fully resolved belief.")
+        cb,cc=st.columns([2,1])
+        with cb:
+            fb=draw_bloch_sphere(dn7,rw,mw,dn7,f"P(DO)={dn7*100:.1f}%")
+            st.pyplot(fb,use_container_width=True)
+        with cc:
+            fc=draw_comparison_chart(dn7,dn7,si)
+            st.pyplot(fc,use_container_width=True)
+            theta_deg=np.degrees(np.arccos(np.clip(1-2*dn7,-1,1)))
+            st.markdown(f"""**State vector:**\n- θ = `{theta_deg:.1f}°` (polar)\n- SI = `{si:.2f}`\n- |α|² = `{dn7:.3f}`\n- |β|² = `{1-dn7:.3f}`\n\n*AQ.3.3.5.2: pre-decisional ambiguity preserved as stable epistemic condition.*""")
         st.markdown("---")
+        for ttl,key,doc in [("1. Prior contamination","prior_contamination","AQ.3.3.2 — Distorted priors propagated, not corrected"),
+                             ("2. Order effects","order_effects","AQ.3.3.3 — M₁M₂ρ ≠ M₂M₁ρ · sequence alters belief"),
+                             ("3. Contextual interference","contextual_interference","AQ.3.3.4 — P(H|C₁) ≠ P(H|C₂) · Kochen-Specker"),
+                             ("4. Belief stasis","belief_stasis","AQ.3.3.4 — SCE acknowledged but inert")]:
+            d=diags.get(key,{});sev=d.get("severity","none")
+            cs2={"high":"qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
+                 "moderate":"qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
+                 "none":"qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(sev,"qh")
+            with st.expander(f"{ttl} — {sev.upper()}"):
+                st.markdown(f"<div class='{cs2}'>{doc}</div>",unsafe_allow_html=True)
+                for item in d.get("items",[]):
+                    if isinstance(item,str): st.markdown(f"▸ {item}")
+                    elif isinstance(item,dict):
+                        for k,v in item.items(): st.markdown(f"**{k}:** {v}")
+                if not d.get("items"): st.success("No conditions flagged.")
+                st.caption(d.get("doctrine",""))
 
-        checks = [
-            ("1. Prior contamination", "prior_contamination", "AQ.3.3.2 — Distorted priors inherited, not corrected by Bayes' theorem."),
-            ("2. Order effects (non-commutativity)", "order_effects", "AQ.3.3.3 — M₁M₂ρ ≠ M₂M₁ρ · Evidentiary sequence alters belief state."),
-            ("3. Contextual interference", "contextual_interference", "AQ.3.3.4 — P(H|C₁) ≠ P(H|C₂) · Kochen-Specker · Probative meaning is context-dependent."),
-            ("4. Belief stasis / scalar collapse", "belief_stasis", "AQ.3.3.4 — Premature resolution of ambiguity; SCE formally acknowledged but substantively inert."),
-        ]
+# ── T8: Document analysis ─────────────────────────────────────────────────────
+with TABS[7]:
+    st.markdown("### Document analysis")
+    st.caption("Upload legal documents for Tetrad-grounded analysis. The LLM provides guidance — **you retain full discretion**.")
+    st.info("**Supported:** Gladue reports · IRCA reports · PCL-R/Static-99R assessments · Prior decisions · Transcripts · Bail records · Trauma assessments · Ineffective assistance records")
+    ak=st.text_input("Anthropic API key (optional)",type="password",key="ak")
+    up=st.file_uploader("Upload document",type=["txt","pdf","docx"],key="doc_up")
+    if up:
+        dt_override=st.selectbox("Document type",["Auto-detect","Gladue report","IRCA",
+            "Psychometric (PCL-R)","Psychometric (Static-99R)","FASD assessment",
+            "Bail hearing record","Prior sentencing decision","Court transcript",
+            "Ineffective assistance record","Trauma assessment","Other legal document"],key="dt_ov")
+        if st.button("Analyze against Tetrad framework",type="primary",key="ana"):
+            try:
+                from document_analyzer import extract_text_from_upload,analyze_document
+                up.seek(0)
+                with st.spinner("Analyzing against Tetrad framework..."):
+                    content,auto_type=extract_text_from_upload(up)
+                    dt=auto_type if dt_override=="Auto-detect" else dt_override
+                    result=analyze_document(content,dt,ak or None)
+                st.success(f"Complete · {dt} · Framework: {result.get('applicable_framework','?').upper()} · Connection: {result.get('connection_assessment','?')}")
+                st.markdown(f"*{result.get('document_summary','')}*")
+                st.markdown("#### Suggested node adjustments")
+                acc=dict(st.session_state.doc_adj)
+                sig={k:v for k,v in result.get("nodes",{}).items() if abs(v.get("delta",0))>.02 and v.get("confidence",0)>.1}
+                if sig:
+                    for ns,nd in sig.items():
+                        nid=int(ns);m=NODE_META.get(nid);col=TC.get(m.get("type","risk"),"#888") if m else "#888"
+                        with st.expander(f"N{nid}: {m['name'] if m else '?'} — {'↑' if nd['delta']>0 else '↓'} {abs(nd['delta']):.2f} (conf {nd['confidence']:.0%})"):
+                            st.markdown(f"**Reasoning:** {nd.get('reasoning','')}")
+                            for c in nd.get("citations",[])[:3]: st.markdown(f"> *{c}*")
+                            if st.checkbox(f"Accept adjustment for N{nid}",key=f"acc_{nid}_{len(st.session_state.doc_res)}"): acc[nid]=nd["delta"]
+                            elif nid in acc: del acc[nid]
+                    st.session_state.doc_adj=acc
+                else: st.info("No significant adjustments identified.")
+                for flag in result.get("doctrinal_flags",[]): st.warning(flag)
+                if result.get("ewert_concern"): st.error("⚠️ Ewert concern flagged")
+                st.session_state.doc_res.append(result)
+                run_inf()
+            except ImportError: st.error("Requires `anthropic` package in requirements.txt")
+            except Exception as e: st.error(f"Error: {e}")
+    if st.session_state.doc_adj:
+        st.markdown("---\n#### Active document adjustments")
+        for nid,d in st.session_state.doc_adj.items():
+            m=NODE_META.get(nid,{})
+            st.markdown(f"<span style='color:{TC.get(m.get('type','risk'),'#888')}'>●</span> N{nid} {m.get('name','')}: {'↑' if d>0 else '↓'} {abs(d):.2f}",unsafe_allow_html=True)
+        if st.button("Clear document adjustments"): st.session_state.doc_adj={}; run_inf(); st.rerun()
 
-        for title, key, doctrine in checks:
-            d = diags.get(key, {})
-            sev = d.get("severity", "none")
-            flag_cls = {"high": "qbism-flag-high", "moderate": "qbism-flag-moderate", "none": "qbism-flag-none"}.get(sev, "qbism-flag-none")
-            with st.expander(f"{title} — {sev.upper()}"):
-                st.markdown(f"<div class='{flag_cls}'>{doctrine}</div>", unsafe_allow_html=True)
-                items = d.get("items", [])
-                if items:
-                    for item in items:
-                        if isinstance(item, str):
-                            st.markdown(f"▸ {item}")
-                        elif isinstance(item, dict):
-                            for k, v in item.items():
-                                st.markdown(f"**{k}:** {v}")
-                else:
-                    st.success("No conditions flagged for this diagnostic.")
-                st.caption(f"Doctrine: {d.get('doctrine','')}")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 8: AUDIT REPORT
-# ═══════════════════════════════════════════════════════════════════════════════
-with tabs[7]:
+# ── T9: Audit report ──────────────────────────────────────────────────────────
+with TABS[8]:
     st.markdown("### Audit report")
-    st.caption("Full inference documentation — exportable for legal review.")
+    st.caption("Full inference documentation — exportable for legal review and viva presentation.")
+    Pa=st.session_state.posteriors;da=Pa[20];bla,bca,_=rb(da)
+    cG=[f for f in GF if f["id"] in st.session_state.gladue_checked]
+    cS=[f for f in SF if f["id"] in st.session_state.sce_checked]
+    mx=cmult()
 
-    do_f = st.session_state.posteriors.get(20, 0.5)
-    bl_f, _ = risk_band(do_f)
-    checkedG = [f for f in GLADUE_FACTORS if f["id"] in st.session_state.gladue_checked]
-    checkedS = [f for f in SCE_FACTORS if f["id"] in st.session_state.sce_checked]
-    mult = connection_mult()
+    def sec(t): return f"\n{'─'*60}\n  {t}\n{'─'*60}"
 
-    qbism_text = format_report(st.session_state.qbism_diags) if st.session_state.qbism_diags else "(QBism diagnostics not yet run)"
+    rpt=f"""╔══════════════════════════════════════════════════════════════╗
+║                        P A R V I S                          ║
+║        Probabilistic and Analytical Reasoning               ║
+║        Virtual Intelligence System · Xavier 7               ║
+╚══════════════════════════════════════════════════════════════╝
 
-    report = f"""PARVIS — Audit Report v3.0
-Probabilistic and Analytical Reasoning Virtual Intelligence System
-J.S. Patel  |  University of London (QMUL & LSE)  |  Ethical AI Initiative
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-Inference engine: pgmpy Variable Elimination (genuine Bayesian inference)
-──────────────────────────────────────────────────────────
+  Prepared by:    Jeinis Patel, PhD Candidate and Barrister
+  Institution:    University of London (QMUL & LSE)
+  Initiative:     Ethical AI Initiative
+  Generated:      {datetime.now().strftime('%d %B %Y · %H:%M')}
+  Engine:         pgmpy Variable Elimination (genuine Bayesian inference)
+{sec('INFERENCE OUTPUT')}
+  Node 20 — DO Designation Risk:   {da*100:.2f}%   [{bla.upper()}]
 
-INFERENCE OUTPUT
-──────────────────────────────────────────────────────────
-Node 20 — DO designation risk:  {do_f*100:.2f}%  [{bl_f.upper()}]
+  This figure represents the posterior probability of Dangerous Offender
+  designation given all upstream evidence, corrections, and doctrinal
+  adjustments applied. It models DESIGNATION RISK — not intrinsic
+  dangerousness. This distinction is the thesis's central normative
+  contribution.
+{sec('DOCTRINAL FRAMEWORK')}
+  ► R v Gladue [1999] 1 SCR 688
+  ► R v Ipeelee [2012] SCC 13
+  ► R v Morris 2021 ONCA 680 (para 97 connection gate)
+    Active framework: {st.session_state.scefw.upper()}
+    Connection: {st.session_state.conn.upper()} · Multiplier: {mx:.2f}
+  ► R v Ellis 2022 BCCA 278
+  ► Ewert v Canada [2018] SCC 30
+  ► R v Boutilier 2017 SCC 64
+  ► R v Natomagan 2022 ABCA 48
+{sec('GLADUE FACTOR CHECKLIST')}"""
 
-APPLICABLE FRAMEWORKS
-──────────────────────────────────────────────────────────
-  Gladue / Ipeelee:    R v Gladue [1999] 1 SCR 688; R v Ipeelee [2012] SCC 13
-  Morris framework:    R v Morris 2021 ONCA 680 (Black / racialized offenders)
-  Ellis framework:     R v Ellis 2022 BCCA 278 (socially disadvantaged offenders)
-  Ewert:               Ewert v Canada [2018] SCC 30 (actuarial cultural validity)
-  Active SCE framework: {st.session_state.sce_framework.upper()}
-  Morris para 97 connection: {st.session_state.connection_strength.upper()} (weight: {mult:.2f})
+    if cG:
+        for f in cG: rpt+=f"\n  [✓] {f['l']}\n       → Node {f['n']}  (+{f['w']*100:.0f}%)"
+    else: rpt+="\n  No Gladue factors selected."
 
-GLADUE FACTOR CHECKLIST
-──────────────────────────────────────────────────────────
-{chr(10).join(f"  [✓] {f['label']} → Node {f['node']} (+{f['weight']*100:.0f}%)" for f in checkedG) or "  No Gladue factors selected"}
+    rpt+=sec("MORRIS / ELLIS SOCIAL CONTEXT EVIDENCE")
+    if cS:
+        for f in cS: rpt+=f"\n  [✓] {f['l']}\n       → Node {f['n']}  (+{f['w']*mx*100:.1f}% after connection weight {mx:.2f})"
+    else: rpt+="\n  No Morris/Ellis SCE factors selected."
 
-MORRIS / ELLIS SCE INPUTS
-──────────────────────────────────────────────────────────
-{chr(10).join(f"  [✓] {f['label']} → Node {f['node']} (+{f['weight']*mult*100:.1f}% after connection weight)" for f in checkedS) or "  No Morris/Ellis SCE factors selected"}
+    if st.session_state.doc_adj:
+        rpt+=sec("DOCUMENT ANALYSIS ADJUSTMENTS")
+        for nid,d in st.session_state.doc_adj.items():
+            m=NODE_META.get(nid,{})
+            rpt+=f"\n  [✓] N{nid} {m.get('name','')}: {'↑' if d>0 else '↓'} {abs(d):.2f}"
 
-RISK FACTOR POSTERIORS (Variable Elimination)
-──────────────────────────────────────────────────────────
-{chr(10).join(f"  N{str(n).rjust(2)}  {NODE_META[n]['short'].ljust(26)}  {st.session_state.posteriors.get(n,0.5)*100:5.1f}%" for n in NODE_META if NODE_META[n]['type']=='risk' and n!=20)}
+    rpt+=sec("RISK FACTOR POSTERIORS (Variable Elimination)")
+    for nid in NODE_META:
+        if NODE_META[nid]["type"]=="risk" and nid!=20:
+            rpt+=f"\n  N{str(nid).rjust(2)}  {NODE_META[nid]['short'].ljust(30)} {Pa.get(nid,.5)*100:5.1f}%"
 
-SYSTEMIC DISTORTION CORRECTIONS
-──────────────────────────────────────────────────────────
-{chr(10).join(f"  N{str(n).rjust(2)}  {NODE_META[n]['short'].ljust(26)}  {st.session_state.posteriors.get(n,0.5)*100:5.1f}%" for n in NODE_META if NODE_META[n]['type'] not in ('risk','output') and n!=20)}
+    rpt+=sec("SYSTEMIC DISTORTION CORRECTIONS")
+    for nid in NODE_META:
+        if NODE_META[nid]["type"] not in ("risk","output") and nid!=20:
+            rpt+=f"\n  N{str(nid).rjust(2)}  {NODE_META[nid]['short'].ljust(30)} {Pa.get(nid,.5)*100:5.1f}%"
 
-{qbism_text}
+    qbt=format_report(st.session_state.qdiags) if st.session_state.qdiags else "(QBism pending)"
+    rpt+=f"\n\n{qbt}"
+    rpt+=sec("ARCHITECTURAL NOTES")
+    rpt+="""
+  Inference:   pgmpy Variable Elimination (genuine Bayesian inference)
+  Node 20:     Calibrated post-VE — distortion nodes REDUCE effective
+               risk weight, consistent with thesis argument.
 
-ARCHITECTURAL NOTES
-──────────────────────────────────────────────────────────
-Inference method: Variable Elimination (pgmpy). CPTs encode normative
-priors from doctrine — not empirical frequencies. Extended Bayesian
-tradition: subjective, robust, decision-theoretic Bayesianism.
+  CPTs encode normative priors grounded in doctrine — not empirical
+  frequencies. Extended Bayesian tradition: subjective, robust,
+  decision-theoretic Bayesianism.
 
-Node 1 (burden of proof): global constraint — P(E|H_agg) ≥ 0.90 required.
-Node 20: models DO designation risk, not intrinsic dangerousness.
-This distinction is the thesis's central normative contribution.
+  ─────────────────────────────────────────────────────────────────
+  PARVIS Xavier 7  ·  Research use only
+  NOT for deployment in live proceedings
 
-Noisy-OR applied at Node 20 (9 parents). Continuous SCE/Gladue
-adjustments post-processed after VE inference.
-
-──────────────────────────────────────────────────────────
-PARVIS v3.0  |  Research use only  |  Not for live proceedings.
+  © Jeinis Patel, PhD Candidate and Barrister
+  Ethical AI Initiative · University of London
 """
 
-    st.text_area("Audit report", report, height=500)
-
-    col_dl1, col_dl2 = st.columns(2)
-    with col_dl1:
-        st.download_button("⬇️ Download audit report (.txt)", report.encode(),
-                           file_name="PARVIS_Audit_Report.txt", mime="text/plain")
-    with col_dl2:
-        qbism_only = format_report(st.session_state.qbism_diags) if st.session_state.qbism_diags else ""
-        st.download_button("⬇️ Download QBism diagnostics (.txt)", qbism_only.encode(),
-                           file_name="PARVIS_QBism_Diagnostics.txt", mime="text/plain")
+    st.markdown(f"<div class='at'>{rpt}</div>",unsafe_allow_html=True)
+    c1,c2=st.columns(2)
+    with c1:
+        st.download_button("⬇️ Download audit report (.txt)",rpt.encode(),
+            file_name=f"PARVIS_Audit_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",mime="text/plain")
+    with c2:
+        qbo=format_report(st.session_state.qdiags) if st.session_state.qdiags else ""
+        st.download_button("⬇️ Download QBism diagnostics (.txt)",qbo.encode(),
+            file_name="PARVIS_QBism.txt",mime="text/plain")

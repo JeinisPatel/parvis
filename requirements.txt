@@ -3,3 +3,6 @@ pgmpy>=0.1.25
 networkx>=3.2
 matplotlib>=3.8
 numpy>=1.26
+anthropic>=0.25.0
+pypdf>=4.0.0
+python-docx>=1.1.0
