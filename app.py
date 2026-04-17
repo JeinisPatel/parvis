@@ -168,7 +168,7 @@ def gdelta():
     return d
 
 def sdelta():
-    d={}; fw=st.session_state.scefw; m=cmult() if fw!="ellis" else emult()
+    d={}; fw=(st.session_state.scefw or "morris").lower(); m=cmult() if fw!="ellis" else emult()
     for f in SF:
         if f["id"] in st.session_state.sce_checked:
             show=fw=="both" or (fw=="morris" and f["fw"]!="ellis") or (fw=="ellis" and f["fw"]!="morris")
@@ -277,7 +277,7 @@ def _sync_profile_from_widgets():
     # Sync connection/framework settings
     if "conn_s" in ss:  ss["conn"] = ss["conn_s"]
     if "enex_s" in ss:  ss["enex"] = ss["enex_s"]
-    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"]
+    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"].lower()  # radio returns capitalised
 
 
 _sync_profile_from_widgets()
@@ -474,23 +474,23 @@ with TABS[3]:
     c1,c2=st.columns([1,2])
     with c1:
         fw=st.radio("Framework",["Morris","Ellis","Both"],
-                    index=["morris","ellis","both"].index(st.session_state.scefw),key="scefw_r")
+                    index=["morris","ellis","both"].index((st.session_state.scefw or "morris").lower() if (st.session_state.scefw or "morris").lower() in ["morris","ellis","both"] else 0),key="scefw_r")
         st.session_state.scefw=fw.lower()
     with c2:
-        if st.session_state.scefw!="ellis":
+        if (st.session_state.scefw or "morris").lower()!="ellis":
             st.markdown("**Morris para 97 — connection gate**")
             conn=st.select_slider("Connection strength",["none","absent","weak","moderate","strong","direct"],
                                   value=st.session_state.conn,key="conn_s")
             st.session_state.conn=conn
             st.info(f"Weight multiplier: **{cmult():.0%}** — {'full belief revision obligation' if cmult()>=.9 else 'partial' if cmult()>=.6 else 'limited'}")
-        if st.session_state.scefw!="morris":
+        if (st.session_state.scefw or "morris").lower()!="morris":
             nx_v=st.selectbox("Ellis deprivation nexus",["none","peripheral","relevant","central"],
                               index=["none","peripheral","relevant","central"].index(st.session_state.enex),key="enex_s")
             st.session_state.enex=nx_v
     st.markdown("---")
     ss={}
     for f in SF:
-        fw2=st.session_state.scefw
+        fw2=(st.session_state.scefw or "morris").lower()
         show=fw2=="both" or (fw2=="morris" and f["fw"]!="ellis") or (fw2=="ellis" and f["fw"]!="morris")
         if show: ss.setdefault(f["sec"],[]).append(f)
     cs=set()
