@@ -51,23 +51,22 @@ st.markdown(wm + """
 <style>
 /* ── DM Sans font — remove this block to revert to system font ── */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&display=swap');
-*, .stMarkdown, .stText, select, input, label, .stSlider {
+/* Apply DM Sans via body — safer than * which clobbers icon fonts */
+html, body, [class*="st"], p, div, span, h1, h2, h3, h4, h5,
+input, select, textarea, label, table, td, th {
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
-/* File uploader — fully revert to system font to prevent label duplication */
-[data-testid="stFileUploader"],
-[data-testid="stFileUploader"] *,
-[data-testid="stFileUploaderDropzone"],
-[data-testid="stFileUploaderDropzone"] *,
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] button *,
-[data-testid="stFileUploaderDropzone"] button span,
-[data-testid="stFileUploaderDropzone"] button p,
-[data-testid="stFileUploaderDropzone"] small,
-[data-testid="stFileUploaderDropzone"] span {
-    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
-    letter-spacing: normal !important;
-    font-size: 14px !important;
+/* Protect Streamlit icon fonts — exclude SVG and icon elements */
+svg, svg *, [class*="icon"], [class*="Icon"],
+button svg, button svg * {
+    font-family: inherit;
+}
+/* File uploader: reset entirely so icon font renders correctly */
+[data-testid="stFileUploaderDropzone"] button {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+[data-testid="stFileUploaderDropzone"] button > span {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 /* ── End DM Sans block ── */
 /* ── File uploader button fix ── */
