@@ -196,26 +196,29 @@ def _sync_profile_from_widgets():
     Read all Case Profile widget values from st.session_state (set by their key= params)
     and recompute profile_ev. Called BEFORE the header renders so the DO score
     is always current — not one step behind.
+
+    Defaults MUST match the first item / default value of each widget so that
+    the initial state (no user interaction) gives a neutral, low-evidence baseline.
     """
     ss = st.session_state
-    # Read widget values — use .get() with defaults matching widget defaults
+    # Defaults match widget starting values exactly
     age    = ss.get("age", 35)
     idbg   = ss.get("id_bg", "Not recorded / unknown")
-    pclr   = ss.get("pclr", 20)
-    s99    = ss.get("s99", 3)
-    viol   = ss.get("viol", "Serious")
+    pclr   = ss.get("pclr", 0)            # slider min — no psychopathy evidence
+    s99    = ss.get("s99", 0)             # slider min — no sexual offence evidence
+    viol   = ss.get("viol", "None")       # first selectbox item
     fasd   = ss.get("fasd", "None / not assessed")
-    sub    = ss.get("sub", "Moderate")
-    peers  = ss.get("peers", "Some — limited")
-    stab   = ss.get("stab", "Marginal")
-    det    = ss.get("det", 60)
-    counsel= ss.get("counsel", "Marginal")
-    gr     = ss.get("gr", "No report commissioned")
-    tools  = ss.get("tools", "Standard, no cultural qualification")
-    pol    = ss.get("pol", "Strong — documented over-surveillance")
-    prov   = ss.get("prov", "Medium rate")
-    prog   = ss.get("prog", "Limited availability")
-    rehab  = ss.get("rehab", "Minimal")
+    sub    = ss.get("sub", "None / in remission")    # first item
+    peers  = ss.get("peers", "None identified")      # first item
+    stab   = ss.get("stab", "Stable")                # first item
+    det    = ss.get("det", 0)             # slider min — no pre-trial detention
+    counsel= ss.get("counsel", "Adequate")            # first item
+    gr     = ss.get("gr", "Yes — full report before court")  # first item
+    tools  = ss.get("tools", "Culturally validated only")    # first item
+    pol    = ss.get("pol", "No evidence")             # first item
+    prov   = ss.get("prov", "Low DO designation rate") # first item
+    prog   = ss.get("prog", "Yes — full culturally grounded") # first item
+    rehab  = ss.get("rehab", "Strong — consistent")   # first item
 
     isr = idbg in ["Indigenous — s.718.2(e) + Gladue","Black — Morris IRCA","Other racialized — Morris"]
     pev={}
@@ -253,7 +256,7 @@ def _sync_profile_from_widgets():
     # Sync connection/framework settings
     if "conn_s" in ss:  ss["conn"] = ss["conn_s"]
     if "enex_s" in ss:  ss["enex"] = ss["enex_s"]
-    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"]
+    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"].lower()  # radio returns capitalised
 
 
 _sync_profile_from_widgets()
