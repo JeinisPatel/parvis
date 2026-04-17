@@ -191,6 +191,72 @@ def run_inf():
     st.session_state.qdiags=diagnose(post,bev,list(st.session_state.gladue_checked),
         list(st.session_state.sce_checked),st.session_state.profile_ev,st.session_state.conn)
 
+def _sync_profile_from_widgets():
+    """
+    Read all Case Profile widget values from st.session_state (set by their key= params)
+    and recompute profile_ev. Called BEFORE the header renders so the DO score
+    is always current — not one step behind.
+    """
+    ss = st.session_state
+    # Read widget values — use .get() with defaults matching widget defaults
+    age    = ss.get("age", 35)
+    idbg   = ss.get("id_bg", "Not recorded / unknown")
+    pclr   = ss.get("pclr", 20)
+    s99    = ss.get("s99", 3)
+    viol   = ss.get("viol", "Serious")
+    fasd   = ss.get("fasd", "None / not assessed")
+    sub    = ss.get("sub", "Moderate")
+    peers  = ss.get("peers", "Some — limited")
+    stab   = ss.get("stab", "Marginal")
+    det    = ss.get("det", 60)
+    counsel= ss.get("counsel", "Marginal")
+    gr     = ss.get("gr", "No report commissioned")
+    tools  = ss.get("tools", "Standard, no cultural qualification")
+    pol    = ss.get("pol", "Strong — documented over-surveillance")
+    prov   = ss.get("prov", "Medium rate")
+    prog   = ss.get("prog", "Limited availability")
+    rehab  = ss.get("rehab", "Minimal")
+
+    isr = idbg in ["Indigenous — s.718.2(e) + Gladue","Black — Morris IRCA","Other racialized — Morris"]
+    pev={}
+    pev[2] ={"None":.08,"Minor/historical":.25,"Moderate":.50,"Serious":.78,"Established pattern":.90}.get(viol,.50)
+    pev[3] =.82 if pclr>=30 else .55 if pclr>=20 else .30 if pclr>=10 else .12
+    pev[4] =.82 if s99>=6 else .55 if s99>=4 else .32 if s99>=2 else .12
+    pev[5] ={"Culturally validated only":.10,"Mix — partially qualified":.45,
+             "Standard, no cultural qualification":.85 if isr else .40,"No actuarial tools":.15}.get(tools,.40)
+    pev[6] ={"Adequate":.15,"Marginal":.45,"Inadequate — no cultural investigation":.72,
+             "Ineffective — constitutional breach":.90}.get(counsel,.45)
+    pev[7] =.85 if det>180 else .70 if det>90 else .40 if det>30 else .15
+    pev[9] ={"None / not assessed":.15,"Suspected, undiagnosed":.50,"Confirmed diagnosis":.88}.get(fasd,.15)
+    pev[10]=min(.90,.45+(.20 if "Indigenous" in idbg else 0))
+    pev[11]={"Yes — full culturally grounded":.10,"Limited availability":.55,
+             "No culturally appropriate programming":.85}.get(prog,.55)
+    pev[12]={"Yes — full report before court":.15,"Partial / summary only":.50,
+             "No report commissioned":.82,"Report commissioned, disregarded":.92}.get(gr,.82)
+    pev[13]=.75 if "gaming" in rehab.lower() else .22
+    pev[14]={"No evidence":.15,"Some — marginal":.50,"Strong — documented over-surveillance":.85}.get(pol,.50)
+    pev[15]=.85 if age>=55 else .70 if age>=45 else .40 if age>=35 else .20
+    pev[16]={"Low DO designation rate":.20,"Medium rate":.45,"High DO designation rate":.72}.get(prov,.45)
+    sv ={"None / in remission":.15,"Low":.35,"Moderate":.60,"High — dependency":.80}.get(sub,.60)
+    pv ={"None identified":.10,"Some — limited":.35,"Strong — primary network":.65}.get(peers,.35)
+    stv={"Stable":.10,"Marginal":.40,"Unstable / homeless":.70}.get(stab,.40)
+    pev[18]=float(np.clip((sv+pv+stv)/3+.05,.05,.92))
+    rv ={"Strong — consistent":.10,"Moderate":.35,"Minimal":.60,"None — apparent refusal":.80,
+         "Anomalously positive (gaming risk)":.30}.get(rehab,.60)
+    pev[19]=float(np.clip(rv+(.12 if prog=="No culturally appropriate programming" else 0),.05,.90))
+    # Also sync Gladue and SCE checked sets from checkbox keys
+    gl_checked = {f["id"] for f in GF if ss.get(f"gl_{f['id']}", False)}
+    sce_checked = {f["id"] for f in SF if ss.get(f"sce_{f['id']}", False)}
+    ss["gladue_checked"] = gl_checked
+    ss["sce_checked"]    = sce_checked
+    ss["profile_ev"]     = pev
+    # Sync connection/framework settings
+    if "conn_s" in ss:  ss["conn"] = ss["conn_s"]
+    if "enex_s" in ss:  ss["enex"] = ss["enex_s"]
+    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"]
+
+
+_sync_profile_from_widgets()
 run_inf()
 P=st.session_state.posteriors
 dp=P[20]; bl,bc,bg=rb(dp)
