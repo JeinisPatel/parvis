@@ -603,7 +603,23 @@ with TABS[7]:
     st.markdown("### Document analysis")
     st.caption("Upload legal documents for Tetrad-grounded analysis. The LLM provides guidance — **you retain full discretion**.")
     st.info("**Supported:** Gladue reports · IRCA reports · PCL-R/Static-99R assessments · Prior decisions · Transcripts · Bail records · Trauma assessments · Ineffective assistance records")
-    ak=st.text_input("Anthropic API key (optional)",type="password",key="ak")
+    # Provider selector — backward-compatible, Claude is default
+    col_prov, col_key = st.columns([1, 2])
+    with col_prov:
+        provider = st.selectbox(
+            "AI provider",
+            ["claude", "openai", "gemini"],
+            format_func=lambda x: {
+                "claude":  "Claude (Anthropic) ★ recommended",
+                "openai":  "GPT-4o (OpenAI)",
+                "gemini":  "Gemini 1.5 Pro (Google)",
+            }[x],
+            key="doc_provider",
+        )
+    with col_key:
+        key_label = {"claude":"Anthropic API key","openai":"OpenAI API key","gemini":"Google API key"}.get(provider,"API key")
+        ak = st.text_input(f"{key_label} (optional — uses Streamlit secrets if blank)",
+                           type="password", key="ak")
     up=st.file_uploader("Upload document",type=["txt","pdf","docx"],key="doc_up")
     if up:
         dt_override=st.selectbox("Document type",["Auto-detect","Gladue report","IRCA",
@@ -617,8 +633,8 @@ with TABS[7]:
                 with st.spinner("Analyzing against Tetrad framework..."):
                     content,auto_type=extract_text_from_upload(up)
                     dt=auto_type if dt_override=="Auto-detect" else dt_override
-                    result=analyze_document(content,dt,ak or None)
-                st.success(f"Complete · {dt} · Framework: {result.get('applicable_framework','?').upper()} · Connection: {result.get('connection_assessment','?')}")
+                    result=analyze_document(content,dt,ak or None,provider=provider)
+                st.success(f"Complete · {dt} · {result.get('_provider',provider).upper()} · Framework: {result.get('applicable_framework','?').upper()} · Connection: {result.get('connection_assessment','?')}")
                 st.markdown(f"*{result.get('document_summary','')}*")
                 st.markdown("#### Suggested node adjustments")
                 acc=dict(st.session_state.doc_adj)
