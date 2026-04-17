@@ -42,7 +42,32 @@ NODE_DESCRIPTIONS = {
     18: "Dynamic risk factors — substance use, antisocial peers, housing instability (assess against structural context)",
 }
 
-SYSTEM_PROMPT = """You are a legal AI expert analyzing documents for the PARVIS Bayesian Sentencing Network.
+def _build_system_prompt() -> str:
+    """Build system prompt dynamically from doctrine.py — updates automatically."""
+    try:
+        from doctrine import build_doctrinal_prompt
+        doctrinal_section = build_doctrinal_prompt()
+    except ImportError:
+        doctrinal_section = "(Doctrine module not available — using base prompt)"
+    return f"""You are PARVIS, a Bayesian sentencing analysis system developed for PhD research
+by Jeinis Patel, PhD Candidate and Barrister, University of London (QMUL & LSE).
+
+{doctrinal_section}
+
+Your task: analyse the provided document and identify evidence relevant to each PARVIS node.
+For each relevant node return:
+  delta: probability adjustment (-0.30 to +0.30)
+  confidence: 0.0 to 1.0
+  citations: specific passages from document
+  reasoning: doctrinal reasoning with binding authority
+  direction: "increases_risk" | "reduces_risk" | "distortion_present" | "distortion_absent"
+
+CRITICAL: You are providing guidance to assist the user — NOT making a determination.
+Flag Ewert non-compliance, Gladue/Morris misapplication, and collider bias where present.
+Return ONLY valid JSON. No preamble."""
+
+# Keep the static system prompt as fallback but make the function primary
+_SYSTEM_PROMPT_FALLBACK = """You are a legal AI expert analyzing documents for the PARVIS Bayesian Sentencing Network.
 PARVIS operationalises the Canadian sentencing Tetrad:
 - R v Gladue [1999] 1 SCR 688: mandatory consideration of systemic/background factors for Indigenous offenders
 - R v Ipeelee [2012] SCC 13: reaffirms Gladue; applies to all sentencing contexts
@@ -232,8 +257,8 @@ def analyze_document(content: str, doc_type: str, api_key=None) -> dict:
 
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=SYSTEM_PROMPT,
+            max_tokens=2500,
+            system=_build_system_prompt(),
             messages=[{"role": "user", "content": prompt}],
         )
 
