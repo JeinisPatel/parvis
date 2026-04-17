@@ -182,14 +182,42 @@ def _infer_doc_type(content: str, filename: str) -> str:
         return "Legal document"
 
 
-def analyze_document(content: str, doc_type: str, api_key: Optional[str] = None) -> dict:
-    """
-    Send document to Claude for Tetrad-grounded analysis.
 
-    Returns structured dict with node adjustments.
+def _get_api_key(api_key=None):
+    """
+    Resolve Anthropic API key in priority order:
+    1. Explicitly passed argument
+    2. Streamlit secrets (ANTHROPIC_API_KEY) — works on Streamlit Cloud
+    3. Environment variable (ANTHROPIC_API_KEY) — works locally
+    """
+    if api_key:
+        return api_key
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and "ANTHROPIC_API_KEY" in st.secrets:
+            return st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+    import os
+    return os.environ.get("ANTHROPIC_API_KEY")
+
+def analyze_document(content: str, doc_type: str, api_key=None) -> dict:
+    """
+    Send document to Claude for Tetrad-grounded Bayesian node analysis.
+
+    API key resolved automatically from:
+      - Streamlit secrets (ANTHROPIC_API_KEY) when deployed on Streamlit Cloud
+      - ANTHROPIC_API_KEY environment variable when running locally
+      - api_key argument if explicitly passed
+
+    Returns structured dict with per-node probability adjustments,
+    doctrinal reasoning, and supporting text from the document.
+    Each adjustment can be accepted or modified by the user before
+    feeding into the Bayesian network.
     """
     try:
-        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        resolved = _get_api_key(api_key)
+        client = anthropic.Anthropic(api_key=resolved) if resolved else anthropic.Anthropic()
 
         node_desc_text = '\n'.join(
             f"  Node {nid}: {desc}"
