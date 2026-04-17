@@ -333,9 +333,9 @@ with ct:
                filter:invert(1);opacity:0.9"
         alt="Ethical AI" /><span>.R.V.I.S</span>
     </div>
-    <div class="ps">Probabilistic and Analytical Reasoning Virtual Intelligence System &nbsp;·&nbsp;
+    <div class="ps"><em>Probabilistic and Analytical Reasoning Virtual Intelligence System</em> &nbsp;·&nbsp;
     <span style="color:#185FA5;font-weight:500">University of London</span> &nbsp;·&nbsp;
-    Ethical AI Initiative &nbsp;·&nbsp;
+    <span style="color:#1B5E20;font-weight:500">Ethical AI Initiative</span> &nbsp;·&nbsp;
     <span style="color:#A32D2D;font-weight:500">Jeinis Patel, PhD Candidate and Barrister</span>
     &nbsp;·&nbsp; &#169; 2026 Jeinis Patel</div></div>""",unsafe_allow_html=True)
 with cd:
