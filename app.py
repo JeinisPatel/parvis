@@ -14,7 +14,7 @@ from model import build_model, get_inference_engine, query_do_risk, NODE_META, E
 from quantum_diagnostics import diagnose, format_report
 from bloch_sphere import draw_bloch_sphere, draw_comparison_chart
 
-st.set_page_config(page_title="PARVIS", layout="wide", initial_sidebar_state="collapsed",
+st.set_page_config(page_title="P.A.R.V.I.S — Bayesian Sentencing Network", layout="wide", initial_sidebar_state="collapsed",
     menu_items={"About":"PARVIS Xavier 7 — Research use only"})
 
 @st.cache_data
@@ -25,15 +25,32 @@ def get_logo_b64():
     return None
 
 logo_b64 = get_logo_b64()
-wm = f"""<style>.stApp::before{{content:'';position:fixed;bottom:30px;right:30px;
-width:160px;height:160px;background-image:url('data:image/png;base64,{logo_b64}');
-background-size:contain;background-repeat:no-repeat;opacity:0.10;pointer-events:none;
-z-index:0;filter:invert(1) brightness(0.4);}}</style>""" if logo_b64 else ""
+# Watermark: injected fixed div. mix-blend-mode:multiply dissolves the black PNG background.
+wm = f"""
+<style>
+#parvis-watermark {{
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  width: 110px;
+  height: 110px;
+  background-image: url('data:image/png;base64,{logo_b64}');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.13;
+  pointer-events: none;
+  z-index: 9999;
+  mix-blend-mode: multiply;
+}}
+</style>
+<div id="parvis-watermark"></div>
+""" if logo_b64 else ""
 
 st.markdown(wm + """
 <style>
-.pt{font-size:2rem;font-weight:800;letter-spacing:5px;margin:0}
-.ps{font-size:.72rem;color:#888;margin-top:3px}
+.pt{font-size:2.4rem;font-weight:800;letter-spacing:7px;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.ps{font-size:.88rem;color:#777;margin-top:5px;letter-spacing:.3px;line-height:1.5}
 .dc{border-radius:14px;padding:.9rem 1.1rem;text-align:center}
 .dp{font-size:2.4rem;font-weight:700;font-family:monospace;line-height:1}
 .dl{font-size:.72rem;margin-bottom:3px}
@@ -42,6 +59,15 @@ st.markdown(wm + """
 .qh{padding:.5rem .75rem;border-radius:6px;margin:.3rem 0;font-size:.85rem}
 .at{font-family:'Courier New',monospace;font-size:.78rem;line-height:1.75;
     background:#f7f6f3;border-radius:10px;padding:1.2rem;border:1px solid #e0dfd9;white-space:pre-wrap}
+/* Tab styling — larger, more breathing room */
+.stTabs [data-baseweb="tab-list"] {gap:4px}
+.stTabs [data-baseweb="tab"] {
+  font-size:0.88rem !important;
+  font-weight:500 !important;
+  padding:10px 18px !important;
+  letter-spacing:0.2px;
+}
+.stTabs [aria-selected="true"] {font-weight:700 !important}
 footer{visibility:hidden}#MainMenu{visibility:hidden}
 </style>""", unsafe_allow_html=True)
 
@@ -173,7 +199,7 @@ dp=P[20]; bl,bc,bg=rb(dp)
 ct,cd=st.columns([3,1])
 with ct:
     st.markdown(f"""<div style="border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:.6rem;margin-bottom:.5rem">
-    <div class="pt">PARVIS</div>
+    <div class="pt">P.A.R.V.I.S</div>
     <div class="ps">Probabilistic and Analytical Reasoning Virtual Intelligence System &nbsp;·&nbsp;
     University of London &nbsp;·&nbsp; Ethical AI Initiative</div></div>""",unsafe_allow_html=True)
 with cd:
@@ -221,16 +247,6 @@ def draw_dag(post,sel=None):
              markersize=8,label=TL[t]) for t,c in TC.items()]
     ax.legend(handles=handles,loc='upper right',fontsize=7.5,framealpha=.92,edgecolor='#ddd')
     plt.tight_layout(pad=.5);return fig
-
-
-# ── CanLII availability check ─────────────────────────────────────────────────
-try:
-    from canlii_client import (search_node_developments, get_tetrad_updates,
-                                format_canlii_results, is_configured as canlii_ok)
-    CANLII_ON = True
-except ImportError:
-    CANLII_ON = False
-    def canlii_ok(): return False
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 TABS=st.tabs(["🕸️ Architecture","📋 Case profile","🦅 Gladue factors",
@@ -522,26 +538,6 @@ with TABS[7]:
                 if result.get("ewert_concern"): st.error("⚠️ Ewert concern flagged")
                 st.session_state.doc_res.append(result)
                 run_inf()
-                # ── CanLII live results ───────────────────────────────────
-                flagged=[int(k) for k,v in sig.items() if abs(v.get("delta",0))>0.02]
-                if CANLII_ON and canlii_ok() and flagged:
-                    st.markdown("---")
-                    st.markdown("#### 🔍 Live CanLII — recent decisions on flagged nodes")
-                    st.caption("Searching CanLII for recent cases on the same doctrinal issues...")
-                    for nid in flagged[:4]:
-                        nm=NODE_META.get(nid,{}); col=TC.get(nm.get("type","distortion"),"#185FA5")
-                        with st.spinner(f"Node {nid}..."):
-                            cas=search_node_developments(nid,max_results=4)
-                        if cas:
-                            st.markdown(f"<b style='color:{col}'>N{nid} — {nm.get('short','')}</b>",unsafe_allow_html=True)
-                            for r in cas:
-                                dt2=r.get("date","")[:10] or "—"
-                                cit2=r.get("citation") or r.get("title","—")
-                                ur=r.get("url","")
-                                lnk=f"<a href='{ur}' target='_blank'>{cit2}</a>" if ur else cit2
-                                st.markdown(f"<div style='font-size:12px;padding:2px 0;color:#555'>[{dt2}] {lnk}</div>",unsafe_allow_html=True)
-                elif CANLII_ON and not canlii_ok():
-                    st.info("Add **CANLII_API_KEY** to Streamlit secrets to enable live CanLII search.")
             except ImportError: st.error("Requires `anthropic` package in requirements.txt")
             except Exception as e: st.error(f"Error: {e}")
     if st.session_state.doc_adj:
@@ -550,50 +546,6 @@ with TABS[7]:
             m=NODE_META.get(nid,{})
             st.markdown(f"<span style='color:{TC.get(m.get('type','risk'),'#888')}'>●</span> N{nid} {m.get('name','')}: {'↑' if d>0 else '↓'} {abs(d):.2f}",unsafe_allow_html=True)
         if st.button("Clear document adjustments"): st.session_state.doc_adj={}; run_inf(); st.rerun()
-
-    # ── Tetrad tracker ────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 📡 Tetrad subsequent history — live from CanLII")
-    st.caption("Tracks recent citing cases for Gladue, Morris, Ellis, Ewert, Natomagan, Boutilier, Ipeelee.")
-    if CANLII_ON and canlii_ok():
-        col_btn,col_yr=st.columns([2,1])
-        with col_yr:
-            since=st.selectbox("Since year",[2024,2023,2022,2021],index=1,key="tet_yr")
-        with col_btn:
-            run_tet=st.button("🔄 Check Tetrad for recent developments",key="tet_btn")
-        if run_tet:
-            with st.spinner("Querying CanLII for Tetrad citing cases..."):
-                upd=get_tetrad_updates(since_year=since)
-            if upd:
-                for case_lbl,citing in upd.items():
-                    with st.expander(f"📌 {case_lbl} — {len(citing)} recent citing case(s) since {since}"):
-                        for c in citing[:6]:
-                            cd=c.get("decisionDate","")[:10] or "—"
-                            ct=c.get("title","—")
-                            cu=c.get("url","")
-                            lnk=f"<a href='{cu}' target='_blank'>{ct}</a>" if cu else ct
-                            st.markdown(f"<div style='font-size:12px;padding:3px 0'><span style='color:#aaa'>[{cd}]</span> {lnk}</div>",unsafe_allow_html=True)
-            else:
-                st.success(f"No new citing cases found since {since}.")
-        # Update alerts from doctrine.py
-        st.markdown("#### ⚡ Doctrine update alerts")
-        st.caption("Nodes flagged in doctrine.py as having actively evolving law:")
-        try:
-            from doctrine import get_update_notes
-            notes=get_update_notes()
-            for nid,note in notes.items():
-                nm=NODE_META.get(nid,{}); col=TC.get(nm.get("type","distortion"),"#185FA5")
-                st.markdown(f"<div style='border-left:3px solid {col};padding:6px 12px;margin:4px 0;background:{col}11;border-radius:0 6px 6px 0'><b style='color:{col}'>N{nid} — {nm.get('short','')}</b><br><span style='font-size:12px'>{note}</span></div>",unsafe_allow_html=True)
-        except Exception:
-            st.caption("doctrine.py update notes not available.")
-    else:
-        st.markdown(
-            """<div style='background:#FAEEDA;border:1px solid #BA751733;border-radius:8px;padding:12px 16px'>
-            <b>CanLII not yet active.</b> To enable:<br>
-            1. Register free at <a href='https://api.canlii.org' target='_blank'>api.canlii.org</a><br>
-            2. Add <code>CANLII_API_KEY = your-key</code> to Streamlit secrets<br>
-            3. Redeploy — tracker activates automatically.</div>""",
-            unsafe_allow_html=True)
 
 # ── T9: Audit report ──────────────────────────────────────────────────────────
 with TABS[8]:
