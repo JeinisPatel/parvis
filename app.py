@@ -55,6 +55,15 @@ st.markdown(wm + """
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 /* ── End DM Sans block ── */
+/* ── File uploader button fix ── */
+[data-testid="stFileUploaderDropzone"] button {
+    min-width: 90px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+[data-testid="stFileUploadDropzone"] span {
+    font-size: 0.82rem !important;
+}
 .pt{font-size:2.4rem;font-weight:800;letter-spacing:7px;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 .ps{font-size:.88rem;color:#777;margin-top:5px;letter-spacing:.3px;line-height:1.5}
 /* ── Evidence review — thick colored sliders ── */
@@ -336,7 +345,7 @@ with ct:
         style="height:3.2rem;width:3.2rem;object-fit:contain;
                margin:0 -1px;vertical-align:middle;
                transform:translateY(0.25rem);
-               filter:invert(1);opacity:0.9"
+               filter:invert(1) contrast(2.5) brightness(0.85);opacity:0.95"
         alt="Ethical AI" /><span>.R.V.I.S</span>
     </div>
     <div class="ps"><em>Probabilistic and Analytical Reasoning Virtual Intelligence System</em> &nbsp;·&nbsp;
