@@ -25,6 +25,90 @@ import re
 from typing import Dict, List, Optional, Tuple
 import anthropic
 
+# ── Provider configuration ────────────────────────────────────────────────────
+SUPPORTED_PROVIDERS = {
+    "claude":  {"label": "Claude (Anthropic) — recommended",  "secret_key": "ANTHROPIC_API_KEY"},
+    "openai":  {"label": "GPT-4o (OpenAI)",                   "secret_key": "OPENAI_API_KEY"},
+    "gemini":  {"label": "Gemini 1.5 Pro (Google)",           "secret_key": "GOOGLE_API_KEY"},
+}
+
+def _resolve_key(provider: str, api_key=None) -> str | None:
+    """Resolve API key for the given provider from secrets, env, or argument."""
+    if api_key:
+        return api_key
+    secret_name = SUPPORTED_PROVIDERS.get(provider, {}).get("secret_key", "ANTHROPIC_API_KEY")
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and secret_name in st.secrets:
+            return st.secrets[secret_name]
+    except Exception:
+        pass
+    import os
+    return os.environ.get(secret_name)
+
+
+def _call_claude(prompt: str, system: str, api_key: str) -> str:
+    """Call Anthropic Claude API. Returns raw text response."""
+    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+    msg = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=2500,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def _call_openai(prompt: str, system: str, api_key: str) -> str:
+    """Call OpenAI GPT-4o API. Returns raw text response."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise ImportError("openai package not installed. Add 'openai' to requirements.txt.")
+    client = OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        max_tokens=2500,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": prompt},
+        ],
+        response_format={"type": "json_object"},  # enforces JSON output
+    )
+    return resp.choices[0].message.content.strip()
+
+
+def _call_gemini(prompt: str, system: str, api_key: str) -> str:
+    """Call Google Gemini 1.5 Pro API. Returns raw text response."""
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        raise ImportError("google-generativeai package not installed. Add it to requirements.txt.")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-pro",
+        system_instruction=system,
+        generation_config={"response_mime_type": "application/json", "max_output_tokens": 2500},
+    )
+    resp = model.generate_content(prompt)
+    return resp.text.strip()
+
+
+def _parse_json_response(raw: str) -> dict:
+    """Parse JSON from LLM response — strips markdown fences, handles variations."""
+    # Remove markdown fences
+    raw = re.sub(r'^```json\s*', '', raw)
+    raw = re.sub(r'^```\s*', '', raw)
+    raw = re.sub(r'\s*```$', '', raw)
+    raw = raw.strip()
+    # If response is wrapped in prose, extract the JSON object
+    if not raw.startswith('{'):
+        start = raw.find('{')
+        end   = raw.rfind('}')
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
+    return json.loads(raw)
+
 NODE_DESCRIPTIONS = {
     2:  "Serious violence / violent history — primary aggravating factor for DO designation",
     3:  "Psychopathy (PCL-R) — adversarial allegiance effects documented (Larsen 2024); cultural validity concerns (Ewert)",
@@ -226,58 +310,69 @@ def _get_api_key(api_key=None):
     import os
     return os.environ.get("ANTHROPIC_API_KEY")
 
-def analyze_document(content: str, doc_type: str, api_key=None) -> dict:
+def analyze_document(
+    content: str,
+    doc_type: str,
+    api_key: str = None,
+    provider: str = "claude",
+) -> dict:
     """
-    Send document to Claude for Tetrad-grounded Bayesian node analysis.
+    Send document to the selected LLM for Tetrad-grounded Bayesian node analysis.
 
-    API key resolved automatically from:
-      - Streamlit secrets (ANTHROPIC_API_KEY) when deployed on Streamlit Cloud
-      - ANTHROPIC_API_KEY environment variable when running locally
-      - api_key argument if explicitly passed
+    provider: "claude" (default, recommended) | "openai" | "gemini"
+
+    API key resolved automatically from Streamlit secrets, environment variable,
+    or api_key argument. Key name per provider:
+      claude  → ANTHROPIC_API_KEY
+      openai  → OPENAI_API_KEY
+      gemini  → GOOGLE_API_KEY
 
     Returns structured dict with per-node probability adjustments,
-    doctrinal reasoning, and supporting text from the document.
-    Each adjustment can be accepted or modified by the user before
-    feeding into the Bayesian network.
+    doctrinal reasoning, and supporting text. Each adjustment can be
+    accepted or modified before feeding into the Bayesian network.
+    Fully backward-compatible — existing calls without provider= use Claude.
     """
-    try:
-        resolved = _get_api_key(api_key)
-        client = anthropic.Anthropic(api_key=resolved) if resolved else anthropic.Anthropic()
+    provider = (provider or "claude").lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        provider = "claude"
 
-        node_desc_text = '\n'.join(
+    try:
+        resolved_key = _resolve_key(provider, api_key)
+
+        node_desc_text = "\n".join(
             f"  Node {nid}: {desc}"
             for nid, desc in NODE_DESCRIPTIONS.items()
         )
-
         prompt = ANALYSIS_PROMPT_TEMPLATE.format(
             doc_type=doc_type,
             content=content,
             node_desc=node_desc_text,
         )
+        system = _build_system_prompt()
 
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2500,
-            system=_build_system_prompt(),
-            messages=[{"role": "user", "content": prompt}],
-        )
+        # Route to the selected provider
+        if provider == "claude":
+            raw = _call_claude(prompt, system, resolved_key)
+        elif provider == "openai":
+            raw = _call_openai(prompt, system, resolved_key)
+        elif provider == "gemini":
+            raw = _call_gemini(prompt, system, resolved_key)
+        else:
+            raw = _call_claude(prompt, system, resolved_key)
 
-        raw = message.content[0].text.strip()
-        # Strip any markdown fences if present
-        raw = re.sub(r'^```json\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-        result = json.loads(raw)
+        result = _parse_json_response(raw)
+        result["_provider"] = provider  # record which model was used
         return result
 
     except json.JSONDecodeError as e:
         return {
-            "error": f"JSON parse error: {e}",
+            "error": f"JSON parse error ({provider}): {e}",
             "document_summary": "Analysis failed — could not parse LLM response.",
             "nodes": {},
         }
     except Exception as e:
         return {
-            "error": str(e),
+            "error": f"{provider}: {e}",
             "document_summary": f"Analysis failed: {e}",
             "nodes": {},
         }
