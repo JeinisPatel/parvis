@@ -328,16 +328,40 @@ def compute_do_risk(posteriors: dict) -> float:
     # evidentiary weight of violent history as indicator of genuine propensity
     # Node 7 = bail-denial cascade (weight 0.35)
     # Node 6 = ineffective counsel (weight 0.15) — partial effect mediated via N7 CPT
+    # ── Record reliability (Ch.3): bail-denial + ineffective counsel ─────────
+    # Coercive guilty pleas reduce violent history's reliability as evidence
+    # of genuine violent propensity. Tolppanen Report; Feeley (1979); Antic [2017].
     record_reliability = float(np.clip(
         1.0 - 0.35 * p.get(7, 0.5) - 0.15 * p.get(6, 0.5),
         0.40, 1.0
     ))
 
+    # ── Tool validity (Ewert v Canada [2018] SCC 30): Node 5 ─────────────────
+    # When Node 5 is High (culturally invalid tools applied), the outputs of
+    # PCL-R (Node 3) and Static-99R (Node 4) carry reduced evidentiary weight
+    # as indicators of genuine risk. This is the Ewert principle made operational:
+    # the tool's invalidity targets the tool's output directly, not just the
+    # general distortion framework. The formula discounts N3 and N4 by the
+    # degree of tool invalidity — separate from the general dst correction.
+    #
+    # tool_validity ∈ [0.30, 1.0]:
+    #   N5=0.10 (validated tools):    tool_validity ≈ 0.955  — near-full weight
+    #   N5=0.50 (mixed):              tool_validity ≈ 0.775  — 22% reduction
+    #   N5=0.85 (unvalidated):        tool_validity ≈ 0.618  — 38% reduction
+    #   N5=0.93 (Ewert fully engaged): tool_validity ≈ 0.582 — 42% reduction
+    #
+    # References: Ewert v Canada [2018] SCC 30 paras 52-75; Larsen et al (2024)
+    # d=1.08 adversarial allegiance; Venner et al (2021); thesis Ch.1 §1.4
+    tool_validity = float(np.clip(
+        1.0 - 0.45 * p.get(5, 0.5),
+        0.30, 1.0
+    ))
+
     raw = (
-        0.30 * p.get(2, 0.5) * record_reliability +   # Node 2 discounted by reliability
-        0.25 * p.get(3, 0.5) +                        # PCL-R — independent
-        0.20 * p.get(4, 0.5) +                        # Static-99R — independent
-        0.25 * p.get(18, 0.5)                         # Dynamic risk — independent
+        0.30 * p.get(2, 0.5) * record_reliability +  # N2: discounted by record reliability
+        0.25 * p.get(3, 0.5) * tool_validity +       # N3 PCL-R: discounted by Ewert (N5)
+        0.20 * p.get(4, 0.5) * tool_validity +       # N4 Static-99R: discounted by Ewert (N5)
+        0.25 * p.get(18, 0.5)                        # N18 dynamic risk: not a single tool
     )
     dst = (
         0.22 * posteriors.get(5, 0.5) +
