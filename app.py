@@ -54,11 +54,20 @@ st.markdown(wm + """
 *, .stMarkdown, .stText, select, input, label, .stSlider {
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
-/* Exclude file uploader button to prevent label duplication */
+/* File uploader — fully revert to system font to prevent label duplication */
+[data-testid="stFileUploader"],
+[data-testid="stFileUploader"] *,
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploaderDropzone"] *,
 [data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] button * {
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
-    letter-spacing: 0 !important;
+[data-testid="stFileUploaderDropzone"] button *,
+[data-testid="stFileUploaderDropzone"] button span,
+[data-testid="stFileUploaderDropzone"] button p,
+[data-testid="stFileUploaderDropzone"] small,
+[data-testid="stFileUploaderDropzone"] span {
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
+    letter-spacing: normal !important;
+    font-size: 14px !important;
 }
 /* ── End DM Sans block ── */
 /* ── File uploader button fix ── */
