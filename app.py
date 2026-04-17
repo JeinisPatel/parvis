@@ -334,7 +334,10 @@ with ct:
         alt="Ethical AI" /><span>.R.V.I.S</span>
     </div>
     <div class="ps">Probabilistic and Analytical Reasoning Virtual Intelligence System &nbsp;·&nbsp;
-    University of London &nbsp;·&nbsp; Ethical AI Initiative</div></div>""",unsafe_allow_html=True)
+    <span style="color:#185FA5;font-weight:500">University of London</span> &nbsp;·&nbsp;
+    Ethical AI Initiative &nbsp;·&nbsp;
+    <span style="color:#A32D2D;font-weight:500">Jeinis Patel, PhD Candidate and Barrister</span>
+    &nbsp;·&nbsp; &#169; 2026 Jeinis Patel</div></div>""",unsafe_allow_html=True)
 with cd:
     st.markdown(f"""<div class="dc" style="background:{bg};border:1px solid {bc}44;margin-top:4px">
     <div class="dl" style="color:{bc}">Node 20 · DO risk</div>
