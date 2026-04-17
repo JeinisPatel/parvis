@@ -49,6 +49,12 @@ wm = f"""
 
 st.markdown(wm + """
 <style>
+/* ── DM Sans font — remove this block to revert to system font ── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&display=swap');
+*, .stMarkdown, .stText, button, select, input, label, .stSlider {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+/* ── End DM Sans block ── */
 .pt{font-size:2.4rem;font-weight:800;letter-spacing:7px;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 .ps{font-size:.88rem;color:#777;margin-top:5px;letter-spacing:.3px;line-height:1.5}
 /* ── Evidence review — thick colored sliders ── */
