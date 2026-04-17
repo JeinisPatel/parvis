@@ -372,6 +372,27 @@ def compute_do_risk(posteriors: dict) -> float:
         0.08 * posteriors.get(17, 0.5) +
         0.05 * posteriors.get(16, 0.5)
     )
+
+    # ── Age burnout multiplier (Node 15 — temporal distortion) ────────────────
+    # Progressive attenuation when N15 is high (encoding advanced age).
+    # Operationalises the age-crime curve: violent recidivism drops substantially
+    # after 55 and approaches near-minimum by age 70-79+.
+    # This is ADDITIONAL to N15's contribution to dst — it captures the non-linear
+    # strong burnout at advanced ages that the linear dst term cannot fully represent.
+    #
+    # Schedule (N15 posterior → burnout_mult → effective raw reduction):
+    #   N15 < 0.65  (age <48):  1.00  — no additional correction
+    #   N15 = 0.75  (age ~55):  0.83  — 17% additional attenuation
+    #   N15 = 0.85  (age ~63):  0.66  — 34% attenuation
+    #   N15 = 0.92  (age ~70):  0.54  — 46% attenuation
+    #   N15 = 0.97  (age ~79):  0.46  — 54% attenuation
+    #
+    # References: Hanson RK (2018); Lussier & Healey (2009); Static-99R age
+    # adjustment tables; thesis Ch.3 §3.5 temporal distortion.
+    n15 = posteriors.get(15, 0.5)
+    burnout_mult = float(np.clip(1.0 - 1.70 * max(0.0, n15 - 0.65), 0.35, 1.0))
+    raw = raw * burnout_mult
+
     return float(np.clip(raw * (1.0 - 0.68 * dst) + 0.03, 0.05, 0.93))
 
 
