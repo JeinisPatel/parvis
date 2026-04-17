@@ -51,8 +51,14 @@ st.markdown(wm + """
 <style>
 /* ── DM Sans font — remove this block to revert to system font ── */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&display=swap');
-*, .stMarkdown, .stText, button, select, input, label, .stSlider {
+*, .stMarkdown, .stText, select, input, label, .stSlider {
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+/* Exclude file uploader button to prevent label duplication */
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] button * {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+    letter-spacing: 0 !important;
 }
 /* ── End DM Sans block ── */
 /* ── File uploader button fix ── */

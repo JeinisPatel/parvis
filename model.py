@@ -146,7 +146,11 @@ def build_model():
     # ── Node 1: Burden of proof (root — evidentiary constraint) ───────────────
     # This is always "active" — the constraint always applies.
     # P(High=active) = 1.0 (deterministic root)
-    cpd1 = TabularCPD(variable='1', variable_card=2, values=[[0.0], [1.0]])
+    # Node 1: Beyond reasonable doubt threshold — R v Gardiner [1982] 2 SCR 368
+    # P(High=threshold active) = 0.83, reflecting the normative BRD standard
+    # not empirical certainty. This encodes that the evidentiary constraint
+    # operates at the BRD level, not at 100% certainty.
+    cpd1 = TabularCPD(variable='1', variable_card=2, values=[[0.17], [0.83]])
 
     # ── Node 2: Violent history (parent: Node 1) ──────────────────────────────
     # Node 1 modulates threshold: when active (High), threshold enforced
@@ -428,7 +432,7 @@ def query_do_risk(engine, evidence: dict) -> dict:
 def get_default_priors() -> dict:
     """Return prior P(High) for each node (no evidence observed)."""
     return {
-        1: 1.00,  # Burden of proof — always active
+        1: 0.83,  # Burden of proof — beyond reasonable doubt per Gardiner [1982] 2 SCR 368
         2: 0.65,
         3: 0.45,
         4: 0.35,
