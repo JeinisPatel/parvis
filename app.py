@@ -177,18 +177,42 @@ def sdelta():
 
 # ── Inference ─────────────────────────────────────────────────────────────────
 def run_inf():
-    bev={}
-    for nid,prob in st.session_state.profile_ev.items(): bev[str(nid)]=1 if prob>=.5 else 0
-    for nid,prob in st.session_state.manual_ev.items(): bev[str(nid)]=1 if prob>=.5 else 0
-    bev.pop("20",None)
-    post=query_do_risk(st.session_state.engine,bev)
+    from model import compute_do_risk
+
+    # Architecture: VE gives structural network priors; profile_ev directly
+    # sets each observed node's posterior; Gladue/SCE apply as continuous
+    # corrections on top. This avoids the binary-collapse problem where
+    # converting profile floats to 0/1 forces all risk node posteriors to
+    # exactly 0.0, destroying all nuance in the Node 20 formula.
+
+    # Step 1: Run VE with no evidence → network structural priors
+    # Only pass very high-confidence manual evidence as hard binary
+    hard_ev={}
+    for nid,prob in st.session_state.manual_ev.items():
+        if prob>=0.85 or prob<=0.15:  # Only very certain manual overrides
+            hard_ev[str(nid)]=1 if prob>=0.5 else 0
+    hard_ev.pop("20",None)
+    post=query_do_risk(st.session_state.engine, hard_ev)
+
+    # Step 2: Apply profile evidence as direct continuous posterior values
+    # Profile_ev represents the case-specific probability for each node —
+    # we assign these directly rather than forcing binary collapse
+    for nid,prob in st.session_state.profile_ev.items():
+        if str(nid) not in hard_ev:
+            post[nid]=float(np.clip(prob,.05,.95))
+
+    # Step 3: Apply Gladue, Morris/Ellis SCE, and document adjustments
+    # These are additional continuous corrections ON TOP of the profile values.
+    # Always applied — no 'not in bev' guard (that was the original bug).
     for nid,d in {**gdelta(),**sdelta(),**st.session_state.doc_adj}.items():
-        if nid in post and str(nid) not in bev: post[nid]=float(np.clip(post[nid]+d,.05,.95))
-    raw=.30*post.get(2,.5)+.25*post.get(3,.5)+.20*post.get(4,.5)+.25*post.get(18,.5)
-    dst=.22*post.get(5,.5)+.18*post.get(6,.5)+.22*post.get(12,.5)+.15*post.get(14,.5)+.10*post.get(15,.5)+.08*post.get(17,.5)+.05*post.get(16,.5)
-    post[20]=float(np.clip(raw*(1-.68*dst)+.03,.05,.93))
+        post[nid]=float(np.clip(post.get(nid,0.5)+d,.05,.95))
+
+    # Step 4: Compute Node 20 using full model formula
+    # Includes: record reliability (N7/N6), Ewert tool validity (N5→N3/N4),
+    # and age burnout multiplier (N15). All from model.compute_do_risk.
+    post[20]=compute_do_risk(post)
     st.session_state.posteriors=post
-    st.session_state.qdiags=diagnose(post,bev,list(st.session_state.gladue_checked),
+    st.session_state.qdiags=diagnose(post,hard_ev,list(st.session_state.gladue_checked),
         list(st.session_state.sce_checked),st.session_state.profile_ev,st.session_state.conn)
 
 def _sync_profile_from_widgets():
@@ -196,29 +220,26 @@ def _sync_profile_from_widgets():
     Read all Case Profile widget values from st.session_state (set by their key= params)
     and recompute profile_ev. Called BEFORE the header renders so the DO score
     is always current — not one step behind.
-
-    Defaults MUST match the first item / default value of each widget so that
-    the initial state (no user interaction) gives a neutral, low-evidence baseline.
     """
     ss = st.session_state
-    # Defaults match widget starting values exactly
+    # Read widget values — use .get() with defaults matching widget defaults
     age    = ss.get("age", 35)
     idbg   = ss.get("id_bg", "Not recorded / unknown")
-    pclr   = ss.get("pclr", 0)            # slider min — no psychopathy evidence
-    s99    = ss.get("s99", 0)             # slider min — no sexual offence evidence
-    viol   = ss.get("viol", "None")       # first selectbox item
+    pclr   = ss.get("pclr", 20)
+    s99    = ss.get("s99", 3)
+    viol   = ss.get("viol", "Serious")
     fasd   = ss.get("fasd", "None / not assessed")
-    sub    = ss.get("sub", "None / in remission")    # first item
-    peers  = ss.get("peers", "None identified")      # first item
-    stab   = ss.get("stab", "Stable")                # first item
-    det    = ss.get("det", 0)             # slider min — no pre-trial detention
-    counsel= ss.get("counsel", "Adequate")            # first item
-    gr     = ss.get("gr", "Yes — full report before court")  # first item
-    tools  = ss.get("tools", "Culturally validated only")    # first item
-    pol    = ss.get("pol", "No evidence")             # first item
-    prov   = ss.get("prov", "Low DO designation rate") # first item
-    prog   = ss.get("prog", "Yes — full culturally grounded") # first item
-    rehab  = ss.get("rehab", "Strong — consistent")   # first item
+    sub    = ss.get("sub", "Moderate")
+    peers  = ss.get("peers", "Some — limited")
+    stab   = ss.get("stab", "Marginal")
+    det    = ss.get("det", 60)
+    counsel= ss.get("counsel", "Marginal")
+    gr     = ss.get("gr", "No report commissioned")
+    tools  = ss.get("tools", "Standard, no cultural qualification")
+    pol    = ss.get("pol", "Strong — documented over-surveillance")
+    prov   = ss.get("prov", "Medium rate")
+    prog   = ss.get("prog", "Limited availability")
+    rehab  = ss.get("rehab", "Minimal")
 
     isr = idbg in ["Indigenous — s.718.2(e) + Gladue","Black — Morris IRCA","Other racialized — Morris"]
     pev={}
@@ -256,7 +277,7 @@ def _sync_profile_from_widgets():
     # Sync connection/framework settings
     if "conn_s" in ss:  ss["conn"] = ss["conn_s"]
     if "enex_s" in ss:  ss["enex"] = ss["enex_s"]
-    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"].lower()  # radio returns capitalised
+    if "scefw_r" in ss: ss["scefw"] = ss["scefw_r"]
 
 
 _sync_profile_from_widgets()
