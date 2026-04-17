@@ -56,13 +56,16 @@ st.markdown(wm + """
 }
 /* ── End DM Sans block ── */
 /* ── File uploader button fix ── */
-[data-testid="stFileUploaderDropzone"] button {
-    min-width: 90px !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-}
-[data-testid="stFileUploadDropzone"] span {
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] button p,
+[data-testid="stFileUploaderDropzone"] button span {
     font-size: 0.82rem !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    letter-spacing: 0 !important;
+}
+[data-testid="stFileUploaderDropzone"] small {
+    font-size: 0.75rem !important;
 }
 .pt{font-size:2.4rem;font-weight:800;letter-spacing:7px;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 .ps{font-size:.88rem;color:#777;margin-top:5px;letter-spacing:.3px;line-height:1.5}
@@ -345,7 +348,7 @@ with ct:
         style="height:3.2rem;width:3.2rem;object-fit:contain;
                margin:0 -1px;vertical-align:middle;
                transform:translateY(0.25rem);
-               filter:invert(1) contrast(2.5) brightness(0.85);opacity:0.95"
+               filter:invert(1) contrast(2.2);opacity:0.92"
         alt="Ethical AI" /><span>.R.V.I.S</span>
     </div>
     <div class="ps"><em>Probabilistic and Analytical Reasoning Virtual Intelligence System</em> &nbsp;·&nbsp;
