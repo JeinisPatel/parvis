@@ -58,11 +58,14 @@ body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !im
 p, h1, h2, h3, h4, h5, label, select, input, textarea {
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
-/* Nuclear reset on file uploader — reverts ALL styles to browser default */
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] button * {
-    all: revert !important;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+/* Hide the SVG upload icon whose <title>upload</title> renders as visible text */
+[data-testid="stFileUploaderDropzone"] button svg {
+    display: none !important;
+}
+/* Clean up button font */
+[data-testid="stFileUploaderDropzone"] button {
+    font-family: 'DM Sans', -apple-system, sans-serif !important;
+    letter-spacing: normal !important;
 }
 /* ── End DM Sans block ── */
 /* ── File uploader button fix ── */
