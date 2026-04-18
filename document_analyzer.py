@@ -18,12 +18,59 @@ Architecture per Item 7:
 
 Important: The LLM provides guidance only. The user (judge, counsel, researcher)
 makes the final determination on weight to be assigned.
+
+─────────────────────────────────────────────────────────────────────────────────
+PATH A CHANGE LOG — April 2026
+─────────────────────────────────────────────────────────────────────────────────
+Five targeted edits; no public API changes; app.py integration unaffected.
+
+  [1] _build_system_prompt() fallback wired up correctly.
+      Previously: if `from doctrine import build_doctrinal_prompt` failed,
+      the analyzer returned a literal "(Doctrine module not available…)"
+      string as its doctrinal section, silently stripping the LLM of its
+      Tetrad anchor. _SYSTEM_PROMPT_FALLBACK was defined but never reachable.
+      Now: broadened to except Exception (catches partial imports, syntax
+      errors, etc.) and uses _SYSTEM_PROMPT_FALLBACK, which retains the
+      Tetrad content.
+
+  [2] Removed duplicate _get_api_key().
+      _resolve_key() (provider-aware) is the canonical resolver. The old
+      Anthropic-only _get_api_key() was shadowed and never called from the
+      analyze path.
+
+  [3] ANALYZER_NODE_IDS made the single point of coordination between
+      NODE_DESCRIPTIONS, the JSON schema, and the downstream consumers in
+      model.py / doctrine.py. NODE_DESCRIPTIONS values remain verbatim —
+      the carefully-written doctrinal anchors ("Ewert v Canada [2018]",
+      "Larsen 2024", etc.) are preserved to avoid silent prompt drift.
+      A _verify_node_coverage() helper runs on import and logs a warning
+      if ANALYZER_NODE_IDS diverges from NODE_META (model.py) or
+      NODE_DOCTRINE (doctrine.py).
+
+  [4] JSON schema skeleton in the analysis prompt is generated from
+      ANALYZER_NODE_IDS rather than hardcoded. ANALYSIS_PROMPT_TEMPLATE
+      is replaced by _build_analysis_prompt() for the same reason —
+      a single call-time construction keeps the prompt and the
+      analyzer-covered node set in lockstep.
+
+  [5] _validate_analysis() added. Coerces delta/confidence to bounded
+      floats, drops malformed node entries, and ensures top-level fields
+      are the types app.py expects. Prevents the tab from crashing if a
+      provider returns a string where a float is expected.
+
+No changes to: extract_text_from_upload(), _infer_doc_type(),
+_resolve_key(), _call_claude/_openai/_gemini(), _parse_json_response(),
+format_analysis_for_display(), model pin, char cap, or cache behaviour.
+─────────────────────────────────────────────────────────────────────────────────
 """
 
 import json
+import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 import anthropic
+
+log = logging.getLogger(__name__)
 
 # ── Provider configuration ────────────────────────────────────────────────────
 SUPPORTED_PROVIDERS = {
@@ -109,6 +156,18 @@ def _parse_json_response(raw: str) -> dict:
             raw = raw[start:end+1]
     return json.loads(raw)
 
+
+# ── Analyzer node coverage — single point of coordination ────────────────────
+# These are the nodes the analyzer surfaces evidence for. ANALYZER_NODE_IDS is
+# the authoritative set; NODE_DESCRIPTIONS keys must equal it; the JSON schema
+# below is generated from it; downstream sync with model.NODE_META and
+# doctrine.NODE_DOCTRINE is verified on import (logs a warning on drift).
+#
+# To extend coverage (e.g. add nodes 16/17/19), add the ID here AND add a
+# description to NODE_DESCRIPTIONS. The prompt skeleton will adapt automatically.
+
+ANALYZER_NODE_IDS: Set[int] = {2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 18}
+
 NODE_DESCRIPTIONS = {
     2:  "Serious violence / violent history — primary aggravating factor for DO designation",
     3:  "Psychopathy (PCL-R) — adversarial allegiance effects documented (Larsen 2024); cultural validity concerns (Ewert)",
@@ -126,13 +185,68 @@ NODE_DESCRIPTIONS = {
     18: "Dynamic risk factors — substance use, antisocial peers, housing instability (assess against structural context)",
 }
 
+
+def _verify_node_coverage() -> None:
+    """Soft-check that ANALYZER_NODE_IDS, NODE_DESCRIPTIONS, and the canonical
+    sources (model.NODE_META, doctrine.NODE_DOCTRINE) are in sync. Logs
+    warnings on drift but never raises — the analyzer must stay operational
+    even if one of the upstream modules fails to import.
+    """
+    # Internal consistency: descriptions must match the declared ID set
+    desc_keys = set(NODE_DESCRIPTIONS.keys())
+    if desc_keys != ANALYZER_NODE_IDS:
+        missing = ANALYZER_NODE_IDS - desc_keys
+        extra = desc_keys - ANALYZER_NODE_IDS
+        if missing:
+            log.warning("NODE_DESCRIPTIONS missing entries for: %s", sorted(missing))
+        if extra:
+            log.warning("NODE_DESCRIPTIONS has entries not in ANALYZER_NODE_IDS: %s", sorted(extra))
+
+    # Cross-check with model.NODE_META (which nodes accept evidence)
+    try:
+        from model import NODE_META
+        meta_ev_ids = {nid for nid, meta in NODE_META.items() if meta.get("ev")}
+        orphaned = ANALYZER_NODE_IDS - set(NODE_META.keys())
+        if orphaned:
+            log.warning("ANALYZER_NODE_IDS contains nodes absent from NODE_META: %s", sorted(orphaned))
+        # Nodes that NODE_META marks as evidence-accepting but the analyzer ignores
+        # are Path B territory, not a bug — report at INFO only.
+        uncovered = meta_ev_ids - ANALYZER_NODE_IDS
+        if uncovered:
+            log.info("NODE_META evidence-accepting nodes not covered by analyzer "
+                     "(Path B candidates): %s", sorted(uncovered))
+    except Exception as e:
+        log.info("Could not cross-check against model.NODE_META: %s", e)
+
+    # Cross-check with doctrine.NODE_DOCTRINE
+    try:
+        from doctrine import NODE_DOCTRINE
+        undocumented = ANALYZER_NODE_IDS - set(NODE_DOCTRINE.keys())
+        if undocumented:
+            log.warning("ANALYZER_NODE_IDS contains nodes absent from NODE_DOCTRINE: %s",
+                        sorted(undocumented))
+    except Exception as e:
+        log.info("Could not cross-check against doctrine.NODE_DOCTRINE: %s", e)
+
+
+# Run the check on import (silent in the normal case)
+_verify_node_coverage()
+
+
 def _build_system_prompt() -> str:
-    """Build system prompt dynamically from doctrine.py — updates automatically."""
+    """Build system prompt dynamically from doctrine.py — updates automatically.
+
+    If doctrine.py fails to import for any reason (missing file, partial
+    import, syntax error), fall back to _SYSTEM_PROMPT_FALLBACK which retains
+    the core Tetrad content. The previous implementation returned a placeholder
+    string in that path, which silently stripped the LLM of doctrinal context.
+    """
     try:
         from doctrine import build_doctrinal_prompt
         doctrinal_section = build_doctrinal_prompt()
-    except ImportError:
-        doctrinal_section = "(Doctrine module not available — using base prompt)"
+    except Exception as e:
+        log.warning("doctrine.py unavailable (%s) — using static Tetrad fallback.", e)
+        return _SYSTEM_PROMPT_FALLBACK
     return f"""You are PARVIS, a Bayesian sentencing analysis system developed for PhD research
 by Jeinis Patel, PhD Candidate and Barrister, University of London (QMUL & LSE).
 
@@ -150,7 +264,9 @@ CRITICAL: You are providing guidance to assist the user — NOT making a determi
 Flag Ewert non-compliance, Gladue/Morris misapplication, and collider bias where present.
 Return ONLY valid JSON. No preamble."""
 
-# Keep the static system prompt as fallback but make the function primary
+
+# Used when doctrine.py is unavailable. Retains the core Tetrad anchor so the
+# LLM is never prompted without doctrinal context.
 _SYSTEM_PROMPT_FALLBACK = """You are a legal AI expert analyzing documents for the PARVIS Bayesian Sentencing Network.
 PARVIS operationalises the Canadian sentencing Tetrad:
 - R v Gladue [1999] 1 SCR 688: mandatory consideration of systemic/background factors for Indigenous offenders
@@ -182,7 +298,25 @@ CRITICAL INSTRUCTIONS:
 
 Return ONLY valid JSON. No preamble, no explanation outside JSON."""
 
-ANALYSIS_PROMPT_TEMPLATE = """Document type: {doc_type}
+
+def _build_analysis_prompt(doc_type: str, content: str) -> str:
+    """Construct the per-call analysis prompt.
+
+    Replaces the previous module-level ANALYSIS_PROMPT_TEMPLATE — building
+    inline lets the JSON schema skeleton and the node-description block
+    derive from ANALYZER_NODE_IDS / NODE_DESCRIPTIONS so they never drift.
+    """
+    node_desc_text = "\n".join(
+        f"  Node {nid}: {NODE_DESCRIPTIONS[nid]}"
+        for nid in sorted(ANALYZER_NODE_IDS)
+        if nid in NODE_DESCRIPTIONS
+    )
+    node_schema = ",\n".join(
+        f'    "{nid}":  {{"delta": 0.0, "confidence": 0.0, '
+        f'"citations": [], "reasoning": "", "direction": ""}}'
+        for nid in sorted(ANALYZER_NODE_IDS)
+    )
+    return f"""Document type: {doc_type}
 Document content:
 ---
 {content}
@@ -194,20 +328,7 @@ Analyze this document and return a JSON object in this exact format:
   "applicable_framework": "gladue" | "morris" | "ellis" | "all" | "none",
   "connection_assessment": "absent" | "weak" | "moderate" | "strong" | "direct",
   "nodes": {{
-    "2":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "3":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "4":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "5":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "6":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "7":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "9":  {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "10": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "11": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "12": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "13": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "14": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "15": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}},
-    "18": {{"delta": 0.0, "confidence": 0.0, "citations": [], "reasoning": "", "direction": ""}}
+{node_schema}
   }},
   "doctrinal_flags": [],
   "ewert_concern": false,
@@ -216,7 +337,7 @@ Analyze this document and return a JSON object in this exact format:
 }}
 
 Node descriptions for reference:
-{node_desc}
+{node_desc_text}
 
 Set delta=0.0 and confidence=0.0 for nodes where the document contains no relevant evidence.
 Only assign non-zero deltas where the document contains clear, specific evidence."""
@@ -291,24 +412,116 @@ def _infer_doc_type(content: str, filename: str) -> str:
         return "Legal document"
 
 
+# ── Output validation ─────────────────────────────────────────────────────────
+# LLM output is text. Even with response_format={"type":"json_object"} or
+# response_mime_type="application/json", providers have been known to return
+# strings where floats were expected, omit required fields, or nest data
+# unexpectedly. Validation here coerces what we can, drops what we can't, and
+# guarantees app.py never hits a .get("delta") on a malformed entry.
 
-def _get_api_key(api_key=None):
-    """
-    Resolve Anthropic API key in priority order:
-    1. Explicitly passed argument
-    2. Streamlit secrets (ANTHROPIC_API_KEY) — works on Streamlit Cloud
-    3. Environment variable (ANTHROPIC_API_KEY) — works locally
-    """
-    if api_key:
-        return api_key
+_VALID_DIRECTIONS = {"", "increases_risk", "reduces_risk",
+                     "distortion_present", "distortion_absent"}
+_VALID_FRAMEWORKS = {"gladue", "morris", "ellis", "all", "none"}
+_VALID_CONNECTIONS = {"absent", "weak", "moderate", "strong", "direct",
+                      "not assessed"}
+
+
+def _coerce_bounded_float(value, lo: float, hi: float) -> Optional[float]:
+    """Return float clipped to [lo, hi], or None if not coercible."""
     try:
-        import streamlit as st
-        if hasattr(st, "secrets") and "ANTHROPIC_API_KEY" in st.secrets:
-            return st.secrets["ANTHROPIC_API_KEY"]
-    except Exception:
-        pass
-    import os
-    return os.environ.get("ANTHROPIC_API_KEY")
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # NaN check
+        return None
+    return max(lo, min(hi, f))
+
+
+def _validate_analysis(raw: dict) -> dict:
+    """Coerce LLM output into the shape app.py expects. Never raises.
+
+    Contract with app.py (see app.py lines 740–756):
+      - result["_provider"] preserved if present (set by caller)
+      - result["applicable_framework"] is str
+      - result["connection_assessment"] is str
+      - result["document_summary"] is str
+      - result["nodes"] is dict[str, dict] with delta (float) and
+        confidence (float) always numeric
+      - result["doctrinal_flags"] is list[str]
+      - result["ewert_concern"] is bool
+    """
+    if not isinstance(raw, dict):
+        return {
+            "document_summary": "Analysis returned non-dict payload — discarded.",
+            "applicable_framework": "none",
+            "connection_assessment": "not assessed",
+            "nodes": {},
+            "doctrinal_flags": [],
+            "ewert_concern": False,
+            "gladue_factors_present_but_unengaged": [],
+            "morris_connection_note": "",
+        }
+
+    framework = str(raw.get("applicable_framework", "none")).lower().strip()
+    if framework not in _VALID_FRAMEWORKS:
+        framework = "none"
+
+    connection = str(raw.get("connection_assessment", "not assessed")).lower().strip()
+    if connection not in _VALID_CONNECTIONS:
+        connection = "not assessed"
+
+    out = {
+        "document_summary":    str(raw.get("document_summary", "")),
+        "applicable_framework": framework,
+        "connection_assessment": connection,
+        "doctrinal_flags":     [str(f) for f in (raw.get("doctrinal_flags") or []) if f],
+        "ewert_concern":       bool(raw.get("ewert_concern", False)),
+        "gladue_factors_present_but_unengaged": [
+            str(f) for f in (raw.get("gladue_factors_present_but_unengaged") or []) if f
+        ],
+        "morris_connection_note": str(raw.get("morris_connection_note", "")),
+        "nodes": {},
+    }
+
+    nodes_in = raw.get("nodes")
+    if not isinstance(nodes_in, dict):
+        return out
+
+    dropped = []
+    for key, entry in nodes_in.items():
+        if not isinstance(entry, dict):
+            dropped.append(key)
+            continue
+
+        delta = _coerce_bounded_float(entry.get("delta", 0), -0.30, 0.30)
+        confidence = _coerce_bounded_float(entry.get("confidence", 0), 0.0, 1.0)
+        if delta is None or confidence is None:
+            dropped.append(key)
+            continue
+
+        citations = entry.get("citations") or []
+        if not isinstance(citations, list):
+            citations = [citations]
+        citations = [str(c) for c in citations if c]
+
+        direction = str(entry.get("direction", "")).strip()
+        if direction not in _VALID_DIRECTIONS:
+            direction = ""
+
+        out["nodes"][str(key)] = {
+            "delta":      delta,
+            "confidence": confidence,
+            "citations":  citations,
+            "reasoning":  str(entry.get("reasoning", "")),
+            "direction":  direction,
+        }
+
+    if dropped:
+        log.info("Dropped %d malformed node entr%s from LLM output: %s",
+                 len(dropped), "y" if len(dropped) == 1 else "ies", dropped)
+
+    return out
+
 
 def analyze_document(
     content: str,
@@ -339,15 +552,7 @@ def analyze_document(
     try:
         resolved_key = _resolve_key(provider, api_key)
 
-        node_desc_text = "\n".join(
-            f"  Node {nid}: {desc}"
-            for nid, desc in NODE_DESCRIPTIONS.items()
-        )
-        prompt = ANALYSIS_PROMPT_TEMPLATE.format(
-            doc_type=doc_type,
-            content=content,
-            node_desc=node_desc_text,
-        )
+        prompt = _build_analysis_prompt(doc_type, content)
         system = _build_system_prompt()
 
         # Route to the selected provider
@@ -360,7 +565,8 @@ def analyze_document(
         else:
             raw = _call_claude(prompt, system, resolved_key)
 
-        result = _parse_json_response(raw)
+        parsed = _parse_json_response(raw)
+        result = _validate_analysis(parsed)
         result["_provider"] = provider  # record which model was used
         return result
 
