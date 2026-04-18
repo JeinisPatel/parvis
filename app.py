@@ -725,6 +725,34 @@ with TABS[7]:
                            type="password", key="ak")
     up=st.file_uploader("Upload document",type=["txt","pdf","docx"],key="doc_up")
     if up:
+        # ── Jurisdiction override (stare decisis layer) ────────────────────
+        # Auto-detect runs if either dropdown is left on "Auto-detect".
+        # Explicit selection forces that value rather than inference from text.
+        col_prov_j, col_lvl_j = st.columns(2)
+        with col_prov_j:
+            prov_choice = st.selectbox(
+                "Document jurisdiction",
+                ["Auto-detect", "ON — Ontario", "BC — British Columbia",
+                 "AB — Alberta", "QC — Quebec", "SK — Saskatchewan",
+                 "MB — Manitoba", "NS — Nova Scotia", "NB — New Brunswick",
+                 "NL — Newfoundland and Labrador", "PE — Prince Edward Island",
+                 "YT — Yukon", "NT — Northwest Territories", "NU — Nunavut"],
+                key="doc_prov",
+                help="Province the document originates from. Affects binding "
+                     "force of cited authorities under Canadian stare decisis. "
+                     "Leave on Auto-detect to infer from document text.",
+            )
+        with col_lvl_j:
+            lvl_choice = st.selectbox(
+                "Court level",
+                ["Auto-detect", "CA — Court of Appeal",
+                 "SC — Superior trial court (KB/QB/SC)",
+                 "PC — Provincial/inferior court"],
+                key="doc_lvl",
+                help="Court level of the document. Superior trial courts are "
+                     "called King's Bench (AB/SK/MB/NB), Superior Court of "
+                     "Justice (ON), or Supreme Court of [Province] (BC/NS/NL/PE).",
+            )
         dt_override=st.selectbox("Document type",["Auto-detect","Gladue report","IRCA",
             "Psychometric (PCL-R)","Psychometric (Static-99R)","FASD assessment",
             "Bail hearing record","Prior sentencing decision","Court transcript",
@@ -736,9 +764,51 @@ with TABS[7]:
                 with st.spinner("Analyzing against Tetrad framework..."):
                     content,auto_type=extract_text_from_upload(up)
                     dt=auto_type if dt_override=="Auto-detect" else dt_override
-                    result=analyze_document(content,dt,ak or None,provider=provider)
+                    # Resolve jurisdiction overrides — None triggers auto-detect
+                    doc_jur_arg = None if prov_choice == "Auto-detect" else prov_choice.split(" — ")[0].lower()
+                    doc_lvl_arg = None if lvl_choice == "Auto-detect" else lvl_choice.split(" — ")[0].lower()
+                    result=analyze_document(content,dt,ak or None,provider=provider,
+                                            doc_jurisdiction=doc_jur_arg, doc_level=doc_lvl_arg)
                 st.success(f"Complete · {dt} · {result.get('_provider',provider).upper()} · Framework: {result.get('applicable_framework','?').upper()} · Connection: {result.get('connection_assessment','?')}")
                 st.markdown(f"*{result.get('document_summary','')}*")
+                # ── Stare decisis: jurisdiction and splits ───────────────
+                sd = result.get("stare_decisis", {}) or {}
+                sd_jur = sd.get("document_jurisdiction")
+                sd_lvl = sd.get("document_court_level")
+                sd_src = sd.get("jurisdiction_source", "undetermined")
+                if sd_jur or sd_lvl:
+                    _PROV_NAMES = {"federal":"Federal","on":"Ontario","bc":"British Columbia",
+                                   "ab":"Alberta","qc":"Quebec","sk":"Saskatchewan",
+                                   "mb":"Manitoba","ns":"Nova Scotia","nb":"New Brunswick",
+                                   "nl":"Newfoundland and Labrador","pe":"Prince Edward Island",
+                                   "yt":"Yukon","nt":"Northwest Territories","nu":"Nunavut"}
+                    _LVL_NAMES = {"ca":"Court of Appeal","sc":"superior trial court",
+                                  "pc":"provincial/inferior court"}
+                    jur_label = _PROV_NAMES.get(sd_jur, sd_jur or "undetermined")
+                    lvl_label = _LVL_NAMES.get(sd_lvl, sd_lvl or "undetermined")
+                    src_color = "#3B6D11" if sd_src.startswith("explicit") else "#BA7517" if "high" in sd_src else "#888"
+                    st.markdown(
+                        f"<div style='background:#f8f6f1;border-left:3px solid {src_color};"
+                        f"padding:8px 14px;margin:8px 0;border-radius:0 6px 6px 0;font-size:13px'>"
+                        f"<b style='color:#1F3A5F'>Stare decisis — document context</b><br>"
+                        f"<span style='color:#555'>Jurisdiction: <b>{jur_label}</b> · "
+                        f"Court level: <b>{lvl_label}</b> · "
+                        f"<span style='color:{src_color}'>source: {sd_src}</span></span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info("Document jurisdiction could not be determined. "
+                            "Cross-province binding force cannot be computed for this analysis. "
+                            "Use the Document jurisdiction dropdown above to set it manually.")
+                # Inter-provincial splits — high-value diagnostic
+                splits = sd.get("inter_provincial_splits", []) or []
+                for spl in splits:
+                    provs = ", ".join(p.upper() for p in spl.get("provinces", []))
+                    st.warning(
+                        f"⚖️  **Inter-provincial CA split detected** ({provs}) — "
+                        f"{spl.get('note','')}"
+                    )
                 st.markdown("#### Suggested node adjustments")
                 acc=dict(st.session_state.doc_adj)
                 sig={k:v for k,v in result.get("nodes",{}).items() if abs(v.get("delta",0))>.02 and v.get("confidence",0)>.1}
@@ -747,7 +817,36 @@ with TABS[7]:
                         nid=int(ns);m=NODE_META.get(nid);col=TC.get(m.get("type","risk"),"#888") if m else "#888"
                         with st.expander(f"N{nid}: {m['name'] if m else '?'} — {'↑' if nd['delta']>0 else '↓'} {abs(nd['delta']):.2f} (conf {nd['confidence']:.0%})"):
                             st.markdown(f"**Reasoning:** {nd.get('reasoning','')}")
-                            for c in nd.get("citations",[])[:3]: st.markdown(f"> *{c}*")
+                            # Binding-force badges for each citation
+                            _BF_STYLES = {
+                                "binding":              ("#3B6D11", "BINDING"),
+                                "strongly_persuasive":  ("#BA7517", "STRONGLY PERSUASIVE"),
+                                "persuasive":           ("#888888", "PERSUASIVE"),
+                                "under_review":         ("#185FA5", "UNDER REVIEW"),
+                                "not_applicable":       ("#A32D2D", "NOT APPLICABLE"),
+                                "unknown":              ("#aaaaaa", "UNCLASSIFIED"),
+                            }
+                            try:
+                                from stare_decisis import classify_authority, binding_force as _bf
+                                _sd_ready = True
+                            except Exception:
+                                _sd_ready = False
+                            for c in nd.get("citations",[])[:3]:
+                                badge_html = ""
+                                if _sd_ready and sd_jur:
+                                    try:
+                                        meta = classify_authority(c)
+                                        force = _bf(sd_jur, sd_lvl, meta)
+                                        bcol, blabel = _BF_STYLES.get(force, _BF_STYLES["unknown"])
+                                        badge_html = (
+                                            f"<span style='background:{bcol};color:white;"
+                                            f"font-size:10px;font-weight:600;padding:2px 7px;"
+                                            f"border-radius:3px;letter-spacing:.5px;"
+                                            f"margin-right:6px;vertical-align:middle'>{blabel}</span>"
+                                        )
+                                    except Exception:
+                                        pass
+                                st.markdown(f"{badge_html}> *{c}*", unsafe_allow_html=True)
                             if st.checkbox(f"Accept adjustment for N{nid}",key=f"acc_{nid}_{len(st.session_state.doc_res)}"): acc[nid]=nd["delta"]
                             elif nid in acc: del acc[nid]
                     st.session_state.doc_adj=acc
