@@ -76,6 +76,21 @@ reach the Bayesian network correctly. Nodes 16 and 17 appear directly
 in the compute_do_risk distortion sum; node 19 shifts only its own
 posterior and doesn't affect DO risk directly.
 ─────────────────────────────────────────────────────────────────────────────────
+STARE DECISIS CHANGE — April 2026
+─────────────────────────────────────────────────────────────────────────────────
+Added a stare decisis layer computing the binding force of each authority
+relative to the document under analysis. New optional arguments to
+analyze_document(): doc_jurisdiction and doc_level. When not supplied, the
+system auto-detects using stare_decisis.infer_document_jurisdiction().
+The system prompt gains a classification block listing every authority
+grouped by binding force (binding / strongly_persuasive / persuasive /
+not_applicable / under_review). The result gains a top-level
+'stare_decisis' field reporting the inferred jurisdiction, detection
+confidence, and any inter-provincial Court-of-Appeal splits detected
+across the LLM's cited authorities. Fully backward-compatible: callers
+that don't pass doc_jurisdiction get auto-detection; callers that don't
+read result['stare_decisis'] see no change.
+─────────────────────────────────────────────────────────────────────────────────
 """
 
 import json
@@ -251,13 +266,21 @@ def _verify_node_coverage() -> None:
 _verify_node_coverage()
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(
+    doc_jurisdiction: Optional[str] = None,
+    doc_level: Optional[str] = None,
+) -> str:
     """Build system prompt dynamically from doctrine.py — updates automatically.
 
     If doctrine.py fails to import for any reason (missing file, partial
     import, syntax error), fall back to _SYSTEM_PROMPT_FALLBACK which retains
     the core Tetrad content. The previous implementation returned a placeholder
     string in that path, which silently stripped the LLM of doctrinal context.
+
+    When doc_jurisdiction and doc_level are provided (or auto-detected), a
+    stare decisis section is inserted that classifies every known authority
+    by its binding force relative to the document. The LLM is instructed to
+    respect this classification rather than reason about hierarchy itself.
     """
     try:
         from doctrine import build_doctrinal_prompt
@@ -265,10 +288,15 @@ def _build_system_prompt() -> str:
     except Exception as e:
         log.warning("doctrine.py unavailable (%s) — using static Tetrad fallback.", e)
         return _SYSTEM_PROMPT_FALLBACK
+
+    stare_section = _build_stare_decisis_section(doc_jurisdiction, doc_level)
+
     return f"""You are PARVIS, a Bayesian sentencing analysis system developed for PhD research
 by Jeinis Patel, PhD Candidate and Barrister, University of London (QMUL & LSE).
 
 {doctrinal_section}
+
+{stare_section}
 
 Your task: analyse the provided document and identify evidence relevant to each PARVIS node.
 For each relevant node return:
@@ -280,7 +308,102 @@ For each relevant node return:
 
 CRITICAL: You are providing guidance to assist the user — NOT making a determination.
 Flag Ewert non-compliance, Gladue/Morris misapplication, and collider bias where present.
+When you cite an authority in your reasoning, respect the binding force classification
+provided above — do not treat a strongly persuasive authority as binding.
 Return ONLY valid JSON. No preamble."""
+
+
+def _build_stare_decisis_section(
+    doc_jurisdiction: Optional[str],
+    doc_level: Optional[str],
+) -> str:
+    """Build the stare decisis authority-classification block for the prompt.
+
+    If stare_decisis.py is unavailable or the document jurisdiction is
+    undetermined, returns a short note rather than failing.
+    """
+    try:
+        from stare_decisis import (
+            classify_authorities_for_prompt, BindingForce,
+        )
+    except Exception as e:
+        log.info("stare_decisis.py unavailable (%s) — no binding-force layer.", e)
+        return "STARE DECISIS LAYER: unavailable (stare_decisis.py not loaded)."
+
+    doc_desc = _format_doc_descriptor(doc_jurisdiction, doc_level)
+    header = f"""STARE DECISIS — BINDING FORCE RELATIVE TO THIS DOCUMENT
+═══════════════════════════════════════════════════════════════════
+Document under analysis: {doc_desc}
+
+The authorities below are classified by their binding force RELATIVE TO
+THIS DOCUMENT under Canadian stare decisis rules:
+
+  BINDING              — must be followed on the rule it stands for
+  STRONGLY_PERSUASIVE  — another province's CA; not binding, but carries
+                         significant weight
+  PERSUASIVE           — informative only; no doctrinal compulsion
+  NOT_APPLICABLE       — authority has been overruled
+  UNDER_REVIEW         — under appeal to the SCC; currently good law but
+                         may change
+
+Do not relitigate these classifications. They are computed deterministically
+from court-level and jurisdiction metadata. Your job is to determine whether
+the RULE a given authority stands for actually applies to the facts of this
+document."""
+
+    try:
+        classifications = classify_authorities_for_prompt(doc_jurisdiction, doc_level)
+    except Exception as e:
+        log.warning("classify_authorities_for_prompt failed: %s", e)
+        return header + "\n\n(Authority classification unavailable for this run.)"
+
+    # Group by binding force for readable presentation
+    groups: Dict[str, List[dict]] = {}
+    for entry in classifications:
+        groups.setdefault(entry["binding_force"], []).append(entry)
+
+    order = [BindingForce.BINDING, BindingForce.STRONGLY_PERSUASIVE,
+             BindingForce.PERSUASIVE, BindingForce.UNDER_REVIEW,
+             BindingForce.NOT_APPLICABLE, BindingForce.UNKNOWN]
+
+    lines = [header, ""]
+    for force in order:
+        entries = groups.get(force, [])
+        if not entries:
+            continue
+        lines.append(f"── {force.upper()} ──")
+        # Sort within group for stable output
+        for e in sorted(entries, key=lambda x: x["citation"]):
+            lines.append(f"  • {e['citation']}  "
+                         f"[{e['court_level']}/{e.get('jurisdiction','none')}"
+                         f"/{e.get('status','unknown')}]")
+        lines.append("")
+
+    lines.append("═══════════════════════════════════════════════════════════════════")
+    return "\n".join(lines)
+
+
+def _format_doc_descriptor(doc_jur: Optional[str], doc_lvl: Optional[str]) -> str:
+    """Human-readable descriptor for the document, for insertion in the prompt."""
+    if not doc_jur or doc_jur == "unknown":
+        return ("jurisdiction UNDETERMINED — binding force cannot be computed "
+                "with certainty; authorities will be reported as strongly "
+                "persuasive at best")
+    jur_names = {
+        "federal": "federal (Canada)", "on": "Ontario", "bc": "British Columbia",
+        "ab": "Alberta", "qc": "Quebec", "sk": "Saskatchewan",
+        "mb": "Manitoba", "ns": "Nova Scotia", "nb": "New Brunswick",
+        "nl": "Newfoundland and Labrador", "pe": "Prince Edward Island",
+        "yt": "Yukon", "nt": "Northwest Territories", "nu": "Nunavut",
+    }
+    lvl_names = {
+        "ca": "Court of Appeal", "sc": "superior trial court",
+        "pc": "provincial/inferior court",
+    }
+    jn = jur_names.get(doc_jur, doc_jur)
+    if doc_lvl and doc_lvl in lvl_names:
+        return f"{jn} — {lvl_names[doc_lvl]}"
+    return f"{jn} — court level undetermined"
 
 
 # Used when doctrine.py is unavailable. Retains the core Tetrad anchor so the
@@ -546,6 +669,8 @@ def analyze_document(
     doc_type: str,
     api_key: str = None,
     provider: str = "claude",
+    doc_jurisdiction: Optional[str] = None,
+    doc_level: Optional[str] = None,
 ) -> dict:
     """
     Send document to the selected LLM for Tetrad-grounded Bayesian node analysis.
@@ -558,20 +683,45 @@ def analyze_document(
       openai  → OPENAI_API_KEY
       gemini  → GOOGLE_API_KEY
 
+    doc_jurisdiction: 'on', 'bc', 'ab', ... — the document's province.
+                      If None, inferred from content via
+                      stare_decisis.infer_document_jurisdiction().
+    doc_level:        'ca', 'sc', 'pc' — the document's court level.
+                      If None, inferred alongside jurisdiction.
+
     Returns structured dict with per-node probability adjustments,
-    doctrinal reasoning, and supporting text. Each adjustment can be
-    accepted or modified before feeding into the Bayesian network.
-    Fully backward-compatible — existing calls without provider= use Claude.
+    doctrinal reasoning, supporting text, and a stare_decisis section
+    containing the document's inferred jurisdiction, authority
+    classifications, and any detected inter-provincial splits.
+    Fully backward-compatible — existing calls without provider=/doc_* use
+    Claude and auto-detection.
     """
     provider = (provider or "claude").lower()
     if provider not in SUPPORTED_PROVIDERS:
         provider = "claude"
 
+    # ── Stare decisis: resolve document jurisdiction ──────────────────────────
+    # Priority: explicit args > auto-detection > None (unknown).
+    jurisdiction_source = "explicit"
+    detection = None
+    if doc_jurisdiction is None or doc_level is None:
+        try:
+            from stare_decisis import infer_document_jurisdiction
+            detection = infer_document_jurisdiction(content)
+            if doc_jurisdiction is None:
+                doc_jurisdiction = detection.get("province")
+            if doc_level is None:
+                doc_level = detection.get("court_level")
+            jurisdiction_source = f"auto-detected ({detection.get('confidence')})"
+        except Exception as e:
+            log.info("Jurisdiction auto-detection failed: %s", e)
+            jurisdiction_source = "undetermined"
+
     try:
         resolved_key = _resolve_key(provider, api_key)
 
         prompt = _build_analysis_prompt(doc_type, content)
-        system = _build_system_prompt()
+        system = _build_system_prompt(doc_jurisdiction, doc_level)
 
         # Route to the selected provider
         if provider == "claude":
@@ -585,7 +735,12 @@ def analyze_document(
 
         parsed = _parse_json_response(raw)
         result = _validate_analysis(parsed)
-        result["_provider"] = provider  # record which model was used
+        result["_provider"] = provider
+
+        # Attach stare_decisis diagnostic block
+        result["stare_decisis"] = _build_stare_decisis_result(
+            doc_jurisdiction, doc_level, jurisdiction_source, detection, result
+        )
         return result
 
     except json.JSONDecodeError as e:
@@ -600,6 +755,49 @@ def analyze_document(
             "document_summary": f"Analysis failed: {e}",
             "nodes": {},
         }
+
+
+def _build_stare_decisis_result(
+    doc_jurisdiction: Optional[str],
+    doc_level: Optional[str],
+    jurisdiction_source: str,
+    detection: Optional[dict],
+    validated_result: dict,
+) -> dict:
+    """Assemble the stare_decisis section attached to the analysis result.
+
+    Collects every citation cited across all node reasoning and runs
+    split detection on the flattened list. Returns a dict that app.py
+    can surface in the UI.
+    """
+    # Flatten citations from all node entries
+    all_citations: List[str] = []
+    for _, entry in validated_result.get("nodes", {}).items():
+        for c in entry.get("citations", []):
+            if c and isinstance(c, str):
+                all_citations.append(c)
+
+    splits = []
+    try:
+        from stare_decisis import detect_splits
+        splits = detect_splits(all_citations)
+    except Exception as e:
+        log.info("Split detection unavailable: %s", e)
+
+    out = {
+        "document_jurisdiction": doc_jurisdiction,
+        "document_court_level":  doc_level,
+        "jurisdiction_source":   jurisdiction_source,  # explicit / auto-detected(conf) / undetermined
+        "inter_provincial_splits": splits,
+    }
+    if detection:
+        out["auto_detection"] = {
+            "confidence":    detection.get("confidence"),
+            "rationale":     detection.get("rationale"),
+            "province_hits": detection.get("province_hits"),
+            "level_hits":    detection.get("level_hits"),
+        }
+    return out
 
 
 def format_analysis_for_display(analysis: dict) -> str:

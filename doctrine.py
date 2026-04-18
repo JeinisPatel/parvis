@@ -1045,6 +1045,300 @@ NODE_DOCTRINE = {
 }  # end NODE_DOCTRINE
 
 
+# ── CITATION METADATA REGISTRY ────────────────────────────────────────────────
+# Stare decisis layer. For every authority cited in NODE_DOCTRINE, this
+# registry records the minimum metadata needed to compute binding force
+# relative to a document under analysis:
+#
+#   court_level  — 'scc' | 'ca' | 'sc' | 'pc' | 'statute' | 'secondary'
+#   jurisdiction — 'federal' | 'on' | 'bc' | 'ab' | 'qc' | 'sk' | 'mb'
+#                  | 'ns' | 'nb' | 'nl' | 'pe' | 'yt' | 'nt' | 'nu' | 'none'
+#   year         — integer (useful for temporal ordering and currency)
+#   status       — 'good_law' | 'under_appeal' | 'overruled' | 'distinguished'
+#                  | 'inter_provincial_split' | 'unknown'
+#   notes        — free text (e.g. known splits, leave applications, caveats)
+#
+# HOW TO UPDATE: when an authority's status changes (SCC grants leave, a case
+# is overruled or distinguished, an inter-provincial split emerges), update
+# the 'status' and 'notes' fields here — no change to NODE_DOCTRINE needed.
+# The analyzer reads this registry via stare_decisis.py.
+#
+# DESIGN NOTE: the registry is keyed by the exact citation string used in
+# NODE_DOCTRINE. stare_decisis.normalize_citation() handles minor variations
+# ("R v X 2022 ABCA 48" vs "X 2022 ABCA 48"). To add a new authority, add
+# an entry here AND cite it in a NODE_DOCTRINE primary_auth list.
+
+CITATION_METADATA = {
+
+    # ── Supreme Court of Canada (binds everyone) ──────────────────────────────
+    "Ewert v Canada [2018] SCC 30": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2018,
+        "status": "good_law",
+        "notes": "Leading authority on cultural validity of actuarial tools for "
+                 "Indigenous offenders. CSC breach of duty of accuracy. Binds all "
+                 "lower courts on tool-validation obligations.",
+    },
+    "R v Antic [2017] SCC 27": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2017,
+        "status": "good_law",
+        "notes": "Leading authority on bail; ladder principle. Binds all courts.",
+    },
+    "R v Boutilier [2017] SCC 64": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2017,
+        "status": "good_law",
+        "notes": "DO regime constitutional validity; pattern of behaviour (not "
+                 "offences) test; Gladue applies at all stages of DO proceedings.",
+    },
+    "R v GDB [2000] 1 SCR 520": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2000,
+        "status": "good_law",
+        "notes": "Leading authority on ineffective assistance of counsel. "
+                 "Two-part test: (1) incompetence; (2) miscarriage of justice.",
+    },
+    "R v Gladue [1999] 1 SCR 688": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 1999,
+        "status": "good_law",
+        "notes": "Foundational Indigenous sentencing authority. Reaffirmed and "
+                 "strengthened by Ipeelee [2012] SCC 13. Binds all courts.",
+    },
+    "R v Ipeelee [2012] SCC 13": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2012,
+        "status": "good_law",
+        "notes": "Reaffirms Gladue; applies at all sentencing stages including "
+                 "DO proceedings. Binds all courts.",
+    },
+    "R v Lacasse [2015] SCC 64": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2015,
+        "status": "good_law",
+        "notes": "Provincial sentencing ranges are starting points, not binding "
+                 "rules. Deference to trial judges absent error in principle.",
+    },
+    "R v Le [2019] SCC 34": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2019,
+        "status": "good_law",
+        "notes": "Racial profiling in s.9 Charter analysis. Binds all courts on "
+                 "over-policing and systemic bias in contact with police.",
+    },
+    "R v Lloyd [2016] SCC 13": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2016,
+        "status": "good_law",
+        "notes": "Mandatory minimum sentences unconstitutional under s.12 where "
+                 "reasonable hypothetical produces grossly disproportionate "
+                 "sentence. Binds all courts.",
+    },
+    "R v Lyons [1987] 2 SCR 309": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 1987,
+        "status": "good_law",
+        "notes": "Foundational DO authority; constitutional validity of regime. "
+                 "Risk assessment must be individualised, not actuarial alone.",
+    },
+    "R v Mohan [1994] 2 SCR 9": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 1994,
+        "status": "good_law",
+        "notes": "Admissibility of expert evidence. Four-part test: relevance, "
+                 "necessity, absence of exclusionary rule, qualified expert.",
+    },
+    "R v Nur [2015] SCC 15": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2015,
+        "status": "good_law",
+        "notes": "Mandatory minimums struck down for firearms offences under "
+                 "s.12 Charter. Reasonable hypothetical test.",
+    },
+    "R v Parranto [2021] SCC 46": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2021,
+        "status": "good_law",
+        "notes": "Sentencing starting points; judicial comity and appellate "
+                 "deference on sentence.",
+    },
+    "R v Zora [2020] SCC 14": {
+        "court_level": "scc", "jurisdiction": "federal", "year": 2020,
+        "status": "good_law",
+        "notes": "Mens rea of breach of bail conditions; subjective standard. "
+                 "Relevant to bail-denial cascade analysis.",
+    },
+
+    # ── Provincial Courts of Appeal ───────────────────────────────────────────
+    "R v Bourdon 2024 ONCA 8": {
+        "court_level": "ca", "jurisdiction": "on", "year": 2024,
+        "status": "good_law",
+        "notes": "Recent Ontario CA authority. Binding in Ontario; strongly "
+                 "persuasive elsewhere. Watch for reception in other provinces.",
+    },
+    "R v Ellis 2022 BCCA 278": {
+        "court_level": "ca", "jurisdiction": "bc", "year": 2022,
+        "status": "good_law",
+        "notes": "Extends contextual sentencing reasoning to non-racialised "
+                 "socially disadvantaged offenders. Binding in BC only; "
+                 "strongly persuasive elsewhere. Reception in ON, AB, other "
+                 "provinces is still developing.",
+    },
+    "R v Gracie 2019 ONCA 658": {
+        "court_level": "ca", "jurisdiction": "on", "year": 2019,
+        "status": "good_law",
+        "notes": "Ontario CA application of Ewert. Binding in Ontario on the "
+                 "specific rule it stands for; persuasive in other provinces. "
+                 "Key worked example of how a provincial CA interprets SCC "
+                 "authority on tool validity.",
+    },
+    "R v Morris 2021 ONCA 680": {
+        "court_level": "ca", "jurisdiction": "on", "year": 2021,
+        "status": "good_law",
+        "notes": "SCE for Black/racialised offenders; para 97 connection gate. "
+                 "Binding in Ontario only. Widely cited and adopted elsewhere "
+                 "(notably BC in Ellis); monitor for explicit adoption in AB, "
+                 "MB, SK, and by the SCC.",
+    },
+    "R v Natomagan 2022 ABCA 48": {
+        "court_level": "ca", "jurisdiction": "ab", "year": 2022,
+        "status": "good_law",
+        "notes": "Structural unavailability of culturally appropriate programming "
+                 "cannot be weighed against Indigenous accused. Binding in "
+                 "Alberta; strongly persuasive elsewhere on the Natomagan "
+                 "principle. Closely watch subsequent applications.",
+    },
+
+    # ── Provincial superior / inferior courts ─────────────────────────────────
+    "R v EB Ontario Superior Court": {
+        "court_level": "sc", "jurisdiction": "on", "year": None,
+        "status": "unknown",
+        "notes": "Citation incomplete in doctrine.py. Canonical cite needs "
+                 "verification. If an ONSC decision, binding only on OCJ; "
+                 "persuasive at ONSC level (horizontal comity per Hansard "
+                 "Spruce Mills).",
+    },
+
+    # ── Federal statutes (bind everyone per their terms) ──────────────────────
+    "Criminal Code RSC 1985 c C-46, s 493.2": {
+        "court_level": "statute", "jurisdiction": "federal", "year": 2019,
+        "status": "good_law",
+        "notes": "Requirement to consider circumstances of Indigenous and "
+                 "vulnerable accused in bail decisions. Added by SC 2019 c.25.",
+    },
+    "Criminal Code RSC 1985 c C-46, s 753(1)(a)(i)": {
+        "court_level": "statute", "jurisdiction": "federal", "year": 1985,
+        "status": "good_law",
+        "notes": "DO designation: pattern of repetitive behaviour showing "
+                 "failure to restrain; likelihood of death or severe harm.",
+    },
+    "Criminal Code RSC 1985 c C-46, s 753(1)(a)(ii)": {
+        "court_level": "statute", "jurisdiction": "federal", "year": 1985,
+        "status": "good_law",
+        "notes": "DO designation: pattern of persistent aggressive behaviour "
+                 "with indifference to consequences.",
+    },
+
+    # ── Secondary sources (academic, reports, policy — never binding) ─────────
+    "Denis-Boileau MA (2021) 54:3 UBC Law Review 537": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2021,
+        "status": "good_law", "notes": "Academic article — persuasive only.",
+    },
+    "Ewing B and Kerr L (2023) 74 University of Toronto Law Journal": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2023,
+        "status": "good_law",
+        "notes": "Academic analysis of judicial misapplication of Gladue. "
+                 "Persuasive only.",
+    },
+    "Feeley M (1979) The Process Is the Punishment": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 1979,
+        "status": "good_law",
+        "notes": "Foundational socio-legal scholarship on coercive effects of "
+                 "pre-trial detention. Persuasive only.",
+    },
+    "Hanson RK (2018) research on age and recidivism": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2018,
+        "status": "good_law",
+        "notes": "Empirical research on age-crime curve and Static-99R age "
+                 "adjustments. Persuasive only; basis for temporal distortion "
+                 "node analysis.",
+    },
+    "Iacobucci F (2013) First Nations Representation on Ontario Juries": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2013,
+        "status": "good_law",
+        "notes": "Commissioned report. Persuasive only.",
+    },
+    "Lampron E (2022) Overrepresentation of Indigenous People in DO Designations": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2022,
+        "status": "good_law",
+        "notes": "Empirical analysis of DO designation disparities. "
+                 "Persuasive only.",
+    },
+    "Larsen et al (2024) Psychology Public Policy and Law": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2024,
+        "status": "good_law",
+        "notes": "Adversarial allegiance effects in PCL-R assessments. d = 1.08. "
+                 "Persuasive only; highly relevant to Node 3 analysis.",
+    },
+    "Lee Hanson and Blais (2020) Canadian Psychology 61(1)": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2020,
+        "status": "good_law",
+        "notes": "Research on Static-99R validation for Indigenous populations. "
+                 "Persuasive only.",
+    },
+    "Liell Fisher and Jones (2023) Routledge — Challenging Bias in Forensic Assessment": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2023,
+        "status": "good_law",
+        "notes": "Academic text on bias in forensic psychological assessment. "
+                 "Persuasive only.",
+    },
+    "Milward D (2018) 66:3 Crim LQ 254": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2018,
+        "status": "good_law",
+        "notes": "Academic analysis of Indigenous sentencing. Persuasive only.",
+    },
+    "National Inquiry into MMIWG Final Report (2019)": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2019,
+        "status": "good_law",
+        "notes": "Commissioned national inquiry report. Persuasive only.",
+    },
+    "Ontario Human Rights Commission — A Collective Impact (2020)": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2020,
+        "status": "good_law",
+        "notes": "OHRC report on systemic racism in Toronto Police Service. "
+                 "Persuasive only.",
+    },
+    "Pearl J (2009) Causality — Models, Reasoning, Inference (2nd ed)": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2009,
+        "status": "good_law",
+        "notes": "Foundational text on causal inference. Basis for collider "
+                 "bias analysis (Node 17). Persuasive only.",
+    },
+    "Ralston BA (2021) The Gladue Principles BC First Nations Justice Council": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2021,
+        "status": "good_law",
+        "notes": "Practitioner synthesis of Gladue jurisprudence. "
+                 "Persuasive only.",
+    },
+    "Tolppanen Report (2018) Federal-Provincial-Territorial Heads of Prosecutions": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2018,
+        "status": "good_law",
+        "notes": "Government working group report on bail reform and wrongful "
+                 "plea cascades. Persuasive only.",
+    },
+    "Venner et al (2021) International Journal of Forensic Mental Health 20(3)": {
+        "court_level": "secondary", "jurisdiction": "none", "year": 2021,
+        "status": "good_law",
+        "notes": "Empirical research on actuarial tool performance. "
+                 "Persuasive only.",
+    },
+}
+
+
+def get_citation_metadata(citation: str) -> dict:
+    """Return metadata dict for a citation, or an 'unknown' placeholder."""
+    if citation in CITATION_METADATA:
+        return CITATION_METADATA[citation]
+    return {
+        "court_level": "unknown", "jurisdiction": "unknown", "year": None,
+        "status": "unknown",
+        "notes": f"Citation not yet registered in CITATION_METADATA: {citation}",
+    }
+
+
+def get_all_citations_with_metadata() -> dict:
+    """Return the full {citation: metadata} registry."""
+    return dict(CITATION_METADATA)
+
+
 # ── Formatted system prompt builder ───────────────────────────────────────────
 
 def build_doctrinal_prompt() -> str:
