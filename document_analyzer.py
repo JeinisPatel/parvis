@@ -61,6 +61,20 @@ Five targeted edits; no public API changes; app.py integration unaffected.
 No changes to: extract_text_from_upload(), _infer_doc_type(),
 _resolve_key(), _call_claude/_openai/_gemini(), _parse_json_response(),
 format_analysis_for_display(), model pin, char cap, or cache behaviour.
+
+─────────────────────────────────────────────────────────────────────────────────
+PATH B CHANGE — April 2026
+─────────────────────────────────────────────────────────────────────────────────
+Extended ANALYZER_NODE_IDS from 14 → 17 nodes. Added entries for
+nodes 16 (interjurisdictional tariff effects), 17 (collider bias),
+and 19 (absence of rehabilitative progress). These were already
+documented in doctrine.NODE_DOCTRINE and present in model.NODE_META;
+the analyzer was simply ignoring them. All three have ev=False in
+NODE_META (no evidence slider in UI), but LLM-inferred deltas flow
+through app.py line 271 regardless of the ev flag, so the adjustments
+reach the Bayesian network correctly. Nodes 16 and 17 appear directly
+in the compute_do_risk distortion sum; node 19 shifts only its own
+posterior and doesn't affect DO risk directly.
 ─────────────────────────────────────────────────────────────────────────────────
 """
 
@@ -166,7 +180,8 @@ def _parse_json_response(raw: str) -> dict:
 # To extend coverage (e.g. add nodes 16/17/19), add the ID here AND add a
 # description to NODE_DESCRIPTIONS. The prompt skeleton will adapt automatically.
 
-ANALYZER_NODE_IDS: Set[int] = {2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 18}
+ANALYZER_NODE_IDS: Set[int] = {2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15,
+                               16, 17, 18, 19}
 
 NODE_DESCRIPTIONS = {
     2:  "Serious violence / violent history — primary aggravating factor for DO designation",
@@ -182,7 +197,10 @@ NODE_DESCRIPTIONS = {
     13: "Gaming risk detector — anomalously positive rehabilitation signals inconsistent with institutional record",
     14: "Over-policing / epistemic contamination — record inflated by disproportionate surveillance",
     15: "Temporal distortion — age-related burnout effect; prior convictions under repudiated mandatory minimums",
+    16: "Interjurisdictional tariff effects — provincial variance in sentencing norms produces DO designation disparity independent of offender risk (Lacasse [2015] SCC 64)",
+    17: "Collider bias — conditioning on incarceration (caused by both conduct and systemic factors) induces spurious correlations that inflate apparent risk (Pearl 2009)",
     18: "Dynamic risk factors — substance use, antisocial peers, housing instability (assess against structural context)",
+    19: "Absence of rehabilitative progress — must be assessed against programming availability; structural absence ≠ offender refusal (Natomagan 2022 ABCA 48)",
 }
 
 
