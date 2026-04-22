@@ -86,47 +86,24 @@ def build_docx(Pa, da, bla, cG, cS, mx, cr_rec, cr_doc_adj, doc_adj,
     section.left_margin   = Cm(2.8)
     section.right_margin  = Cm(2.8)
 
-    # ── Header: table layout — text left, logo right, navy rule ─────────────
+    # ── Header: logo right-aligned, navy rule ──────────────────────────────────
     header = section.header
-    # Remove default empty paragraph
-    for p in header.paragraphs:
-        p._element.getparent().remove(p._element)
-
-    htbl = header.add_table(1, 2, width=Cm(15.4))
-    htbl.style = "Table Grid"
-    tblPr = htbl._tbl.tblPr
-    tblBorders = OxmlElement("w:tblBorders")
-    for side in ["top","left","bottom","right","insideH","insideV"]:
-        b = OxmlElement(f"w:{side}")
-        b.set(qn("w:val"), "none")
-        tblBorders.append(b)
-    tblPr.append(tblBorders)
-
-    # Left cell: document title text
-    lc = htbl.rows[0].cells[0]
-    lp = lc.paragraphs[0]
-    lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    lr = lp.add_run("P.A.R.V.I.S  ·  Audit Report")
-    lr.font.name = FONT; lr.font.size = Pt(8.5)
-    lr.font.color.rgb = RGBColor.from_string("888888")
-
-    # Right cell: logo, vertically matching text
-    rc = htbl.rows[0].cells[1]
-    rp = rc.paragraphs[0]
-    rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    hp = header.paragraphs[0]
+    hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    hr = hp.add_run()
+    hr.font.name = FONT
+    hr.font.size = Pt(8)
+    hr.font.color.rgb = RGBColor.from_string("888888")
+    hr.text = "P.A.R.V.I.S  ·  Audit Report  ·  "
     if logos.get("light"):
-        rr = rp.add_run()
-        rr.add_picture(logos["light"], height=Pt(18))
-
-    # Bottom rule paragraph
-    rule_p = header.add_paragraph()
-    rule_p.paragraph_format.space_before = Pt(1)
-    rule_p.paragraph_format.space_after  = Pt(0)
-    pPr = rule_p.paragraph_format._element.get_or_add_pPr()
+        hr2 = hp.add_run()
+        hr2.add_picture(logos["light"], width=Inches(0.32))
+    # Header bottom rule
+    pPr = hp.paragraph_format._element.get_or_add_pPr()
     pBdr = OxmlElement("w:pBdr")
     bot = OxmlElement("w:bottom")
     bot.set(qn("w:val"), "single"); bot.set(qn("w:sz"), "6")
-    bot.set(qn("w:space"), "2"); bot.set(qn("w:color"), "1B2A4A")
+    bot.set(qn("w:space"), "4"); bot.set(qn("w:color"), "1B2A4A")
     pBdr.append(bot); pPr.append(pBdr)
 
     # ── Footer: page numbers ───────────────────────────────────────────────────
@@ -204,27 +181,16 @@ def build_docx(Pa, da, bla, cG, cS, mx, cr_rec, cr_doc_adj, doc_adj,
     tp.alignment = WD_ALIGN_PARAGRAPH.LEFT
     tp.paragraph_format.space_before = Pt(0)
     tp.paragraph_format.space_after  = Pt(4)
-    # Fixed line spacing prevents logo from pushing line height unpredictably
-    tp.paragraph_format.line_spacing = Pt(44)
 
     r_p = tp.add_run("P.")
     r_p.bold = True; r_p.font.size = Pt(36)
     r_p.font.name = FONT
     r_p.font.color.rgb = RGBColor.from_string("1B2A4A")
 
-    # Inline logo — sized to match cap height, dist set for vertical centering
+    # Inline logo
     if logos.get("light"):
         r_logo = tp.add_run()
-        r_logo.add_picture(logos["light"], width=Pt(34))
-        # Adjust vertical position via inline image XML
-        from docx.shared import Emu
-        drawing = tp._p.findall(".//" + qn("w:drawing"))[-1]
-        inline = drawing.find(qn("wp:inline"))
-        if inline is not None:
-            inline.set("distT", str(int(Pt(2).emu)))
-            inline.set("distB", "0")
-            inline.set("distL", str(int(Pt(1).emu)))
-            inline.set("distR", str(int(Pt(1).emu)))
+        r_logo.add_picture(logos["light"], width=Pt(38))
     else:
         r_dot = tp.add_run("A")
         r_dot.bold = True; r_dot.font.size = Pt(36)
