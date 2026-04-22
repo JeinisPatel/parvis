@@ -1275,263 +1275,256 @@ with TABS[8]:
             "3. Redeploy — tracker activates automatically.</div>",
             unsafe_allow_html=True)
 
-# ── T3: Intake (Chat) — conversational case entry ───────────────────────────
+# ── T3: Intake (Chat) — PARVIS assistant ────────────────────────────────────
 with TABS[2]:
     st.markdown("### 💬 Intake (Chat)")
-    st.caption("Describe the case in plain language — typed or dictated. PARVIS parses it and proposes values for your review before applying to the network.")
+    st.caption("Ask PARVIS anything about the current case — or describe a case and let it populate the network. PARVIS is aware of all current node values.")
+
     st.markdown(dobar(P[20]), unsafe_allow_html=True)
 
-    # ── Speech-to-text (browser Web Speech API — no API key needed) ──────────
+    # ── Initialise session state ──────────────────────────────────────────────
+    if "chat_history"        not in st.session_state: st.session_state.chat_history = []
+    if "chat_pending_action" not in st.session_state: st.session_state.chat_pending_action = None
+    if "chat_ak"             not in st.session_state: st.session_state.chat_ak = ""
+
+    # ── API key (top, compact) ────────────────────────────────────────────────
+    with st.expander("⚙️ API settings", expanded=not st.session_state.chat_ak):
+        ck1, ck2 = st.columns([3,1])
+        with ck1:
+            st.session_state.chat_ak = st.text_input(
+                "Anthropic API key (or set ANTHROPIC_API_KEY in Streamlit secrets)",
+                type="password", value=st.session_state.chat_ak,
+                key="chat_ak_input", label_visibility="collapsed",
+                placeholder="Anthropic API key — leave blank if set in Streamlit secrets")
+        with ck2:
+            chat_provider = st.selectbox("Provider",["claude","openai","gemini"],
+                format_func=lambda x:{"claude":"Claude ★","openai":"GPT-4o","gemini":"Gemini"}[x],
+                key="chat_provider", label_visibility="collapsed")
+
+    # ── Speech-to-text widget ─────────────────────────────────────────────────
     speech_html = """
-<div style='margin-bottom:8px'>
-  <div style='display:flex;align-items:center;gap:10px;margin-bottom:6px'>
-    <button id='mic-btn' onclick='toggleMic()' style='background:#1B2A4A;color:white;
-      border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font-size:13px'>
-      🎤 <span id='mic-label'>Start dictation</span>
+<div style='margin:6px 0 10px 0'>
+  <div style='display:flex;align-items:center;gap:10px;margin-bottom:5px'>
+    <button id='mic-btn2' onclick='toggleMic2()' style='background:#1B2A4A;color:white;
+      border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px'>
+      🎤 <span id='mic-label2'>Dictate</span>
     </button>
-    <span id='mic-status' style='font-size:12px;color:#888;font-style:italic'></span>
+    <span id='mic-status2' style='font-size:12px;color:#888;font-style:italic'></span>
   </div>
-  <div id='transcript-box' style='min-height:36px;padding:8px 12px;background:#f8f8f8;
-    border:1px solid #ddd;border-radius:8px;font-size:13px;color:#333;
-    white-space:pre-wrap;margin-bottom:6px'></div>
-  <button onclick='copyTranscript()' style='background:#185FA5;color:white;border:none;
-    border-radius:6px;padding:5px 14px;cursor:pointer;font-size:12px'>
-    Copy to clipboard ↓ (paste into the text box below)
-  </button>
+  <div id='transcript-box2' style='min-height:28px;padding:6px 12px;background:#f8f8f8;
+    border:1px solid #e0e0e0;border-radius:8px;font-size:13px;color:#333;
+    white-space:pre-wrap;display:none'></div>
 </div>
 <script>
-let recog=null,running=false;
-function toggleMic(){
+let recog2=null,running2=false;
+function toggleMic2(){
   if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){
-    document.getElementById('mic-status').textContent='Not supported — use Chrome or Edge';return;}
-  if(running){recog.stop();return;}
+    document.getElementById('mic-status2').textContent='Use Chrome or Edge for dictation';return;}
+  if(running2){recog2.stop();return;}
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  recog=new SR();recog.continuous=true;recog.interimResults=true;recog.lang='en-CA';
-  recog.onresult=e=>{let t='';for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;
-    document.getElementById('transcript-box').textContent=t;};
-  recog.onerror=e=>{document.getElementById('mic-status').textContent='Error: '+e.error;running=false;};
-  recog.onend=()=>{running=false;document.getElementById('mic-label').textContent='Start dictation';
-    document.getElementById('mic-btn').style.background='#1B2A4A';
-    document.getElementById('mic-status').textContent='';};
-  recog.start();running=true;
-  document.getElementById('mic-label').textContent='Stop';
-  document.getElementById('mic-btn').style.background='#A32D2D';
-  document.getElementById('mic-status').textContent='Listening…';
-}
-function copyTranscript(){
-  const t=document.getElementById('transcript-box').textContent;
-  if(t.trim()){navigator.clipboard.writeText(t).then(()=>{
-    document.getElementById('mic-status').textContent='Copied — paste into the text box below ↓';});}
+  recog2=new SR();recog2.continuous=true;recog2.interimResults=true;recog2.lang='en-CA';
+  recog2.onresult=e=>{
+    let t='';for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;
+    const box=document.getElementById('transcript-box2');
+    box.textContent=t;box.style.display='block';};
+  recog2.onerror=e=>{document.getElementById('mic-status2').textContent='Error: '+e.error;running2=false;};
+  recog2.onend=()=>{running2=false;
+    document.getElementById('mic-label2').textContent='Dictate';
+    document.getElementById('mic-btn2').style.background='#1B2A4A';
+    const t=document.getElementById('transcript-box2').textContent;
+    if(t.trim()){document.getElementById('mic-status2').textContent='Done — copy text below to chat ↓';}};
+  recog2.start();running2=true;
+  document.getElementById('mic-label2').textContent='Stop';
+  document.getElementById('mic-btn2').style.background='#A32D2D';
+  document.getElementById('mic-status2').textContent='Listening…';
 }
 </script>"""
-    st.components.v1.html(speech_html, height=125, scrolling=False)
-    st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+    st.components.v1.html(speech_html, height=80, scrolling=False)
 
-    # ── Text input ─────────────────────────────────────────────────────────────
-    # Larger text styling for the intake text area
-    st.markdown("""
-    <style>
-    div[data-testid="stTextArea"][aria-label="Case description"] textarea {
-        font-size: 1.05rem !important;
-        line-height: 1.65 !important;
-        padding: 12px 14px !important;
-        color: #1B2A4A !important;
-    }
-    </style>""", unsafe_allow_html=True)
+    # ── Build PARVIS context for system prompt ────────────────────────────────
+    def _build_context() -> str:
+        Pa = st.session_state.posteriors
+        cr = st.session_state.criminal_record
+        cG = [f for f in GF if f["id"] in st.session_state.gladue_checked]
+        cS = [f for f in SF if f["id"] in st.session_state.sce_checked]
+        esc = st.session_state.cr_doc_adj.get("escalation",{})
 
-    intake_text = st.text_area(
-        "Case description",
-        placeholder=(
-            "e.g. Male offender, 38, Indigenous, Northern Ontario. "
-            "Prior record: aggravated assault 2016 (18 months custody), "
-            "robbery 2019 (3 years federal). Gladue report filed but not "
-            "engaged by sentencing judge. Bail denied 11 months pre-trial. "
-            "PCL-R score 24. No culturally appropriate treatment available."
-        ),
-        height=180,
-        key="intake_text",
-        label_visibility="collapsed"
-    )
-    st.markdown("<div style='height:.3rem'></div>", unsafe_allow_html=True)
+        ctx = f"""You are PARVIS — the Probabilistic and Analytical Reasoning Virtual Intelligence System, 
+a Bayesian sentencing assistant for Canadian Dangerous Offender proceedings. You are built on a 
+20-node pgmpy Bayesian network grounded in the Tetrad doctrinal framework.
 
-    st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
-    ip1, ip2, ip3 = st.columns([2, 2, 1])
-    with ip1:
-        intake_provider = st.selectbox("Provider",
-            ["claude","openai","gemini"],
-            format_func=lambda x:{"claude":"Claude (Anthropic) ★","openai":"GPT-4o (OpenAI)","gemini":"Gemini 1.5 Pro"}[x],
-            key="intake_provider", label_visibility="collapsed")
-    with ip2:
-        _key_label = {"claude":"Anthropic API key","openai":"OpenAI API key","gemini":"Google API key"}.get(intake_provider,"API key")
-        intake_ak = st.text_input(f"{_key_label} (or set in Streamlit secrets)",
-            type="password", key="intake_ak", label_visibility="collapsed",
-            placeholder=f"{_key_label} — optional if set in secrets")
-    with ip3:
-        parse_btn = st.button("🔍 Parse & propose", key="intake_parse", use_container_width=True)
+CURRENT NETWORK STATE:
+Node 20 (DO Designation Risk): {Pa.get(20,0.249)*100:.1f}% — {rb(Pa.get(20,0.249))[0]}
 
-    if parse_btn and intake_text.strip():
-        with st.spinner("Parsing case description…"):
+RISK FACTOR POSTERIORS:
+- N2 Violent history: {Pa.get(2,0.08)*100:.1f}%
+- N3 PCL-R (psychopathy): {Pa.get(3,0.55)*100:.1f}%
+- N4 Static-99R (sexual offence): {Pa.get(4,0.32)*100:.1f}%
+- N18 Dynamic risk: {Pa.get(18,0.167)*100:.1f}%
+
+DISTORTION CORRECTIONS (reduce effective risk weight):
+- N1 Burden of proof: {Pa.get(1,0.83)*100:.1f}%
+- N5 Invalid risk tools (Ewert): {Pa.get(5,0.10)*100:.1f}%
+- N6 Ineffective counsel: {Pa.get(6,0.15)*100:.1f}%
+- N7 Bail-denial cascade: {Pa.get(7,0.40)*100:.1f}%
+- N9 FASD: {Pa.get(9,0.15)*100:.1f}%
+- N10 Intergenerational trauma: {Pa.get(10,0.45)*100:.1f}%
+- N11 No cultural treatment: {Pa.get(11,0.10)*100:.1f}%
+- N12 Gladue misapplication: {Pa.get(12,0.15)*100:.1f}%
+- N14 Over-policing: {Pa.get(14,0.15)*100:.1f}%
+- N15 Temporal distortion: {Pa.get(15,0.40)*100:.1f}%
+- N19 No rehabilitation: {Pa.get(19,0.10)*100:.1f}%
+
+GLADUE FACTORS ACTIVE ({len(cG)}): {', '.join([f['l'] for f in cG]) if cG else 'None selected'}
+MORRIS/ELLIS SCE ({len(cS)}): {', '.join([f['l'] for f in cS]) if cS else 'None selected'}
+Connection strength: {st.session_state.conn} | Framework: {st.session_state.scefw.upper()}
+
+CRIMINAL RECORD ({len(cr)} conviction(s)):"""
+        if cr:
+            for e in cr:
+                ctx += f"\n- [{e['year']}] {e['offence']} — {e.get('sentence_type','?')} — Cal. weight {e['cal_weight']*100:.0f}%"
+            ctx += f"\nPattern (Boutilier): {esc.get('pattern','—').title()}"
+        else:
+            ctx += "\nNo convictions entered."
+
+        ctx += """
+
+YOUR ROLE:
+1. Answer questions about the current case, node values, and doctrinal framework
+2. Explain what specific posteriors mean and why they are at their current levels
+3. Help the user understand the Tetrad framework (Gladue, Ipeelee, Morris, Ellis, Ewert, Boutilier)
+4. Accept plain-language case descriptions and propose structured PARVIS values
+5. When suggesting changes to node values, ALWAYS end with a JSON block in this exact format:
+   PROPOSED_CHANGES: {"node": <id>, "value": <0.0-1.0>, "reason": "<one sentence>"}
+   You may propose multiple changes, one JSON block per change.
+   Never apply changes yourself — the user must confirm each one.
+
+IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. This distinction is the 
+thesis's central normative contribution. Always maintain this framing in your responses."""
+        return ctx
+
+    # ── Display chat history ──────────────────────────────────────────────────
+    chat_container = st.container()
+    with chat_container:
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"],
+                avatar="⚖️" if msg["role"]=="assistant" else "👤"):
+                st.markdown(msg["content"])
+
+                # Show confirm buttons for any proposed changes in assistant messages
+                if msg["role"]=="assistant" and msg.get("proposals"):
+                    for pi, prop in enumerate(msg["proposals"]):
+                        nid = prop.get("node")
+                        val = prop.get("value")
+                        reason = prop.get("reason","")
+                        nm = NODE_META.get(nid,{}).get("name","?") if nid else "?"
+                        cur = P.get(nid, 0.5) if nid else 0.5
+                        col_p = "#A32D2D" if val and val > cur else "#3B6D11"
+                        arrow = "↑" if val and val > cur else "↓"
+                        msg_id = msg.get("id", pi)
+
+                        st.markdown(
+                            f"<div style='background:#f8f8f8;border-left:3px solid {col_p};"
+                            f"border-radius:6px;padding:.5rem .8rem;margin:.3rem 0;font-size:.85rem'>"
+                            f"<b>Proposed:</b> N{nid} {nm} {arrow} "
+                            f"<b style='color:{col_p}'>{val*100:.0f}%</b> "
+                            f"(current: {cur*100:.0f}%) — {reason}</div>",
+                            unsafe_allow_html=True)
+
+                        bc1, bc2 = st.columns([1,4])
+                        with bc1:
+                            if st.button(f"✅ Apply", key=f"chat_apply_{msg_id}_{pi}_{nid}"):
+                                st.session_state.profile_ev[nid] = float(val)
+                                run_inf()
+                                st.session_state.chat_history.append({
+                                    "role": "assistant",
+                                    "content": f"✅ Applied — N{nid} ({nm}) set to **{val*100:.0f}%**. Node 20 updated to **{st.session_state.posteriors[20]*100:.1f}%**.",
+                                    "proposals": []
+                                })
+                                st.rerun()
+                        with bc2:
+                            if st.button(f"✗ Decline", key=f"chat_decline_{msg_id}_{pi}_{nid}"):
+                                st.session_state.chat_history.append({
+                                    "role": "assistant",
+                                    "content": f"Understood — N{nid} ({nm}) left at {cur*100:.0f}%.",
+                                    "proposals": []
+                                })
+                                st.rerun()
+
+    # ── Pending confirmation (for bulk proposals from intake-style messages) ──
+    # ── Chat input ────────────────────────────────────────────────────────────
+    if prompt := st.chat_input("Ask PARVIS anything, or describe a case…"):
+        # Add user message
+        st.session_state.chat_history.append({"role":"user","content":prompt})
+
+        # Build API call
+        with st.spinner("PARVIS is thinking…"):
             try:
-                import json, re as _re
-                from document_analyzer import analyze_document
+                import anthropic as _ant, json as _json, re as _re
 
-                _PROMPT = (
-                    "You are a Canadian criminal law expert helping populate a Bayesian sentencing "
-                    "network (PARVIS) from a plain-language case description. "
-                    "Extract ALL information present and return ONLY valid JSON — no markdown, no preamble, no explanation. "
-                    "Use null for any field not mentioned. JSON structure:\n"
-                    '{"age":null,"indigenous":false,"province":null,'
-                    '"gladue_report_filed":false,"gladue_engaged":false,'
-                    '"bail_denied_months":null,"pclr_score":null,"static99r_score":null,'
-                    '"fasd":false,"intergenerational_trauma":false,'
-                    '"no_cultural_treatment":false,"ineffective_counsel":false,'
-                    '"convictions":[{"offence":"","year":null,'
-                    '"sentence_type":"Federal custody (2+ years)","sentence_detail":"",'
-                    '"seriousness":"Significant","gang":false,"weapon":false,'
-                    '"domestic_violence":false,"child_victim":false,"position_of_trust":false}],'
-                    '"gladue_factors":[],'
-                    '"notes":""}\n\n'
-                    "sentence_type must be one of: Federal custody (2+ years), Provincial custody (< 2 years), "
-                    "Conditional sentence order (CSO), Probation only, Fine only, "
-                    "Absolute / conditional discharge, Time served, Other / unknown\n"
-                    "seriousness must be one of: Minor, Moderate, Significant, Serious violent, Catastrophic\n"
-                    "gladue_factors items from: colonialism, poverty, residential_school, child_welfare, "
-                    "family_violence, substance_abuse, mental_health, lack_services, "
-                    "systemic_discrimination, loss_culture\n\n"
-                    "Case description:\n" + intake_text.strip()
-                )
+                # Resolve API key
+                ak = st.session_state.chat_ak
+                if not ak:
+                    try: ak = st.secrets.get("ANTHROPIC_API_KEY","")
+                    except Exception: pass
+                if not ak:
+                    import os; ak = os.environ.get("ANTHROPIC_API_KEY","")
 
-                raw = analyze_document(
-                    file_content=_PROMPT,
-                    provider=intake_provider,
-                    api_key=intake_ak or None,
-                )
-                m = _re.search(r'\{.*\}', raw, _re.DOTALL)
-                if m:
-                    parsed = json.loads(m.group(0))
-                    st.session_state.intake_parsed = parsed
+                if not ak:
+                    st.session_state.chat_history.append({
+                        "role":"assistant",
+                        "content":"⚠️ No API key found. Please enter your Anthropic API key in the ⚙️ API settings panel above.",
+                        "proposals":[]
+                    })
                     st.rerun()
                 else:
-                    st.error("Could not extract structured values. Try rephrasing the description.")
+                    client = _ant.Anthropic(api_key=ak)
+
+                    # Build messages for API
+                    messages = []
+                    for m in st.session_state.chat_history[:-1]:  # exclude latest user msg
+                        messages.append({"role": m["role"], "content": m["content"]})
+                    messages.append({"role":"user","content":prompt})
+
+                    response = client.messages.create(
+                        model="claude-opus-4-5",
+                        max_tokens=1500,
+                        system=_build_context(),
+                        messages=messages
+                    )
+                    raw = response.content[0].text
+
+                    # Parse any PROPOSED_CHANGES blocks
+                    proposals = []
+                    for m2 in _re.finditer(r'PROPOSED_CHANGES:\s*(\{[^}]+\})', raw):
+                        try:
+                            proposals.append(_json.loads(m2.group(1)))
+                        except Exception:
+                            pass
+
+                    import time
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": raw,
+                        "proposals": proposals,
+                        "id": int(time.time()*1000)
+                    })
+                    st.rerun()
+
             except Exception as ex:
-                st.error(f"Parse error: {ex}")
-
-    # ── Preview + Apply ────────────────────────────────────────────────────────
-    if "intake_parsed" in st.session_state and st.session_state.intake_parsed:
-        parsed = st.session_state.intake_parsed
-        st.markdown("---")
-        st.markdown("#### Proposed values — review before applying")
-        st.caption("Review what PARVIS intends to set. Click **Apply** to push values into the network. Nothing is written until you click Apply.")
-
-        pa1, pa2 = st.columns(2)
-        with pa1:
-            st.markdown("**Profile & risk tools**")
-            if parsed.get("age"):               st.markdown(f"- Age: **{parsed['age']}**")
-            if parsed.get("indigenous"):         st.markdown("- Indigenous: **Yes** → Gladue applies")
-            if parsed.get("province"):           st.markdown(f"- Province: **{parsed['province']}**")
-            if parsed.get("bail_denied_months"): st.markdown(f"- Bail denied: **{parsed['bail_denied_months']} months** → N7 ↑")
-            if parsed.get("pclr_score") is not None: st.markdown(f"- PCL-R: **{parsed['pclr_score']}** → N3")
-            if parsed.get("static99r_score") is not None: st.markdown(f"- Static-99R: **{parsed['static99r_score']}** → N4")
-        with pa2:
-            st.markdown("**Contextual & distortion**")
-            if parsed.get("gladue_report_filed"):  st.markdown("- Gladue report: **Filed**")
-            if not parsed.get("gladue_engaged"):   st.markdown("- Court engagement: **Not engaged** → N12 ↑")
-            if parsed.get("fasd"):                 st.markdown("- FASD: **Yes** → N9")
-            if parsed.get("intergenerational_trauma"): st.markdown("- Intergenerational trauma → N10")
-            if parsed.get("no_cultural_treatment"): st.markdown("- No cultural treatment → N11")
-            if parsed.get("ineffective_counsel"):  st.markdown("- Ineffective counsel → N6")
-
-        if parsed.get("convictions"):
-            st.markdown("**Criminal record**")
-            for cv in parsed["convictions"]:
-                flags = [f for f,k in [("Gang","gang"),("Weapon","weapon"),("DV","domestic_violence"),("Child","child_victim"),("Trust","position_of_trust")] if cv.get(k)]
-                fstr = f" · {', '.join(flags)}" if flags else ""
-                st.markdown(f"- {cv.get('year','')} **{cv['offence']}** — {cv['sentence_type']}{fstr}")
-
-        if parsed.get("gladue_factors"):
-            st.markdown(f"**Gladue factors detected:** {', '.join(parsed['gladue_factors'])}")
-
-        if parsed.get("notes"):
-            st.info(f"ℹ️ {parsed['notes']}")
-
-        st.markdown("---")
-        ab1, ab2 = st.columns([1,3])
-        with ab1:
-            if st.button("✅ Apply to PARVIS", key="intake_apply", use_container_width=True):
-                pev = dict(st.session_state.profile_ev)
-
-                # Node mappings
-                if parsed.get("bail_denied_months"):
-                    pev[7] = float(np.clip(0.20 + 0.04*min(int(parsed["bail_denied_months"]),18), 0.15, 0.85))
-                if parsed.get("pclr_score") is not None:
-                    pev[3] = float(np.clip(float(parsed["pclr_score"]) / 40.0, 0.05, 0.95))
-                if parsed.get("static99r_score") is not None:
-                    pev[4] = float(np.clip(float(parsed["static99r_score"]) / 12.0, 0.05, 0.95))
-                if parsed.get("fasd"):                      pev[9]  = 0.75
-                if parsed.get("intergenerational_trauma"):  pev[10] = 0.75
-                if parsed.get("no_cultural_treatment"):     pev[11] = 0.75
-                if parsed.get("ineffective_counsel"):       pev[6]  = 0.65
-                if parsed.get("gladue_report_filed") and not parsed.get("gladue_engaged"):
-                    pev[12] = 0.70
-                st.session_state.profile_ev = pev
-
-                # Add convictions to criminal record
-                if parsed.get("convictions"):
-                    _ser_map = {"Minor":0.20,"Moderate":0.42,"Significant":0.65,
-                                "Serious violent":0.82,"Catastrophic":1.00}
-                    for cv in parsed["convictions"]:
-                        entry = {
-                            "offence":       cv.get("offence","Unknown"),
-                            "court":         "",
-                            "year":          cv.get("year", 2000) or 2000,
-                            "sentence":      cv.get("sentence_type",""),
-                            "sentence_type": cv.get("sentence_type","Other / unknown"),
-                            "sentence_detail": cv.get("sentence_detail",""),
-                            "sent_modifier": {"Federal custody (2+ years)":1.0,"Provincial custody (< 2 years)":0.9,
-                                "Conditional sentence order (CSO)":0.7,"Probation only":0.55,
-                                "Fine only":0.35,"Absolute / conditional discharge":0.2,
-                                "Time served":0.8,"Other / unknown":0.85,"Other":0.85}.get(cv.get("sentence_type","Other"),0.85),
-                            "jurisdiction":  parsed.get("province","ON") or "ON",
-                            "seriousness":   _ser_map.get(cv.get("seriousness","Significant"),0.65),
-                            "seriousness_label": cv.get("seriousness","Significant") + " (0.55–0.75)",
-                            "agg_boost":     1.0,
-                            "gang":          cv.get("gang",False),
-                            "weapon":        cv.get("weapon",False),
-                            "child_victim":  cv.get("child_victim",False),
-                            "position_of_trust": cv.get("position_of_trust",False),
-                            "domestic_violence": cv.get("domestic_violence",False),
-                            "hate_crime":    False,
-                            "terrorism":     False,
-                            "vulnerable_victim": False,
-                            "drug_trafficking":  False,
-                            "drug_type":     "",
-                            "adj":  {"bail":0.0,"ewert":0.0,"gladue":0.0,
-                                     "police":0.0,"mm":0.0,"time":0.0},
-                            "raw_weight": 1.0,
-                            "cal_weight": _ser_map.get(cv.get("seriousness","Significant"),0.65),
-                        }
-                        st.session_state.criminal_record.append(entry)
-
-                # Gladue factors
-                if parsed.get("gladue_factors"):
-                    gf_map = {"colonialism":1,"poverty":2,"residential_school":3,
-                              "child_welfare":4,"family_violence":5,"substance_abuse":6,
-                              "mental_health":7,"lack_services":8,
-                              "systemic_discrimination":9,"loss_culture":10}
-                    checked = set(st.session_state.gladue_checked)
-                    for gf in parsed["gladue_factors"]:
-                        gid = gf_map.get(gf.lower().replace(" ","_"))
-                        if gid: checked.add(gid)
-                    st.session_state.gladue_checked = checked
-
-                run_inf()
-                st.success("✅ Applied to PARVIS — review each tab to verify and fine-tune.")
-                st.session_state.intake_parsed = None
+                st.session_state.chat_history.append({
+                    "role":"assistant",
+                    "content":f"⚠️ Error: {ex}",
+                    "proposals":[]
+                })
                 st.rerun()
-        with ab2:
-            if st.button("✗ Discard", key="intake_discard"):
-                st.session_state.intake_parsed = None
-                st.rerun()
+
+    # Clear chat button
+    if st.session_state.chat_history:
+        if st.button("🗑 Clear conversation", key="chat_clear"):
+            st.session_state.chat_history = []
+            st.rerun()
+
 
 # ── T9: Criminal record ──────────────────────────────────────────────────────
 with TABS[3]:
