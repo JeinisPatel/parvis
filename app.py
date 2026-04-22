@@ -720,27 +720,32 @@ with TABS[6]:
   const ctx = canvas.getContext("2d");
   const W=570, H=570, cx=285, cy=285, R=210;
 
-  // Colour palette — dark on white
-  const C_RISK  = "#C0392B";
-  const C_MIT   = "#1A6B35";
-  const C_POLE  = "#1B2A4A";
-  const C_MID   = "#666666";
+  const C_RISK = "#C0392B", C_MIT = "#1A6B35", C_POLE = "#1B2A4A", C_MID = "#666";
   const riskCol = S.risk>=0.55 ? "#C0392B" : S.risk>=0.35 ? "#B8850A" : "#1A6B35";
 
-  function proj(x,y,z,ry) {{
-    const rx = x*Math.cos(ry)-z*Math.sin(ry);
-    const rz = x*Math.sin(ry)+z*Math.cos(ry);
-    const f=3.2;
-    return [cx+rx*R*f/(f+rz+2), cy-y*R*f/(f+rz+2)];
+  // Full 3D rotation: Y-axis (azimuthal) + X-axis (polar tilt)
+  // This gives authentic Bloch-sphere precession in 3D
+  function proj(x, y, z, ry, rx) {{
+    // 1. Rotate around Y (azimuthal — left/right)
+    let x1 = x*Math.cos(ry) - z*Math.sin(ry);
+    let y1 = y;
+    let z1 = x*Math.sin(ry) + z*Math.cos(ry);
+    // 2. Rotate around X (polar tilt — forward/back)
+    let x2 = x1;
+    let y2 = y1*Math.cos(rx) - z1*Math.sin(rx);
+    let z2 = y1*Math.sin(rx) + z1*Math.cos(rx);
+    // 3. Perspective
+    const f = 3.2;
+    return [cx + x2*R*f/(f+z2+2), cy - y2*R*f/(f+z2+2), z2];
   }}
 
-  function draw(rot) {{
+  function draw(ry, rx) {{
     ctx.clearRect(0,0,W,H);
 
-    // Sphere fill
-    const g = ctx.createRadialGradient(cx-60,cy-60,20,cx,cy,R+10);
-    g.addColorStop(0,"rgba(210,218,232,0.45)");
-    g.addColorStop(1,"rgba(240,242,248,0.10)");
+    // Sphere fill gradient
+    const g = ctx.createRadialGradient(cx-65,cy-65,20,cx,cy,R+10);
+    g.addColorStop(0,"rgba(205,215,230,0.50)");
+    g.addColorStop(1,"rgba(238,241,248,0.10)");
     ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
     ctx.fillStyle=g; ctx.fill();
     ctx.strokeStyle="rgba(0,0,0,0.15)"; ctx.lineWidth=1.5; ctx.stroke();
@@ -748,77 +753,75 @@ with TABS[6]:
     // Latitude rings
     for(let lat=-60;lat<=60;lat+=30){{
       const lr=Math.cos(lat*Math.PI/180), ly=Math.sin(lat*Math.PI/180);
-      const eq=lat===0;
-      ctx.beginPath(); let f2=true;
+      ctx.beginPath(); let fi=true;
       for(let a=0;a<=360;a+=3){{
         const r=a*Math.PI/180;
-        const [sx,sy]=proj(lr*Math.cos(r),ly,lr*Math.sin(r),rot);
-        f2 ? (ctx.moveTo(sx,sy),f2=false) : ctx.lineTo(sx,sy);
+        const [sx,sy]=proj(lr*Math.cos(r),ly,lr*Math.sin(r),ry,rx);
+        fi?(ctx.moveTo(sx,sy),fi=false):ctx.lineTo(sx,sy);
       }}
       ctx.closePath();
-      ctx.strokeStyle=eq?"rgba(0,0,0,0.25)":"rgba(0,0,0,0.07)";
-      ctx.lineWidth=eq?1.3:0.7; ctx.stroke();
+      ctx.strokeStyle=lat===0?"rgba(0,0,0,0.22)":"rgba(0,0,0,0.07)";
+      ctx.lineWidth=lat===0?1.3:0.7; ctx.stroke();
     }}
 
     // Meridians
     for(let lon=0;lon<180;lon+=45){{
       const lr2=lon*Math.PI/180;
-      ctx.beginPath(); let f3=true;
+      ctx.beginPath(); let fi2=true;
       for(let a=0;a<=360;a+=3){{
         const r=a*Math.PI/180;
-        const [sx,sy]=proj(Math.sin(r)*Math.cos(lr2+rot),Math.cos(r),Math.sin(r)*Math.sin(lr2+rot),0);
-        f3 ? (ctx.moveTo(sx,sy),f3=false) : ctx.lineTo(sx,sy);
+        const [sx,sy]=proj(Math.sin(r)*Math.cos(lr2),Math.cos(r),Math.sin(r)*Math.sin(lr2),ry,rx);
+        fi2?(ctx.moveTo(sx,sy),fi2=false):ctx.lineTo(sx,sy);
       }}
       ctx.strokeStyle="rgba(0,0,0,0.05)"; ctx.lineWidth=0.7; ctx.stroke();
     }}
 
-    // Risk axis (rotates with sphere)
-    const [rx1,ry1]=proj(0.85,0,0,rot);
-    const [rx2,ry2]=proj(-0.85,0,0,rot);
-    const [ocx,ocy]=proj(0,0,0,rot);
+    // Horizontal axes (rotate with sphere)
+    const [ocx,ocy]=proj(0,0,0,ry,rx);
+    const [rx1,ry1]=proj(0.85,0,0,ry,rx);
+    const [mx1,my1]=proj(-0.85,0,0,ry,rx);
     ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(rx1,ry1);
     ctx.strokeStyle=C_RISK+"88"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle=C_RISK; ctx.font="bold 12px -apple-system,sans-serif";
     ctx.fillText("Risk",rx1+5,ry1+4);
-
-    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(rx2,ry2);
+    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(mx1,my1);
     ctx.strokeStyle=C_MIT+"88"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle=C_MIT; ctx.font="bold 12px -apple-system,sans-serif";
-    const mw2=ctx.measureText("Mitigation").width;
-    ctx.fillText("Mitigation",rx2-mw2-5,ry2+4);
+    const mw=ctx.measureText("Mitigation").width;
+    ctx.fillText("Mitigation",mx1-mw-5,my1+4);
 
-    // Vertical axis (fixed — no rotation)
-    const [ax1,ay1]=proj(0,0.85,0,0);
-    const [ax2,ay2]=proj(0,-0.85,0,0);
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(ax1,ay1);
+    // Vertical axis (also rotates in 3D)
+    const [ap1,ap2]=proj(0,0.85,0,ry,rx);
+    const [an1,an2]=proj(0,-0.85,0,ry,rx);
+    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(ap1,ap2);
     ctx.strokeStyle=C_POLE+"55"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(ax2,ay2);
+    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(an1,an2);
     ctx.strokeStyle=C_MID+"55"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
 
-    // Pole labels — centred, outside sphere
-    const [np1,np2]=proj(0,1.02,0,0);
-    const [sp1,sp2]=proj(0,-1.02,0,0);
+    // Pole labels — attached to the rotated pole positions
+    const [np1,np2]=proj(0,1.04,0,ry,rx);
+    const [sp1,sp2]=proj(0,-1.04,0,ry,rx);
     ctx.textAlign="center";
-    ctx.fillStyle=C_POLE; ctx.font="bold 13px -apple-system,sans-serif";
-    ctx.fillText("|DO\u27e9  P=1.0  \u2191 High",np1,np2-12);
-    ctx.fillStyle=C_MID; ctx.font="13px -apple-system,sans-serif";
-    ctx.fillText("|\u00acDO\u27e9  P=0.0  \u2193 Low",sp1,sp2+24);
+    ctx.fillStyle=C_POLE; ctx.font="bold 12px -apple-system,sans-serif";
+    ctx.fillText("|DO\u27e9  P=1.0",np1,np2-10);
+    ctx.fillStyle=C_MID; ctx.font="12px -apple-system,sans-serif";
+    ctx.fillText("|\u00acDO\u27e9  P=0.0",sp1,sp2+20);
     ctx.textAlign="left";
 
-    // State vector
-    const th=S.theta, ph=S.phi+rot;
-    const vvx=Math.sin(th)*Math.cos(ph);
-    const vvy=Math.cos(th);
-    const vvz=Math.sin(th)*Math.sin(ph);
-    const [ovx,ovy]=proj(0,0,0,0);
-    const [vpx,vpy]=proj(vvx*0.92,vvy*0.92,vvz*0.92,0);
+    // State vector — in world space, same 3D rotation applied
+    const th=S.theta, ph=S.phi;
+    const svx=Math.sin(th)*Math.cos(ph);
+    const svy=Math.cos(th);
+    const svz=Math.sin(th)*Math.sin(ph);
+    const [ovx,ovy]=proj(0,0,0,ry,rx);
+    const [vpx,vpy]=proj(svx*0.92,svy*0.92,svz*0.92,ry,rx);
 
     // Glow
-    ctx.shadowColor=riskCol+"33"; ctx.shadowBlur=14;
+    ctx.shadowColor=riskCol+"44"; ctx.shadowBlur=16;
     ctx.beginPath(); ctx.moveTo(ovx,ovy); ctx.lineTo(vpx,vpy);
     ctx.strokeStyle=riskCol; ctx.lineWidth=4; ctx.stroke();
     ctx.shadowBlur=0;
@@ -831,45 +834,53 @@ with TABS[6]:
     ctx.lineTo(vpx-13*Math.cos(ang2+0.38),vpy-13*Math.sin(ang2+0.38));
     ctx.closePath(); ctx.fillStyle=riskCol; ctx.fill();
 
-    // Vector label with pill background
+    // Vector label with pill
     const lbl=`|\u03c8\u27e9  P(DO) = ${{(S.risk*100).toFixed(1)}}%`;
     ctx.font="bold 13px -apple-system,sans-serif";
     const lw=ctx.measureText(lbl).width;
-    const lx=vpx>cx ? vpx+11 : vpx-lw-11;
-    const ly=vpy<90 ? vpy+22 : vpy-9;
+    const lx=vpx>cx ? vpx+12 : vpx-lw-12;
+    const ly=vpy<90 ? vpy+22 : vpy-10;
     ctx.fillStyle="rgba(255,255,255,0.90)";
     ctx.fillRect(lx-3,ly-14,lw+6,19);
     ctx.fillStyle=riskCol; ctx.fillText(lbl,lx,ly);
 
-    // Superposition equatorial ring (when SI > 0.6)
+    // Equatorial superposition ring
     if(S.si>0.6){{
-      ctx.beginPath(); let f4=true;
+      ctx.beginPath(); let fi3=true;
       for(let a=0;a<=360;a+=4){{
         const r=a*Math.PI/180;
-        const [sx,sy]=proj(Math.cos(r),0,Math.sin(r),rot);
-        f4 ? (ctx.moveTo(sx,sy),f4=false) : ctx.lineTo(sx,sy);
+        const [sx,sy]=proj(Math.cos(r),0,Math.sin(r),ry,rx);
+        fi3?(ctx.moveTo(sx,sy),fi3=false):ctx.lineTo(sx,sy);
       }}
       ctx.closePath();
-      ctx.strokeStyle="#B8850A66"; ctx.lineWidth=2;
+      ctx.strokeStyle="#B8850A55"; ctx.lineWidth=2;
       ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
     }}
 
     // Centre dot
     ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2);
-    ctx.fillStyle="#aaa"; ctx.fill();
+    ctx.fillStyle="#bbb"; ctx.fill();
 
-    // Update sub-label
-    const deg=x=>((x*180/Math.PI)%360).toFixed(1);
+    // Sub-label
     document.getElementById("bloch-label").textContent =
-      "\u03b8 = "+deg(S.theta)+"\u00b0  \u00b7  \u03c6 = "+deg(S.phi+rot)+"\u00b0  \u00b7  SI = "+S.si.toFixed(3);
+      "\u03b8 = "+(S.theta*180/Math.PI).toFixed(1)+"\u00b0  \u00b7  "
+      +"\u03c6 = "+(S.phi*180/Math.PI).toFixed(1)+"\u00b0  \u00b7  "
+      +"SI = "+S.si.toFixed(3);
   }}
 
-  // Gentle oscillation — ±35° over 12 seconds
+  // ── 3D precession animation ──────────────────────────────────────────────
+  // Mimics the physical precession of a spin-1/2 particle on the Bloch sphere:
+  //   - Primary: slow continuous rotation around Z (vertical) axis  — azimuthal precession
+  //   - Secondary: gentle sinusoidal tilt around X axis             — nutation / latitude wobble
+  // Together these trace an elegant looping path characteristic of genuine
+  // Bloch-sphere dynamics under a static magnetic field.
   let t0=null;
   function animate(ts){{
     if(!t0) t0=ts;
-    const rot=0.60*Math.sin(2*Math.PI*(ts-t0)/12000);
-    draw(rot);
+    const e=(ts-t0)/1000;                 // seconds elapsed
+    const ry = (e * 2*Math.PI/20);        // full Y rotation every 20s
+    const rx = 0.28*Math.sin(e*2*Math.PI/9);  // ±16° X tilt, period 9s
+    draw(ry, rx);
     requestAnimationFrame(animate);
   }}
   requestAnimationFrame(animate);
