@@ -1278,7 +1278,34 @@ with TABS[8]:
 # ── T3: Intake (Chat) — PARVIS assistant ────────────────────────────────────
 with TABS[2]:
     st.markdown("### 💬 Intake (Chat)")
-    st.caption("Ask PARVIS anything about the current case — or describe a case and let it populate the network. PARVIS is aware of all current node values.")
+
+    # ── How it works ──────────────────────────────────────────────────────────
+    with st.expander("ℹ️ How to use this assistant", expanded=len(st.session_state.get("chat_history",[]))==0):
+        st.markdown("""
+**This is a real AI assistant** — powered by Claude — that knows the current state of your PARVIS network at all times.
+
+**What it can do:**
+- Answer questions about any node value, doctrinal principle, or network output
+- Explain *why* Node 20 is at its current level and which nodes are driving it
+- Accept a plain-language case description and propose values across all tabs
+- Suggest changes to the network — but only *propose* them; you confirm each one before anything changes
+
+**How to use it:**
+1. **Type or dictate** a case description or question in the chat box below
+2. If PARVIS suggests a change, a card appears with ✅ Apply / ✗ Decline buttons — nothing is written until you click Apply
+3. Navigate to any other tab to verify and fine-tune the populated values
+
+**Example prompts:**
+> *"The offender is 42, Indigenous, from Northern Manitoba. Two prior assault convictions, bail denied for 9 months, Gladue report filed but the judge only cited it in passing. PCL-R score 22."*
+
+> *"Why is Node 7 at 40% and what does that mean for the DO risk?"*
+
+> *"What Gladue factors are most relevant here given the criminal record?"*
+
+> *"If I remove the Ewert tool correction, what happens to Node 20?"*
+
+**API key required** — enter your Anthropic key in the ⚙️ API settings panel to activate the assistant.
+        """)
 
     st.markdown(dobar(P[20]), unsafe_allow_html=True)
 
@@ -1304,10 +1331,14 @@ with TABS[2]:
     # ── Speech-to-text widget ─────────────────────────────────────────────────
     speech_html = """
 <div style='margin:6px 0 10px 0'>
-  <div style='display:flex;align-items:center;gap:10px;margin-bottom:5px'>
+  <div style='display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap'>
     <button id='mic-btn2' onclick='toggleMic2()' style='background:#1B2A4A;color:white;
       border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px'>
       🎤 <span id='mic-label2'>Dictate</span>
+    </button>
+    <button id='copy-btn2' onclick='copyChat2()' style='background:#185FA5;color:white;
+      border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;display:none'>
+      📋 Copy to chat
     </button>
     <span id='mic-status2' style='font-size:12px;color:#888;font-style:italic'></span>
   </div>
@@ -1332,14 +1363,26 @@ function toggleMic2(){
     document.getElementById('mic-label2').textContent='Dictate';
     document.getElementById('mic-btn2').style.background='#1B2A4A';
     const t=document.getElementById('transcript-box2').textContent;
-    if(t.trim()){document.getElementById('mic-status2').textContent='Done — copy text below to chat ↓';}};
+    if(t.trim()){
+      document.getElementById('mic-status2').textContent='Ready — click Copy to chat ↓';
+      document.getElementById('copy-btn2').style.display='inline-block';
+    }};
   recog2.start();running2=true;
   document.getElementById('mic-label2').textContent='Stop';
   document.getElementById('mic-btn2').style.background='#A32D2D';
   document.getElementById('mic-status2').textContent='Listening…';
 }
+function copyChat2(){
+  const t=document.getElementById('transcript-box2').textContent;
+  if(t.trim()){
+    navigator.clipboard.writeText(t).then(()=>{
+      document.getElementById('mic-status2').textContent='✓ Copied — paste into the chat box below (Cmd+V or Ctrl+V)';
+      document.getElementById('copy-btn2').style.background='#3B6D11';
+    });
+  }
+}
 </script>"""
-    st.components.v1.html(speech_html, height=80, scrolling=False)
+    st.components.v1.html(speech_html, height=90, scrolling=False)
 
     # ── Build PARVIS context for system prompt ────────────────────────────────
     def _build_context() -> str:
@@ -1403,6 +1446,27 @@ IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. This distinc
 thesis's central normative contribution. Always maintain this framing in your responses."""
         return ctx
 
+    # ── How it works panel ────────────────────────────────────────────────────
+    with st.expander("ℹ️ How PARVIS Chat works", expanded=len(st.session_state.chat_history)==0):
+        st.markdown("""
+**PARVIS Chat is fully context-aware.** Every message you send includes a live snapshot of the entire network:
+- All 20 node posteriors (risk factors and distortion corrections)
+- Active Gladue factors and Morris/Ellis SCE factors
+- Criminal record with calibrated weights and Boutilier pattern analysis
+- Connection strength, framework setting, and Node 20 output
+
+**What you can ask:**
+- *"Why is Node 7 at 40%?"* — PARVIS explains what's driving any node value
+- *"What would happen if the Gladue report had been properly engaged?"* — scenario reasoning
+- *"Explain what the superposition index of 0.50 means for this case"*
+- *"Which distortion corrections are most significant right now?"*
+- *"Describe an Indigenous offender, 42, Ontario, prior assault conviction, PCL-R 26"* — populates the network
+
+**When PARVIS suggests a change to a node value**, it will show you a confirmation card with the current value, proposed value, and reason. **Nothing changes until you click ✅ Apply.**
+
+**Dictation:** click **🎤 Dictate**, speak your case description, then click **📋 Copy to chat** and paste into the chat box below.
+        """)
+
     # ── Display chat history ──────────────────────────────────────────────────
     chat_container = st.container()
     with chat_container:
@@ -1453,7 +1517,7 @@ thesis's central normative contribution. Always maintain this framing in your re
 
     # ── Pending confirmation (for bulk proposals from intake-style messages) ──
     # ── Chat input ────────────────────────────────────────────────────────────
-    if prompt := st.chat_input("Ask PARVIS anything, or describe a case…"):
+    if prompt := st.chat_input("Describe the case or ask a question — e.g. 'Male, 42, Indigenous, bail denied 8 months, Gladue not engaged, PCL-R 22'"):
         # Add user message
         st.session_state.chat_history.append({"role":"user","content":prompt})
 
