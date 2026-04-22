@@ -2028,7 +2028,7 @@ with TABS[8]:
     # ── Save current scenario ─────────────────────────────────────────────────
     sc1, sc2 = st.columns([3,1])
     with sc1:
-        sc_name = st.text_input("Scenario name", placeholder="e.g. Xavier — no Gladue corrections applied", key="sc_name")
+        sc_name = st.text_input("Scenario name", placeholder="e.g. Offender A — no Gladue factors applied", key="sc_name")
     with sc2:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         if st.button("💾 Save current profile", key="sc_save", use_container_width=True):
