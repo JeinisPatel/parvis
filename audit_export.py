@@ -198,47 +198,66 @@ def build_docx(Pa, da, bla, cG, cS, mx, cr_rec, cr_doc_adj, doc_adj,
         r2.font.color.rgb = RGBColor.from_string(vc)
         return p
 
-    # ── TITLE: embedded Streamlit header image (pixel-perfect) ──────────────
+    # ── TITLE: P. [logo] .R.V.I.S ─────────────────────────────────────────────
     doc.add_paragraph()  # top spacing
+    tp = doc.add_paragraph()
+    tp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    tp.paragraph_format.space_before = Pt(0)
+    tp.paragraph_format.space_after  = Pt(4)
+    # Fixed line spacing prevents logo from pushing line height unpredictably
+    tp.paragraph_format.line_spacing = Pt(44)
 
-    header_img_paths = [
-        "parvis_header_image.png",
-        "parvis/parvis_header_image.png",
-        "/mount/src/parvis/parvis_header_image.png",
-    ]
-    import os as _os
-    header_img = next((p for p in header_img_paths if _os.path.exists(p)), None)
+    r_p = tp.add_run("P.")
+    r_p.bold = True; r_p.font.size = Pt(36)
+    r_p.font.name = FONT
+    r_p.font.color.rgb = RGBColor.from_string("1B2A4A")
 
-    if header_img:
-        hp2 = doc.add_paragraph()
-        hp2.paragraph_format.space_before = Pt(0)
-        hp2.paragraph_format.space_after  = Pt(10)
-        hr2 = hp2.add_run()
-        hr2.add_picture(header_img, width=Cm(15.4))
+    # Inline logo — sized to match cap height, dist set for vertical centering
+    if logos.get("light"):
+        r_logo = tp.add_run()
+        r_logo.add_picture(logos["light"], width=Pt(34))
+        # Adjust vertical position via inline image XML
+        from docx.shared import Emu
+        drawing = tp._p.findall(".//" + qn("w:drawing"))[-1]
+        inline = drawing.find(qn("wp:inline"))
+        if inline is not None:
+            inline.set("distT", str(int(Pt(2).emu)))
+            inline.set("distB", "0")
+            inline.set("distL", str(int(Pt(1).emu)))
+            inline.set("distR", str(int(Pt(1).emu)))
     else:
-        # Fallback plain text
-        tp = doc.add_paragraph()
-        tp.paragraph_format.space_after = Pt(4)
-        r_f = tp.add_run("P.A.R.V.I.S")
-        r_f.bold = True; r_f.font.size = Pt(36)
-        r_f.font.name = FONT
-        r_f.font.color.rgb = RGBColor.from_string("1B2A4A")
-        sp = doc.add_paragraph()
-        sr = sp.add_run("Probabilistic and Analytical Reasoning Virtual Intelligence System")
-        sr.italic = True; sr.font.size = Pt(10.5); sr.font.name = FONT
-        sr.font.color.rgb = RGBColor.from_string("555555")
-        ip = doc.add_paragraph()
-        ip.paragraph_format.space_after = Pt(10)
-        for part, col in [
-            ("Jeinis Patel, PhD Candidate and Barrister", "A32D2D"),
-            ("  \u00b7  University of London", "185FA5"),
-            ("  \u00b7  Ethical AI Initiative", "1B5E20"),
-            (f"  \u00b7  {datetime.now().strftime('%d %B %Y  %H:%M')}", "777777"),
-            ("  \u00b7  \u00a9 2026 Jeinis Patel", "999999"),
-        ]:
-            ir = ip.add_run(part)
-            ir.font.size = Pt(9.5); ir.font.name = FONT
-            ir.font.color.rgb = RGBColor.from_string(col)
+        r_dot = tp.add_run("A")
+        r_dot.bold = True; r_dot.font.size = Pt(36)
+        r_dot.font.name = FONT
+        r_dot.font.color.rgb = RGBColor.from_string("1B2A4A")
+
+    r_rest = tp.add_run(".R.V.I.S")
+    r_rest.bold = True; r_rest.font.size = Pt(36)
+    r_rest.font.name = FONT
+    r_rest.font.color.rgb = RGBColor.from_string("1B2A4A")
+
+    # Subtitle: italic system name
+    sp = doc.add_paragraph()
+    sp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    sp.paragraph_format.space_after = Pt(2)
+    sr = sp.add_run("Probabilistic and Analytical Reasoning Virtual Intelligence System")
+    sr.italic = True; sr.font.size = Pt(10.5); sr.font.name = FONT
+    sr.font.color.rgb = RGBColor.from_string("555555")
+
+    # Authorship line
+    ip = doc.add_paragraph()
+    ip.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    ip.paragraph_format.space_after = Pt(10)
+    for part, col in [
+        ("Jeinis Patel, PhD Candidate and Barrister", "A32D2D"),
+        ("  \u00b7  University of London", "185FA5"),
+        ("  \u00b7  Ethical AI Initiative", "1B5E20"),
+        (f"  \u00b7  {datetime.now().strftime('%d %B %Y  %H:%M')}", "777777"),
+        ("  \u00b7  \u00a9 2026 Jeinis Patel", "999999"),
+    ]:
+        ir = ip.add_run(part)
+        ir.font.size = Pt(9.5); ir.font.name = FONT
+        ir.font.color.rgb = RGBColor.from_string(col)
 
     add_rule("1B2A4A", "10")
 
