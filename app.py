@@ -706,10 +706,11 @@ with TABS[6]:
 
     bloch_html = f"""
 <div style="display:flex;flex-direction:column;align-items:center;gap:0">
-  <canvas id="bloch" width="380" height="380"
-    style="border-radius:12px;background:linear-gradient(135deg,#0d1b2a 0%,#1a2f45 100%)">
+  <canvas id="bloch" width="570" height="570"
+    style="border-radius:14px;background:#ffffff;border:1px solid #e8e8e8;
+           box-shadow:0 2px 12px rgba(0,0,0,0.08)">
   </canvas>
-  <div id="bloch-label" style="font-family:monospace;font-size:12px;color:#aaa;margin-top:4px;text-align:center"></div>
+  <div id="bloch-label" style="font-family:monospace;font-size:13px;color:#666;margin-top:6px;text-align:center"></div>
 </div>
 <script>
 (function(){{
@@ -717,19 +718,27 @@ with TABS[6]:
   const canvas = document.getElementById("bloch");
   const ctx    = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  const cx = W/2, cy = H/2, R = 150;
-  let angle = 0;   // azimuthal rotation offset for animation
+  const cx = W/2, cy = H/2, R = 220;   // 50% larger radius
+  let angle = 0;
 
-  // Color by risk level
-  const riskCol = state.risk >= 0.55 ? "#E05252" :
-                  state.risk >= 0.35 ? "#E09B2D" : "#4CAF50";
+  // Palette: dark grey/black silhouette on white
+  const SPHERE_STROKE  = "rgba(0,0,0,0.12)";
+  const LAT_EQ_STROKE  = "rgba(0,0,0,0.28)";
+  const LAT_STROKE     = "rgba(0,0,0,0.09)";
+  const MERID_STROKE   = "rgba(0,0,0,0.06)";
+  const AXIS_RISK      = "#C0392B";    // red — risk axis
+  const AXIS_MIT       = "#1A6B35";    // green — mitigation axis
+  const AXIS_POLE      = "#1B2A4A";    // navy — poles
+  const TEXT_DARK      = "#1B2A4A";
+  const TEXT_MID       = "#555555";
+
+  const riskCol = state.risk >= 0.55 ? "#C0392B" :
+                  state.risk >= 0.35 ? "#B8850A" : "#1A6B35";
 
   function project(x, y, z, rotY) {{
-    // Rotate around Y axis
     const rx = x*Math.cos(rotY) - z*Math.sin(rotY);
     const rz = x*Math.sin(rotY) + z*Math.cos(rotY);
-    // Simple perspective projection
-    const fov = 2.8;
+    const fov = 3.0;
     const sx = cx + rx * R * fov / (fov + rz + 2);
     const sy = cy - y * R * fov / (fov + rz + 2);
     return [sx, sy, rz];
@@ -738,133 +747,151 @@ with TABS[6]:
   function drawSphere(rot) {{
     ctx.clearRect(0, 0, W, H);
 
-    // Sphere background
-    const grad = ctx.createRadialGradient(cx-40, cy-40, 10, cx, cy, R+10);
-    grad.addColorStop(0, "rgba(255,255,255,0.05)");
-    grad.addColorStop(1, "rgba(255,255,255,0.01)");
+    // White background (already set by canvas style)
+    // Sphere outline
+    const grad = ctx.createRadialGradient(cx-50, cy-50, 20, cx, cy, R+10);
+    grad.addColorStop(0, "rgba(220,225,235,0.55)");
+    grad.addColorStop(0.7, "rgba(235,238,245,0.30)");
+    grad.addColorStop(1, "rgba(245,246,250,0.10)");
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI*2);
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
     ctx.fillStyle = grad;
     ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 
-    // Draw latitude circles (equator prominent)
+    // Latitude circles
     for (let lat = -60; lat <= 60; lat += 30) {{
       const latR = Math.cos(lat * Math.PI/180);
       const latY = Math.sin(lat * Math.PI/180);
       const isEq = lat === 0;
       ctx.beginPath();
       let first = true;
-      for (let a = 0; a <= 360; a += 4) {{
+      for (let a = 0; a <= 360; a += 3) {{
         const rad = a * Math.PI/180;
-        const [sx, sy, sz] = project(latR*Math.cos(rad), latY, latR*Math.sin(rad), rot);
+        const [sx, sy] = project(latR*Math.cos(rad), latY, latR*Math.sin(rad), rot);
         if (first) {{ ctx.moveTo(sx, sy); first=false; }}
         else ctx.lineTo(sx, sy);
       }}
       ctx.closePath();
-      ctx.strokeStyle = isEq ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.08)";
-      ctx.lineWidth = isEq ? 1.5 : 0.8;
+      ctx.strokeStyle = isEq ? LAT_EQ_STROKE : LAT_STROKE;
+      ctx.lineWidth = isEq ? 1.4 : 0.7;
       ctx.stroke();
     }}
 
-    // Draw meridian lines
+    // Meridian lines
     for (let lon = 0; lon < 180; lon += 45) {{
       const lonR = lon * Math.PI/180;
       ctx.beginPath();
       let first = true;
-      for (let a = 0; a <= 360; a += 4) {{
+      for (let a = 0; a <= 360; a += 3) {{
         const rad = a * Math.PI/180;
-        const [sx, sy, sz] = project(Math.sin(rad)*Math.cos(lonR+rot), Math.cos(rad), Math.sin(rad)*Math.sin(lonR+rot), 0);
+        const [sx, sy] = project(Math.sin(rad)*Math.cos(lonR+rot), Math.cos(rad), Math.sin(rad)*Math.sin(lonR+rot), 0);
         if (first) {{ ctx.moveTo(sx, sy); first=false; }}
         else ctx.lineTo(sx, sy);
       }}
-      ctx.strokeStyle = "rgba(255,255,255,0.07)";
-      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = MERID_STROKE;
+      ctx.lineWidth = 0.7;
       ctx.stroke();
     }}
 
     // Axes
     const axes = [
-      [1,0,0,"R (Risk)","#E05252"],
-      [-1,0,0,"M (Mit)","#4CAF50"],
-      [0,1,0,"|DO⟩","#ffffff"],
-      [0,-1,0,"|¬DO⟩","#aaaaaa"],
+      [1,0,0,"Risk (N2/3/4/18)", AXIS_RISK],
+      [-1,0,0,"Mitigation", AXIS_MIT],
+      [0,1,0,"|DO⟩ P=1.0", AXIS_POLE],
+      [0,-1,0,"|\u00acDO⟩ P=0.0", TEXT_MID],
     ];
     axes.forEach(([ax,ay,az,lbl,col]) => {{
-      const [sx, sy] = project(ax*0.9, ay*0.9, az*0.9, rot);
+      const [sx, sy] = project(ax*0.88, ay*0.88, az*0.88, rot);
       const [ox, oy] = project(0, 0, 0, rot);
       ctx.beginPath();
       ctx.moveTo(ox, oy);
       ctx.lineTo(sx, sy);
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = col + "88";
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([5, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = col;
-      ctx.font = "bold 10px monospace";
-      ctx.fillText(lbl, sx+4, sy+4);
+      ctx.font = "bold 13px -apple-system,sans-serif";
+      ctx.fillText(lbl, sx+6, sy+5);
     }});
 
-    // State vector
+    // State vector — thick, prominent
     const th = state.theta;
     const ph = state.phi + rot;
     const vx = Math.sin(th)*Math.cos(ph);
     const vy = Math.cos(th);
     const vz = Math.sin(th)*Math.sin(ph);
-    const [ox, oy]  = project(0, 0, 0, 0);
-    const [vsx, vsy] = project(vx*0.95, vy*0.95, vz*0.95, 0);
+    const [ox, oy]   = project(0, 0, 0, 0);
+    const [vsx, vsy] = project(vx*0.93, vy*0.93, vz*0.93, 0);
 
-    // Glow
-    ctx.shadowColor = riskCol;
-    ctx.shadowBlur = 18;
+    // Shadow/glow (subtle on white)
+    ctx.shadowColor = riskCol + "44";
+    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.moveTo(ox, oy);
     ctx.lineTo(vsx, vsy);
     ctx.strokeStyle = riskCol;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Tip dot
+    // Arrowhead
+    const ang = Math.atan2(vsy-oy, vsx-ox);
     ctx.beginPath();
-    ctx.arc(vsx, vsy, 7, 0, Math.PI*2);
+    ctx.moveTo(vsx, vsy);
+    ctx.lineTo(vsx - 14*Math.cos(ang-0.4), vsy - 14*Math.sin(ang-0.4));
+    ctx.lineTo(vsx - 14*Math.cos(ang+0.4), vsy - 14*Math.sin(ang+0.4));
+    ctx.closePath();
     ctx.fillStyle = riskCol;
     ctx.fill();
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
 
-    // Label on vector tip
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 11px monospace";
-    ctx.fillText(`|ψ⟩ P(DO)=${{(state.risk*100).toFixed(1)}}%`, vsx+10, vsy-6);
+    // Tip label (larger)
+    ctx.fillStyle = TEXT_DARK;
+    ctx.font = "bold 14px -apple-system,sans-serif";
+    ctx.fillText(`|\u03c8\u27e9  P(DO) = ${{(state.risk*100).toFixed(1)}}%`, vsx+12, vsy-8);
 
-    // Superposition ring at equator if high SI
+    // Superposition ring
     if (state.si > 0.6) {{
+      const [eq1] = project(1, 0, 0, rot);
       ctx.beginPath();
-      ctx.arc(cx, cy, R*0.15, 0, Math.PI*2);
-      ctx.strokeStyle = "rgba(255,200,50,0.5)";
+      let first = true;
+      for (let a = 0; a <= 360; a += 4) {{
+        const rad = a * Math.PI/180;
+        const [sx, sy] = project(Math.cos(rad), 0, Math.sin(rad), rot);
+        if (first) {{ ctx.moveTo(sx, sy); first=false; }}
+        else ctx.lineTo(sx, sy);
+      }}
+      ctx.closePath();
+      ctx.strokeStyle = "#B8850A88";
       ctx.lineWidth = 2;
-      ctx.setLineDash([3, 3]);
+      ctx.setLineDash([4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
     }}
 
     // Poles
-    const [nsx, nsy] = project(0, 0.95, 0, 0);
-    const [ssx, ssy] = project(0, -0.95, 0, 0);
-    ctx.fillStyle = "#fff";
-    ctx.font = "10px monospace";
-    ctx.fillText("P=1 (High)", nsx+6, nsy);
-    ctx.fillStyle = "#aaa";
-    ctx.fillText("P=0 (Low)", ssx+6, ssy);
+    const [nsx, nsy] = project(0, 0.93, 0, 0);
+    const [ssx, ssy] = project(0, -0.93, 0, 0);
+    ctx.fillStyle = AXIS_POLE;
+    ctx.font = "bold 13px -apple-system,sans-serif";
+    ctx.fillText("P=1 · High", nsx+8, nsy+5);
+    ctx.fillStyle = TEXT_MID;
+    ctx.font = "13px -apple-system,sans-serif";
+    ctx.fillText("P=0 · Low", ssx+8, ssy+5);
+
+    // Centre dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI*2);
+    ctx.fillStyle = "#999";
+    ctx.fill();
 
     // Update label
     document.getElementById("bloch-label").textContent =
-      `θ=${{(state.theta*180/Math.PI).toFixed(1)}}° · φ=${{(state.phi*180/Math.PI + rot*180/Math.PI).toFixed(1)}}° · SI=${{state.si.toFixed(2)}}`;
+      `\u03b8 = ${{(state.theta*180/Math.PI).toFixed(1)}}\u00b0  \u00b7  \u03c6 = ${{((state.phi + rot)*180/Math.PI % 360).toFixed(1)}}\u00b0  \u00b7  SI = ${{state.si.toFixed(3)}}`;
   }}
 
   // Animate — slow, gentle rotation
@@ -884,7 +911,7 @@ with TABS[6]:
     with qb1:
         st.markdown("#### Bloch sphere — quantum belief state |ψ⟩")
         st.caption("The state vector rotates slowly to illustrate the superposition of belief states. North pole = fully collapsed to DO (P=1). South pole = fully collapsed to no DO (P=0). Equator = maximum pre-decisional ambiguity (P=0.5).")
-        st.components.v1.html(bloch_html, height=430, scrolling=False)
+        st.components.v1.html(bloch_html, height=620, scrolling=False)
 
     with qb2:
         st.markdown("#### State vector")
@@ -922,6 +949,42 @@ with TABS[6]:
         if diags:
             fc = draw_comparison_chart(dn7, dn7, si)
             st.pyplot(fc, use_container_width=True)
+
+        # ── Why QBism over classical? ─────────────────────────────────────────
+        with st.expander("❓ Why quantum values alongside classical Bayesian?", expanded=False):
+            st.markdown("""
+**Classical Bayesian inference** (Variable Elimination — what Node 20 computes) gives you a single
+probability: *P(DO designation) = 24.9%*. This is mathematically rigorous and the core of PARVIS.
+
+**But it has a structural limitation in legal settings:** it treats each node's posterior as a stable,
+independent belief state. In reality, the legal reasoning process is subject to:
+
+| Classical assumption | What actually happens in DO proceedings |
+|---|---|
+| Priors are independent | Distorted priors propagate through the network (Bail-denial → coercive plea → conviction → record) |
+| Evidence is commutative | The *order* evidence is presented alters judicial belief (Busemeyer & Bruza 2012 §4.3) |
+| Context is fixed | The same Gladue factor carries different weight depending on which other factors surround it |
+| Belief is resolved | Sentencing courts are required to decide even when epistemic conditions are genuinely ambiguous |
+
+**QBism (Quantum Bayesianism)** treats the belief state as a *superposition* — the judge holds
+both |DO⟩ and |¬DO⟩ simultaneously until the moment of decision. This is not a metaphor: it
+generates measurable predictions about non-commutativity and contextual interference that
+classical Bayes cannot.
+
+**The Bloch sphere encodes this:**
+- The **state vector |ψ⟩** sits on the sphere. Its polar angle θ encodes the classical probability (P(DO) = cos²(θ/2)).
+  But its azimuthal angle φ and distance from the poles encode *how resolved* that belief actually is.
+- **Superposition index (SI) = |2·P - 1|** measures distance from the equator. SI=0 = maximum ambiguity.
+  SI=1 = fully resolved. In this case SI = {si:.3f}, meaning the system is **{"well resolved" if si > 0.7 else "in moderate superposition" if si > 0.4 else "near maximum pre-decisional ambiguity"}**.
+
+**The diagnostic value is not in changing the number.** Node 20 stays at {dn7*100:.1f}%. The value is in
+identifying whether the conditions that produced that number are epistemically stable — or whether
+the system has produced a precise answer from imprecise foundations.
+
+*Thesis reference: Appendix Q §AQ.3.3 — The four diagnostic conditions (prior contamination, order effects,
+contextual interference, belief stasis) each represent a departure from the classical independence assumption
+that Variable Elimination requires to be valid.*
+            """.format(si=si, dn7=dn7))
 
     # ── Diagnostic conditions ─────────────────────────────────────────────────
     if diags:
