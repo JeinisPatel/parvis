@@ -1628,12 +1628,12 @@ with TABS[9]:
 
     st.markdown("---")
 
-    # ── Export functions ───────────────────────────────────────────────────────
-    # ── Export functions (from audit_export.py) ───────────────────────────────
-    from audit_export import build_docx as _build_docx_fn, build_pdf as _build_pdf_fn
+    # ── Export functions — reload module each time to bust Streamlit cache ────
+    import importlib, audit_export as _ae
+    importlib.reload(_ae)
 
     def _build_docx():
-        return _build_docx_fn(
+        return _ae.build_docx(
             Pa=Pa, da=da, bla=bla, cG=cG, cS=cS, mx=mx,
             cr_rec=st.session_state.criminal_record,
             cr_doc_adj=st.session_state.cr_doc_adj,
@@ -1645,7 +1645,7 @@ with TABS[9]:
         )
 
     def _build_pdf():
-        return _build_pdf_fn(
+        return _ae.build_pdf(
             Pa=Pa, da=da, bla=bla, cG=cG, cS=cS, mx=mx,
             cr_rec=st.session_state.criminal_record,
             cr_doc_adj=st.session_state.cr_doc_adj,
