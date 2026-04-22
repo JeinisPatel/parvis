@@ -1258,25 +1258,37 @@ with TABS[8]:
                 for f in flags
             ]) if flags else "<span style='color:#aaa;font-size:.72rem'>No distortion flags</span>"
 
-            st.markdown(f"""<div style='border:1px solid #ddd;border-left:4px solid {col_c};
-                border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.4rem;background:#fafafa'>
-                <div style='display:flex;justify-content:space-between;align-items:flex-start'>
-                  <div>
-                    <div style='font-weight:600;font-size:.95rem'>{e["offence"]}{doc_badge}</div>
-                    <div style='font-size:.78rem;color:#777;margin-top:2px'>{e["year"]} · {e["court"]} · {e["jurisdiction"]} · {e.get("sentence","") or "Sentence not entered"}</div>
-                    <div style='margin-top:4px'>
-                      <span style='background:#f0f0f0;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#555'>⚖️ {e.get("seriousness_label","—")}</span>
-                      {"&nbsp;<span style=\'background:#FDECEA;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#A32D2D\'>🔴 Gang / organized crime context</span>" if e.get("gang") else ""}
-                    </div>
-                  </div>
-                  <div style='text-align:right;min-width:90px'>
-                    <div style='font-size:1.35rem;font-weight:700;color:{col_c}'>{cal_pct:.0f}%</div>
-                    <div style='font-size:.7rem;color:#aaa'>calibrated weight</div>
-                    <div style='font-size:.7rem;color:#ccc;text-decoration:line-through'>{raw_pct:.0f}% raw</div>
-                  </div>
-                </div>
-                <div style='margin-top:.55rem'>{flag_html}</div>
-                </div>""", unsafe_allow_html=True)
+            # Pre-build badge strings to avoid nested quote conflicts in f-string
+            ser_label   = e.get("seriousness_label", "—")
+            ser_badge   = f"<span style='background:#f0f0f0;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#555'>⚖️ {ser_label}</span>"
+            gang_badge  = (
+                "<span style='background:#FDECEA;border-radius:4px;padding:1px 7px;"
+                "font-size:.68rem;color:#A32D2D;margin-left:4px'>🔴 Gang context</span>"
+                if e.get("gang") else ""
+            )
+            offence_str = e["offence"]
+            court_str   = e.get("court", "")
+            jur_str     = e.get("jurisdiction", "")
+            sent_str    = e.get("sentence", "") or "Sentence not entered"
+            yr_str      = str(e["year"])
+
+            st.markdown(
+                f"<div style='border:1px solid #ddd;border-left:4px solid {col_c};"
+                f"border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.4rem;background:#fafafa'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:flex-start'>"
+                f"<div>"
+                f"<div style='font-weight:600;font-size:.95rem'>{offence_str}{doc_badge}</div>"
+                f"<div style='font-size:.78rem;color:#777;margin-top:2px'>{yr_str} · {court_str} · {jur_str} · {sent_str}</div>"
+                f"<div style='margin-top:4px'>{ser_badge}{gang_badge}</div>"
+                f"</div>"
+                f"<div style='text-align:right;min-width:90px'>"
+                f"<div style='font-size:1.35rem;font-weight:700;color:{col_c}'>{cal_pct:.0f}%</div>"
+                f"<div style='font-size:.7rem;color:#aaa'>calibrated weight</div>"
+                f"<div style='font-size:.7rem;color:#ccc;text-decoration:line-through'>{raw_pct:.0f}% raw</div>"
+                f"</div></div>"
+                f"<div style='margin-top:.55rem'>{flag_html}</div>"
+                f"</div>",
+                unsafe_allow_html=True)
 
             # ── Per-conviction action row ──────────────────────────────────────
             cb1, cb2, cb3 = st.columns([4, 2, 1])
