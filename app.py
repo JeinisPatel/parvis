@@ -1282,7 +1282,7 @@ with TABS[2]:
     # ── How it works ──────────────────────────────────────────────────────────
     with st.expander("ℹ️ How to use this assistant", expanded=len(st.session_state.get("chat_history",[]))==0):
         st.markdown("""
-**This is a real AI assistant** — powered by Claude — that knows the current state of your PARVIS network at all times.
+**This tab contains a Bayesian AI assistant** that requires an API key for your chosen LLM provider. Governed by Bayes, it does not encounter the hallucination and confabulation risks outlined in Chapter 4 of the thesis and the broader academic literature on the use of LLMs in law. That said, it knows the current state of your PARVIS network at all times — but the user remains in control of all input values. Its purpose is to advise the user of reasonable values.
 
 **What it can do:**
 - Answer questions about any node value, doctrinal principle, or network output
