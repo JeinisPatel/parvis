@@ -1142,14 +1142,37 @@ with TABS[8]:
         if gang_entries:
             cr_adj[14] = cr_adj.get(14, 0) + float(np.clip(0.08 * len(gang_entries), 0.0, 0.25))
         if weapon_entries:
-            # Weapon use → boosts dynamic risk (N18) and violent history (N2)
             cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.06 * len(weapon_entries), 0.0, 0.20))
         if child_entries:
-            # Child victim → boosts sexual offence profile context (N4 adjacent)
             cr_adj[4]  = cr_adj.get(4, 0)  + float(np.clip(0.07 * len(child_entries), 0.0, 0.20))
         if trust_entries:
-            # Position of trust → boosts psychopathy/predatory behaviour signal (N3)
             cr_adj[3]  = cr_adj.get(3, 0)  + float(np.clip(0.05 * len(trust_entries), 0.0, 0.15))
+        # New aggravating factors → node signals
+        domestic_e = [e for e in rec if e.get("domestic_violence", False)]
+        hate_e     = [e for e in rec if e.get("hate_crime", False)]
+        terror_e   = [e for e in rec if e.get("terrorism", False)]
+        vuln_e     = [e for e in rec if e.get("vulnerable_victim", False)]
+        drug_e     = [e for e in rec if e.get("drug_trafficking", False)]
+        if domestic_e:
+            # Domestic violence → boosts violent history (N2) and dynamic risk (N18)
+            cr_adj[2]  = cr_adj.get(2, 0)  + float(np.clip(0.05 * len(domestic_e), 0.0, 0.15))
+            cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.04 * len(domestic_e), 0.0, 0.12))
+        if hate_e:
+            # Hate crime → boosts dynamic risk (N18)
+            cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.06 * len(hate_e), 0.0, 0.18))
+        if terror_e:
+            # Terrorism → significant boost to N18 and N2
+            cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.12 * len(terror_e), 0.0, 0.30))
+            cr_adj[2]  = cr_adj.get(2, 0)  + float(np.clip(0.10 * len(terror_e), 0.0, 0.25))
+        if vuln_e:
+            # Vulnerable victim → boosts dynamic risk (N18)
+            cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.05 * len(vuln_e), 0.0, 0.15))
+        if drug_e:
+            # Drug trafficking — Parranto [2021] — fentanyl at top of tariff
+            fentanyl_e = [e for e in drug_e if "fentanyl" in e.get("drug_type","").lower()
+                          or "carfentanil" in e.get("drug_type","").lower()]
+            cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(
+                0.06 * len(drug_e) + 0.06 * len(fentanyl_e), 0.0, 0.22))
 
         # ── Distortion aggregates → N7, N14, N12 ─────────────────────────────
         bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
@@ -1203,23 +1226,61 @@ with TABS[8]:
             cr_gang = st.checkbox(
                 "Gang / organized crime context",
                 value=False, key="cr_gang",
-                help="R v Lacasse [2015] SCC 64; s.718.2(a)(iv) CC — gang aggravating. Consider also Le [2019] SCC 34 — may reflect over-policing rather than individual culpability"
+                help="s.718.2(a)(iv) CC; R v Lacasse [2015] SCC 64 — gang context aggravating. Consider Le [2019] SCC 34 — may also reflect over-policing"
             )
             cr_weapon = st.checkbox(
                 "Weapon / firearm used or present",
                 value=False, key="cr_weapon",
-                help="s.718.2(a)(i) CC; s.85, s.95 CC — use of weapon is statutory aggravating factor. Firearm offences carry significant weight in Boutilier pattern analysis"
+                help="s.718.2(a)(i) CC; s.85, s.95 CC — statutory aggravating. Firearm offences carry significant weight in Boutilier pattern analysis"
             )
             cr_child_victim = st.checkbox(
                 "Child victim (under 18)",
                 value=False, key="cr_child",
-                help="s.718.2(a)(ii.1) CC — offences against children are statutory aggravating factors. Particularly significant for sexual offence profile (N4 / Static-99R)"
+                help="s.718.2(a)(ii.1) CC — statutory aggravating. Significant for sexual offence profile (N4 / Static-99R)"
             )
             cr_trust = st.checkbox(
                 "Position of trust / authority",
                 value=False, key="cr_trust",
-                help="s.718.2(a)(iii) CC — abuse of position of trust is statutory aggravating. Relevant to predatory behaviour analysis under Boutilier and PCL-R score (N3)"
+                help="s.718.2(a)(iii) CC — statutory aggravating. Relevant to predatory behaviour under Boutilier and PCL-R (N3)"
             )
+            cr_domestic = st.checkbox(
+                "Domestic / intimate partner violence",
+                value=False, key="cr_domestic",
+                help="s.718.2(a)(ii) CC — abuse of spouse or common-law partner is explicit statutory aggravating factor. Also relevant to Gladue analysis where colonialism intersects with family violence"
+            )
+            cr_hate = st.checkbox(
+                "Hate crime / bias motivation",
+                value=False, key="cr_hate",
+                help="s.718.2(a)(i) CC — evidence that offence motivated by bias, prejudice or hate based on race, national/ethnic origin, language, colour, religion, sex, age, disability, sexual orientation is statutory aggravating"
+            )
+            cr_terrorism = st.checkbox(
+                "Terrorism-related offence",
+                value=False, key="cr_terrorism",
+                help="s.718.2(a)(i) CC; Criminal Code Part II.1 — terrorism offences carry the highest seriousness weighting and directly engage the DO regime's public protection rationale under s.753"
+            )
+            cr_vulnerable = st.checkbox(
+                "Vulnerable victim (age, disability, circumstance)",
+                value=False, key="cr_vulnerable",
+                help="s.718.2(a)(i) CC — evidence that victim was vulnerable due to age, disability or other circumstances of vulnerability is statutory aggravating. Distinct from child victim — covers elderly, cognitively impaired, or situationally vulnerable adults"
+            )
+            cr_drugs = st.checkbox(
+                "Drug / substance trafficking (serious narcotics)",
+                value=False, key="cr_drugs",
+                help="s.718.2(a)(i) CC; Controlled Drugs and Substances Act — nature and quantity of substance trafficked is aggravating. Fentanyl, carfentanil, and methamphetamine carry greater weight than cannabis. R v Parranto [2021] SCC 46 — fentanyl trafficking attracts elevated tariff"
+            )
+            cr_drugs_type = ""
+            if cr_drugs:
+                cr_drugs_type = st.selectbox(
+                    "Substance type",
+                    ["Fentanyl / carfentanil",
+                     "Heroin / opioids",
+                     "Cocaine / crack cocaine",
+                     "Methamphetamine / MDMA",
+                     "Cannabis (pre-legalization)",
+                     "Other controlled substance"],
+                    key="cr_drugs_type",
+                    help="R v Parranto [2021] SCC 46 — fentanyl and carfentanil occupy the highest tier given lethal risk at microgram quantities"
+                )
 
         st.markdown("**Doctrinal reliability adjustments for this conviction**")
         st.caption("Each slider reflects the degree to which this specific conviction's evidentiary weight should be discounted based on the distortion nodes currently active in PARVIS.")
@@ -1255,10 +1316,19 @@ with TABS[8]:
 
         # Aggravating factor boost — statutory aggravating raises base seriousness
         agg_boost = 1.0
-        if cr_weapon:      agg_boost = min(agg_boost + 0.08, 1.25)
-        if cr_child_victim:agg_boost = min(agg_boost + 0.12, 1.25)
-        if cr_trust:       agg_boost = min(agg_boost + 0.10, 1.25)
-        if cr_gang:        agg_boost = min(agg_boost + 0.06, 1.25)
+        if cr_weapon:      agg_boost = min(agg_boost + 0.08, 1.40)
+        if cr_child_victim:agg_boost = min(agg_boost + 0.12, 1.40)
+        if cr_trust:       agg_boost = min(agg_boost + 0.10, 1.40)
+        if cr_gang:        agg_boost = min(agg_boost + 0.06, 1.40)
+        if cr_domestic:    agg_boost = min(agg_boost + 0.07, 1.40)
+        if cr_hate:        agg_boost = min(agg_boost + 0.09, 1.40)
+        if cr_terrorism:   agg_boost = min(agg_boost + 0.20, 1.40)
+        if cr_vulnerable:  agg_boost = min(agg_boost + 0.08, 1.40)
+        if cr_drugs:
+            _drug_boost = {"Fentanyl / carfentanil":0.15,"Heroin / opioids":0.10,
+                           "Cocaine / crack cocaine":0.08,"Methamphetamine / MDMA":0.09,
+                           "Cannabis (pre-legalization)":0.03,"Other controlled substance":0.06}
+            agg_boost = min(agg_boost + _drug_boost.get(cr_drugs_type, 0.06), 1.40)
 
         # Compute calibrated weight for this entry
         raw_wt = 1.0
@@ -1303,6 +1373,12 @@ with TABS[8]:
                     "weapon":            cr_weapon,
                     "child_victim":      cr_child_victim,
                     "position_of_trust": cr_trust,
+                    "domestic_violence": cr_domestic,
+                    "hate_crime":        cr_hate,
+                    "terrorism":         cr_terrorism,
+                    "vulnerable_victim": cr_vulnerable,
+                    "drug_trafficking":  cr_drugs,
+                    "drug_type":         cr_drugs_type if cr_drugs else "",
                     "adj": {
                         "bail":   adj_bail,
                         "ewert":  adj_ewert,
@@ -1379,6 +1455,13 @@ with TABS[8]:
             if e.get("child_victim"):      flags.append("👶 Child victim")
             if e.get("position_of_trust"): flags.append("🏛 Position of trust")
             if e.get("gang"):              flags.append("🔴 Gang context")
+            if e.get("domestic_violence"): flags.append("🏠 Domestic violence")
+            if e.get("hate_crime"):        flags.append("⚠️ Hate crime")
+            if e.get("terrorism"):         flags.append("🚨 Terrorism")
+            if e.get("vulnerable_victim"): flags.append("🧓 Vulnerable victim")
+            if e.get("drug_trafficking"):
+                dt = e.get("drug_type","")
+                flags.append(f"💊 Drug trafficking{' — ' + dt if dt else ''}")
             # Sentence type attenuation signal
             sent_mod_e = e.get("sent_modifier", 1.0)
             if sent_mod_e <= 0.55: flags.append(f"📋 {e.get('sentence_type','Sentence')} (↓{(1-sent_mod_e)*100:.0f}% weight)")
