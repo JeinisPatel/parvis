@@ -445,10 +445,10 @@ except ImportError:
     def canlii_ok(): return False
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-TABS=st.tabs(["🕸️ Architecture","📋 Case profile","🦅 Gladue factors",
-              "⚖️ Morris / Ellis SCE","🔬 Evidence review","📊 Inference",
-              "⚛️ QBism diagnostics","📂 Document analysis","📜 Criminal record",
-              "🔀 Scenarios","📄 Audit report"])
+TABS=st.tabs(["🕸️ Architecture","📋 Case profile","📜 Criminal record",
+              "🦅 Gladue factors","⚖️ Morris / Ellis SCE","🔬 Evidence review",
+              "📊 Inference","📂 Document analysis","🔀 Scenarios",
+              "⚛️ QBism diagnostics","📄 Audit report"])
 
 # ── T1: Architecture ──────────────────────────────────────────────────────────
 with TABS[0]:
@@ -545,7 +545,7 @@ with TABS[1]:
     st.success(f"Node 20 — DO designation risk: **{P[20]*100:.1f}%** · {bl2}")
 
 # ── T3: Gladue ────────────────────────────────────────────────────────────────
-with TABS[2]:
+with TABS[3]:
     st.markdown("### Gladue factors")
     st.caption("*R v Gladue* [1999] · *R v Ipeelee* [2012] · No causation requirement")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
@@ -565,7 +565,7 @@ with TABS[2]:
     st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
 
 # ── T4: Morris/Ellis SCE ──────────────────────────────────────────────────────
-with TABS[3]:
+with TABS[4]:
     st.markdown("### Morris / Ellis SCE")
     st.caption("*R v Morris* 2021 ONCA 680 · *R v Ellis* 2022 BCCA 278")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
@@ -630,7 +630,7 @@ with TABS[3]:
     st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
 
 # ── T5: Evidence review ───────────────────────────────────────────────────────
-with TABS[4]:
+with TABS[5]:
     st.markdown("### Evidence review")
     st.caption("Fine-tune node probabilities. Values auto-set from Case Profile and Gladue/SCE tabs.")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
@@ -656,7 +656,7 @@ with TABS[4]:
     run_inf()
 
 # ── T6: Inference ─────────────────────────────────────────────────────────────
-with TABS[5]:
+with TABS[6]:
     P=st.session_state.posteriors;dp6=P[20];bl6,bc6,bg6=rb(dp6)
     st.markdown("### Inference — posterior distribution")
     st.caption("Variable Elimination posteriors (pgmpy). Arc on DAG reflects P(High).")
@@ -678,7 +678,7 @@ with TABS[5]:
             </div></div>""",unsafe_allow_html=True)
 
 # ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
-with TABS[6]:
+with TABS[9]:
     st.markdown("### ⚛️ Quantum Bayesianism (QBism) diagnostic layer")
     st.caption("Appendix Q: *The Limits of Classical Bayesian Inference in Legally Distorted Systems* · Busemeyer & Bruza (2012) · Wojciechowski (2023)")
     st.info("This layer does **not** alter the VE posterior. It identifies epistemic conditions — cognitive and structural — that require heightened scrutiny in the legal reasoning process.")
@@ -1276,7 +1276,7 @@ with TABS[7]:
             unsafe_allow_html=True)
 
 # ── T9: Criminal record ──────────────────────────────────────────────────────
-with TABS[8]:
+with TABS[2]:
     st.markdown("### Criminal record")
     st.caption("Enter prior convictions and calibrate each entry's evidentiary weight against doctrinal distortion nodes.")
     st.markdown(dobar(P[20], show_cr=True),unsafe_allow_html=True)
@@ -2018,7 +2018,7 @@ with TABS[8]:
 
 
 # ── T10: Scenarios — side-by-side comparison ─────────────────────────────────
-with TABS[9]:
+with TABS[8]:
     st.markdown("### Scenario comparison")
     st.caption("Save the current profile as a named scenario and compare up to four profiles side by side. Shows how distortion corrections shift DO designation risk.")
 
