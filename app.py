@@ -1134,11 +1134,22 @@ with TABS[8]:
         if abs(esc["signal"]) > 0.01:
             cr_adj[18] = float(np.clip(esc["signal"], -0.30, 0.35))
 
-        # ── Gang / organized crime context → N14 boost ────────────────────────
-        gang_entries = [e for e in rec if e.get("gang", False)]
+        # ── Aggravating factors → node boosts ────────────────────────────────
+        gang_entries   = [e for e in rec if e.get("gang", False)]
+        weapon_entries = [e for e in rec if e.get("weapon", False)]
+        child_entries  = [e for e in rec if e.get("child_victim", False)]
+        trust_entries  = [e for e in rec if e.get("position_of_trust", False)]
         if gang_entries:
-            gang_factor = float(np.clip(0.08 * len(gang_entries), 0.0, 0.25))
-            cr_adj[14] = cr_adj.get(14, 0) + gang_factor
+            cr_adj[14] = cr_adj.get(14, 0) + float(np.clip(0.08 * len(gang_entries), 0.0, 0.25))
+        if weapon_entries:
+            # Weapon use → boosts dynamic risk (N18) and violent history (N2)
+            cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.06 * len(weapon_entries), 0.0, 0.20))
+        if child_entries:
+            # Child victim → boosts sexual offence profile context (N4 adjacent)
+            cr_adj[4]  = cr_adj.get(4, 0)  + float(np.clip(0.07 * len(child_entries), 0.0, 0.20))
+        if trust_entries:
+            # Position of trust → boosts psychopathy/predatory behaviour signal (N3)
+            cr_adj[3]  = cr_adj.get(3, 0)  + float(np.clip(0.05 * len(trust_entries), 0.0, 0.15))
 
         # ── Distortion aggregates → N7, N14, N12 ─────────────────────────────
         bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
@@ -1162,7 +1173,18 @@ with TABS[8]:
             cr_court     = st.text_input("Court", placeholder="e.g. Ontario Superior Court of Justice", key="cr_court")
         with ca2:
             cr_year      = st.number_input("Year of conviction", min_value=1950, max_value=2026, value=2015, step=1, key="cr_year")
-            cr_sentence  = st.text_input("Sentence", placeholder="e.g. 18 months custody", key="cr_sent")
+            cr_sentence_type = st.selectbox("Sentence type",
+                ["Federal custody (2+ years)",
+                 "Provincial custody (< 2 years)",
+                 "Conditional sentence order (CSO)",
+                 "Probation only",
+                 "Fine only",
+                 "Absolute / conditional discharge",
+                 "Time served",
+                 "Other / unknown"],
+                key="cr_sent_type",
+                help="Sentence type informs evidentiary weight — CSO/probation/discharge outcomes suggest original court assessed limited dangerousness per Boutilier [2017] SCC 64")
+            cr_sentence_detail = st.text_input("Sentence detail", placeholder="e.g. 18 months, 2 years probation", key="cr_sent_detail")
         cr_jurisdiction = st.selectbox("Province / jurisdiction",
             ["ON","BC","AB","QC","SK","MB","NS","NB","NL","PE","YT","NT","NU","Federal"],
             key="cr_jur")
@@ -1177,10 +1199,26 @@ with TABS[8]:
                 help="Boutilier [2017] SCC 64 — offence seriousness determines base weight in pattern analysis"
             )
         with cf2:
+            st.markdown("<div style='font-size:.82rem;font-weight:600;margin-bottom:4px'>Aggravating factors (s.718.2 CC)</div>", unsafe_allow_html=True)
             cr_gang = st.checkbox(
                 "Gang / organized crime context",
                 value=False, key="cr_gang",
-                help="R v Lacasse [2015] SCC 64 — gang context aggravating; but also consider Le [2019] SCC 34 — may reflect over-policing of community rather than individual culpability"
+                help="R v Lacasse [2015] SCC 64; s.718.2(a)(iv) CC — gang aggravating. Consider also Le [2019] SCC 34 — may reflect over-policing rather than individual culpability"
+            )
+            cr_weapon = st.checkbox(
+                "Weapon / firearm used or present",
+                value=False, key="cr_weapon",
+                help="s.718.2(a)(i) CC; s.85, s.95 CC — use of weapon is statutory aggravating factor. Firearm offences carry significant weight in Boutilier pattern analysis"
+            )
+            cr_child_victim = st.checkbox(
+                "Child victim (under 18)",
+                value=False, key="cr_child",
+                help="s.718.2(a)(ii.1) CC — offences against children are statutory aggravating factors. Particularly significant for sexual offence profile (N4 / Static-99R)"
+            )
+            cr_trust = st.checkbox(
+                "Position of trust / authority",
+                value=False, key="cr_trust",
+                help="s.718.2(a)(iii) CC — abuse of position of trust is statutory aggravating. Relevant to predatory behaviour analysis under Boutilier and PCL-R score (N3)"
             )
 
         st.markdown("**Doctrinal reliability adjustments for this conviction**")
@@ -1202,12 +1240,33 @@ with TABS[8]:
             adj_time   = st.slider("Temporal attenuation (age / distance)",    0.0, 1.0, min(pN15*0.6, 0.80),0.05, key="cr_adj_time",
                 help="R v Boutilier [2017] SCC 64 — old convictions carry reduced weight especially where age burnout is active")
 
+        # Sentence type modifier — CSO/probation/discharge suggests limited dangerousness
+        _sent_modifier = {
+            "Federal custody (2+ years)":         1.00,
+            "Provincial custody (< 2 years)":     0.90,
+            "Conditional sentence order (CSO)":   0.70,
+            "Probation only":                     0.55,
+            "Fine only":                          0.35,
+            "Absolute / conditional discharge":   0.20,
+            "Time served":                        0.80,
+            "Other / unknown":                    0.85,
+        }
+        sent_mod = _sent_modifier.get(cr_sentence_type, 0.85)
+
+        # Aggravating factor boost — statutory aggravating raises base seriousness
+        agg_boost = 1.0
+        if cr_weapon:      agg_boost = min(agg_boost + 0.08, 1.25)
+        if cr_child_victim:agg_boost = min(agg_boost + 0.12, 1.25)
+        if cr_trust:       agg_boost = min(agg_boost + 0.10, 1.25)
+        if cr_gang:        agg_boost = min(agg_boost + 0.06, 1.25)
+
         # Compute calibrated weight for this entry
         raw_wt = 1.0
         cal_wt = float(np.clip(
-            raw_wt * (1 - 0.55*adj_bail) * (1 - 0.40*adj_ewert) *
+            raw_wt * sent_mod * agg_boost *
+            (1 - 0.55*adj_bail) * (1 - 0.40*adj_ewert) *
             (1 - 0.35*adj_police) * (1 - 0.30*adj_gladue) *
-            (1 - 0.25*adj_mm) * (1 - 0.45*adj_time), 0.05, 1.0))
+            (1 - 0.25*adj_mm) * (1 - 0.45*adj_time), 0.05, 1.15))
         pct_ret = cal_wt * 100
 
         col_ret = "#3B6D11" if pct_ret >= 70 else "#BA7517" if pct_ret >= 40 else "#A32D2D"
@@ -1229,14 +1288,21 @@ with TABS[8]:
                     "Catastrophic (1.00)": 1.00,
                 }
                 entry = {
-                    "offence":       cr_offence.strip(),
-                    "court":         cr_court.strip(),
-                    "year":          int(cr_year),
-                    "sentence":      cr_sentence.strip(),
-                    "jurisdiction":  cr_jurisdiction,
-                    "seriousness":   _ser_map.get(cr_seriousness, 0.65),
+                    "offence":           cr_offence.strip(),
+                    "court":             cr_court.strip(),
+                    "year":              int(cr_year),
+                    "sentence":          f"{cr_sentence_type} — {cr_sentence_detail}".strip(" —") if cr_sentence_detail else cr_sentence_type,
+                    "sentence_type":     cr_sentence_type,
+                    "sentence_detail":   cr_sentence_detail.strip(),
+                    "sent_modifier":     sent_mod,
+                    "jurisdiction":      cr_jurisdiction,
+                    "seriousness":       _ser_map.get(cr_seriousness, 0.65),
                     "seriousness_label": cr_seriousness,
-                    "gang":          cr_gang,
+                    "agg_boost":         agg_boost,
+                    "gang":              cr_gang,
+                    "weapon":            cr_weapon,
+                    "child_victim":      cr_child_victim,
+                    "position_of_trust": cr_trust,
                     "adj": {
                         "bail":   adj_bail,
                         "ewert":  adj_ewert,
@@ -1308,6 +1374,14 @@ with TABS[8]:
             if adj["gladue"] > 0.10: flags.append(f"🦅 Gladue {adj['gladue']*100:.0f}%")
             if adj["mm"]     > 0.05: flags.append(f"⚖️ Mand min {adj['mm']*100:.0f}%")
             if adj["time"]   > 0.10: flags.append(f"⏳ Temporal {adj['time']*100:.0f}%")
+            # Aggravating factors
+            if e.get("weapon"):            flags.append("🔫 Weapon/firearm")
+            if e.get("child_victim"):      flags.append("👶 Child victim")
+            if e.get("position_of_trust"): flags.append("🏛 Position of trust")
+            if e.get("gang"):              flags.append("🔴 Gang context")
+            # Sentence type attenuation signal
+            sent_mod_e = e.get("sent_modifier", 1.0)
+            if sent_mod_e <= 0.55: flags.append(f"📋 {e.get('sentence_type','Sentence')} (↓{(1-sent_mod_e)*100:.0f}% weight)")
 
             # Doc-linked indicator
             has_doc  = bool(e.get("doc_analysis"))
