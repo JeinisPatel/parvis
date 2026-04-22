@@ -1083,7 +1083,7 @@ with TABS[8]:
 
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
-        # Per-conviction cards
+        # Per-conviction cards — each with its own document attachment
         for i, e in enumerate(rec):
             cal_pct = e["cal_weight"] * 100
             raw_pct = e["raw_weight"] * 100
@@ -1099,14 +1099,24 @@ with TABS[8]:
             if adj["mm"]     > 0.05: flags.append(f"⚖️ Mand min {adj['mm']*100:.0f}%")
             if adj["time"]   > 0.10: flags.append(f"⏳ Temporal {adj['time']*100:.0f}%")
 
-            flag_html = "  ".join([f"<span style='background:#f0f0f0;border-radius:4px;padding:2px 8px;font-size:.72rem;color:#555'>{f}</span>" for f in flags]) if flags else "<span style='color:#aaa;font-size:.72rem'>No distortion flags</span>"
+            # Doc-linked indicator
+            has_doc  = bool(e.get("doc_analysis"))
+            has_recs = bool(e.get("doc_recs"))
+            doc_badge = ""
+            if has_doc:
+                doc_badge = "<span style='background:#E8F5E9;color:#2E7D32;border-radius:4px;padding:2px 8px;font-size:.70rem;margin-left:6px'>📎 Document linked</span>"
+
+            flag_html = "  ".join([
+                f"<span style='background:#f0f0f0;border-radius:4px;padding:2px 8px;font-size:.72rem;color:#555'>{f}</span>"
+                for f in flags
+            ]) if flags else "<span style='color:#aaa;font-size:.72rem'>No distortion flags</span>"
 
             st.markdown(f"""<div style='border:1px solid #ddd;border-left:4px solid {col_c};
-                border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.7rem;background:#fafafa'>
+                border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.4rem;background:#fafafa'>
                 <div style='display:flex;justify-content:space-between;align-items:flex-start'>
                   <div>
-                    <div style='font-weight:600;font-size:.95rem'>{e['offence']}</div>
-                    <div style='font-size:.78rem;color:#777;margin-top:2px'>{e['year']} · {e['court']} · {e['jurisdiction']} · {e['sentence'] or 'Sentence not entered'}</div>
+                    <div style='font-weight:600;font-size:.95rem'>{e["offence"]}{doc_badge}</div>
+                    <div style='font-size:.78rem;color:#777;margin-top:2px'>{e["year"]} · {e["court"]} · {e["jurisdiction"]} · {e.get("sentence","") or "Sentence not entered"}</div>
                   </div>
                   <div style='text-align:right;min-width:90px'>
                     <div style='font-size:1.35rem;font-weight:700;color:{col_c}'>{cal_pct:.0f}%</div>
@@ -1117,8 +1127,152 @@ with TABS[8]:
                 <div style='margin-top:.55rem'>{flag_html}</div>
                 </div>""", unsafe_allow_html=True)
 
-            cb1, cb2 = st.columns([6,1])
-            with cb2:
+            # ── Per-conviction action row ──────────────────────────────────────
+            cb1, cb2, cb3 = st.columns([4, 2, 1])
+            with cb1:
+                # Document attachment expander for this conviction
+                with st.expander(f"📎 {'Change document' if has_doc else 'Attach document'} for this conviction", expanded=False):
+                    st.caption(f"Attach a trial transcript, bail hearing record, SCE report, or sentencing decision specifically related to the **{e['offence']} ({e['year']})** conviction.")
+                    conv_up = st.file_uploader(
+                        "Upload document",
+                        type=["txt","pdf","docx"],
+                        key=f"cr_up_{i}",
+                        label_visibility="collapsed"
+                    )
+                    prov_conv = st.selectbox(
+                        "AI provider",
+                        ["Claude (Anthropic) ★","GPT-4o (OpenAI)","Gemini (Google)"],
+                        key=f"cr_prov_{i}",
+                        label_visibility="collapsed"
+                    )
+                    if st.button(f"Analyse for this conviction", key=f"cr_run_{i}"):
+                        if conv_up:
+                            with st.spinner(f"Analysing document for {e['offence']} ({e['year']})..."):
+                                try:
+                                    from document_analyzer import analyze_document, extract_text_from_file
+                                    raw_text = extract_text_from_file(conv_up)
+
+                                    conv_prompt = (
+                                        f"You are a Canadian criminal law expert advising on a Dangerous Offender "
+                                        f"sentencing proceeding under PARVIS. You are analysing a document specifically "
+                                        f"related to ONE conviction in the accused's criminal record:\n\n"
+                                        f"CONVICTION: {e['offence']}\n"
+                                        f"YEAR: {e['year']}\n"
+                                        f"COURT: {e['court']}\n"
+                                        f"JURISDICTION: {e['jurisdiction']}\n"
+                                        f"SENTENCE: {e.get('sentence','unknown')}\n"
+                                        f"CURRENT CALIBRATED WEIGHT: {e['cal_weight']*100:.0f}% of nominal\n\n"
+                                        f"Review the uploaded document and provide specific findings on:\n"
+                                        f"1. BAIL-DENIAL / COERCIVE PLEA (R v Antic [2017] SCC 27): Was this conviction "
+                                        f"preceded by extended pre-trial detention? Any evidence of plea pressure? "
+                                        f"Quote the relevant passage if present.\n"
+                                        f"2. INEFFECTIVE COUNSEL (R v GDB [2000] 1 SCR 520): Any indication of "
+                                        f"inadequate legal representation? Missed Gladue submissions? Failure to "
+                                        f"challenge tool evidence?\n"
+                                        f"3. GLADUE MISAPPLICATION (Morris 2021 ONCA 680 para 97): Was a Gladue report "
+                                        f"filed? Was it engaged substantively or cited and ignored? Connection/causation "
+                                        f"error present?\n"
+                                        f"4. OVER-POLICING / RECORD INFLATION (R v Le [2019] SCC 34): Any evidence "
+                                        f"this charge arose from racialised enforcement patterns, carding, or "
+                                        f"neighbourhood-based targeting?\n"
+                                        f"5. MANDATORY MINIMUM DISTORTION (R v Nur [2015] / Lloyd [2016]): Was a "
+                                        f"mandatory minimum in force at the time? Has it since been struck?\n"
+                                        f"6. TEMPORAL ATTENUATION: How old is this conviction? What weight should "
+                                        f"it carry given the offender's current age and any evidence of behavioural change?\n\n"
+                                        f"End with a RECOMMENDATION block in this exact format:\n"
+                                        f"RECOMMENDATION:\n"
+                                        f"  bail_adj: [0.0-1.0]\n"
+                                        f"  counsel_adj: [0.0-1.0]\n"
+                                        f"  gladue_adj: [0.0-1.0]\n"
+                                        f"  police_adj: [0.0-1.0]\n"
+                                        f"  mm_adj: [0.0-1.0]\n"
+                                        f"  time_adj: [0.0-1.0]\n"
+                                        f"  overall: [KEEP / REDUCE / SIGNIFICANT REDUCTION]\n"
+                                        f"  rationale: [one sentence]"
+                                    )
+                                    prov_key = prov_conv.split()[0].lower()
+                                    result = analyze_document(
+                                        file_content=raw_text,
+                                        provider=prov_key,
+                                        custom_prompt=conv_prompt,
+                                    )
+                                    # Store analysis on the entry itself
+                                    st.session_state.criminal_record[i]["doc_analysis"] = result
+                                    st.session_state.criminal_record[i]["doc_name"] = conv_up.name
+
+                                    # Parse RECOMMENDATION block for suggested adjustments
+                                    import re
+                                    recs = {}
+                                    for field in ["bail_adj","counsel_adj","gladue_adj","police_adj","mm_adj","time_adj"]:
+                                        m = re.search(rf"{field}:\s*([0-9.]+)", result)
+                                        if m:
+                                            recs[field] = float(np.clip(float(m.group(1)), 0.0, 1.0))
+                                    overall_m = re.search(r"overall:\s*(KEEP|REDUCE|SIGNIFICANT REDUCTION)", result, re.IGNORECASE)
+                                    recs["overall"] = overall_m.group(1).upper() if overall_m else "REVIEW"
+                                    st.session_state.criminal_record[i]["doc_recs"] = recs
+                                    st.rerun()
+                                except Exception as ex:
+                                    st.error(f"Analysis error: {ex}")
+                        else:
+                            st.warning("Please upload a document first.")
+
+                    # Show analysis result if present
+                    if has_doc:
+                        doc_analysis = e.get("doc_analysis","")
+                        doc_recs     = e.get("doc_recs", {})
+                        doc_name     = e.get("doc_name","document")
+
+                        if doc_recs:
+                            overall = doc_recs.get("overall","REVIEW")
+                            ov_col = {"KEEP":"#3B6D11","REDUCE":"#BA7517","SIGNIFICANT REDUCTION":"#A32D2D"}.get(overall,"#555")
+                            st.markdown(
+                                f"<div style='background:#f8f8f8;border-radius:8px;padding:.6rem .9rem;margin-top:.4rem'>"
+                                f"<span style='font-size:.75rem;color:#666'>Document: <b>{doc_name}</b> · Recommendation: </span>"
+                                f"<span style='font-weight:700;color:{ov_col}'>{overall}</span></div>",
+                                unsafe_allow_html=True)
+
+                            # Show suggested adjustments as read-only comparison
+                            st.markdown("<div style='font-size:.75rem;color:#888;margin-top:.5rem;margin-bottom:.2rem'>Suggested adjustments from document analysis:</div>", unsafe_allow_html=True)
+                            adj_cols = st.columns(6)
+                            adj_labels = ["bail","counsel","gladue","police","mm","time"]
+                            adj_names  = ["Bail","Counsel","Gladue","Police","MM","Time"]
+                            for ci,(field,lbl) in enumerate(zip(adj_labels, adj_names)):
+                                key_name = f"{field}_adj"
+                                if key_name in doc_recs:
+                                    cur_val = e["adj"].get(field, 0.0)
+                                    sug_val = doc_recs[key_name]
+                                    diff = sug_val - cur_val
+                                    diff_str = f"+{diff:.2f}" if diff>0 else f"{diff:.2f}"
+                                    diff_col = "#A32D2D" if diff>0.05 else "#3B6D11" if diff<-0.05 else "#888"
+                                    adj_cols[ci].markdown(
+                                        f"<div style='text-align:center'>"
+                                        f"<div style='font-size:.68rem;color:#888'>{lbl}</div>"
+                                        f"<div style='font-size:.95rem;font-weight:600'>{sug_val:.2f}</div>"
+                                        f"<div style='font-size:.65rem;color:{diff_col}'>{diff_str}</div>"
+                                        f"</div>", unsafe_allow_html=True)
+
+                            # One-click apply
+                            if st.button(f"Apply recommended adjustments", key=f"cr_apply_{i}"):
+                                for field in adj_labels:
+                                    key_name = f"{field}_adj"
+                                    if key_name in doc_recs:
+                                        # Map counsel → counsel key in adj dict
+                                        adj_key = "bail" if field=="bail" else                                                   "ewert" if field=="counsel" else                                                   "gladue" if field=="gladue" else                                                   "police" if field=="police" else                                                   "mm" if field=="mm" else "time"
+                                        st.session_state.criminal_record[i]["adj"][adj_key] = doc_recs[key_name]
+                                # Recompute calibrated weight for this entry
+                                adj_u = st.session_state.criminal_record[i]["adj"]
+                                new_cal = float(np.clip(
+                                    1.0 * (1-0.55*adj_u["bail"]) * (1-0.40*adj_u["ewert"]) *
+                                    (1-0.35*adj_u["police"]) * (1-0.30*adj_u["gladue"]) *
+                                    (1-0.25*adj_u["mm"]) * (1-0.45*adj_u["time"]), 0.05, 1.0))
+                                st.session_state.criminal_record[i]["cal_weight"] = new_cal
+                                _cr_feed_nodes()
+                                st.rerun()
+
+                        with st.expander("Read full document analysis", expanded=False):
+                            st.markdown(f"<div class='at'>{doc_analysis}</div>", unsafe_allow_html=True)
+
+            with cb3:
                 if st.button("Remove", key=f"cr_del_{i}"):
                     st.session_state.criminal_record.pop(i)
                     _cr_feed_nodes()
