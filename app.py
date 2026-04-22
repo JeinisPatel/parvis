@@ -960,6 +960,31 @@ with TABS[8]:
     police_factor  = float(np.clip(1.0 - 0.35*pN14,            0.50, 1.0))
     gladue_factor  = float(np.clip(1.0 - 0.30*pN12,            0.55, 1.0))
 
+    # ── Feed function defined first so button callbacks can call it ─────────────
+    def _cr_feed_nodes():
+        """Derive N2 (violent history) and distortion node signals from the record."""
+        rec = st.session_state.criminal_record
+        if not rec:
+            st.session_state.cr_doc_adj = {}
+            return
+        violent_types = ["assault","violence","weapon","robbery","forcible","aggravated","murder","manslaughter"]
+        violent = [e for e in rec if any(vt in e["offence"].lower() for vt in violent_types)]
+        if violent:
+            mean_cal = float(np.mean([e["cal_weight"] for e in violent]))
+            n2_signal = float(np.clip(min(0.85, 0.25 + 0.15*len(violent)) * mean_cal, 0.05, 0.90))
+            st.session_state.cr_doc_adj[2] = n2_signal - st.session_state.posteriors.get(2, 0.08)
+        bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
+        police_agg = float(np.mean([e["adj"]["police"] for e in rec]))
+        gladue_agg = float(np.mean([e["adj"]["gladue"] for e in rec]))
+        cr_adj = dict(st.session_state.doc_adj)
+        if bail_agg > 0.1:
+            cr_adj[7]  = cr_adj.get(7,  0) + bail_agg * 0.12
+        if police_agg > 0.1:
+            cr_adj[14] = cr_adj.get(14, 0) + police_agg * 0.10
+        if gladue_agg > 0.1:
+            cr_adj[12] = cr_adj.get(12, 0) + gladue_agg * 0.08
+        st.session_state.doc_adj = {k: float(np.clip(v, -0.4, 0.4)) for k,v in cr_adj.items()}
+
     # ── UI: Add conviction ─────────────────────────────────────────────────────
     st.markdown("#### Add conviction")
     with st.expander("➕ Enter a new conviction", expanded=len(st.session_state.criminal_record)==0):
@@ -1036,34 +1061,6 @@ with TABS[8]:
                 st.warning("Please enter an offence description.")
 
     # ── Feed function: compute aggregate N2 and distortion signals ────────────
-    def _cr_feed_nodes():
-        """Derive N2 (violent history) and distortion node signals from the record."""
-        rec = st.session_state.criminal_record
-        if not rec:
-            st.session_state.cr_doc_adj = {}
-            return
-        # Violent history: mean calibrated weight of violent convictions
-        violent_types = ["assault","violence","weapon","robbery","forcible","aggravated","murder","manslaughter"]
-        violent = [e for e in rec if any(vt in e["offence"].lower() for vt in violent_types)]
-        if violent:
-            mean_cal = float(np.mean([e["cal_weight"] for e in violent]))
-            # N2 posterior: scaled by calibrated weight — max 0.85 for full record
-            n2_signal = float(np.clip(min(0.85, 0.25 + 0.15*len(violent)) * mean_cal, 0.05, 0.90))
-            st.session_state.cr_doc_adj[2] = n2_signal - st.session_state.posteriors.get(2, 0.08)
-        # Aggregate distortion signals into existing doc_adj
-        bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
-        police_agg = float(np.mean([e["adj"]["police"] for e in rec]))
-        gladue_agg = float(np.mean([e["adj"]["gladue"] for e in rec]))
-        # Apply as incremental boosts to distortion nodes
-        cr_adj = dict(st.session_state.doc_adj)
-        if bail_agg > 0.1:
-            cr_adj[7]  = cr_adj.get(7,  0) + bail_agg * 0.12
-        if police_agg > 0.1:
-            cr_adj[14] = cr_adj.get(14, 0) + police_agg * 0.10
-        if gladue_agg > 0.1:
-            cr_adj[12] = cr_adj.get(12, 0) + gladue_agg * 0.08
-        st.session_state.doc_adj = {k: float(np.clip(v, -0.4, 0.4)) for k,v in cr_adj.items()}
-
     # ── Record table ──────────────────────────────────────────────────────────
     rec = st.session_state.criminal_record
     if rec:
