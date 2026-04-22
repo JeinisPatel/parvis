@@ -961,28 +961,133 @@ with TABS[8]:
     gladue_factor  = float(np.clip(1.0 - 0.30*pN12,            0.55, 1.0))
 
     # ── Feed function defined first so button callbacks can call it ─────────────
+    # ── Offence seriousness tiers (Boutilier pattern analysis) ───────────────────
+    SERIOUSNESS = {
+        # Tier 1 — catastrophic (weight 1.00)
+        "murder":1.00,"manslaughter":1.00,"attempted murder":1.00,
+        "sexual assault causing bodily harm":1.00,"aggravated sexual assault":1.00,
+        "kidnapping":1.00,"hostage":1.00,
+        # Tier 2 — serious violent (weight 0.85)
+        "aggravated assault":0.85,"robbery":0.85,"break and enter":0.70,
+        "assault with weapon":0.75,"assault causing bodily harm":0.75,
+        "sexual assault":0.75,"arson":0.80,"forcible confinement":0.80,
+        "weapon":0.70,"discharge firearm":0.80,"extortion":0.75,
+        # Tier 3 — significant (weight 0.55)
+        "assault":0.55,"theft over":0.45,"fraud over":0.40,
+        "dangerous operation":0.55,"impaired":0.35,"possession":0.30,
+        "drug":0.35,"mischief":0.25,"uttering threats":0.45,
+        # Tier 4 — minor (weight 0.20)
+        "breach":0.20,"fail to comply":0.20,"bail":0.15,"summary":0.15,
+    }
+
+    def _get_seriousness(offence_str: str) -> float:
+        """Return base seriousness weight for an offence string."""
+        ol = offence_str.lower()
+        # Check multi-word keys first (most specific)
+        for key in sorted(SERIOUSNESS.keys(), key=len, reverse=True):
+            if key in ol:
+                return SERIOUSNESS[key]
+        return 0.40  # default moderate
+
+    def _detect_escalation(rec: list) -> dict:
+        """
+        Detect escalation, de-escalation, or stable pattern.
+        Per Boutilier [2017] SCC 64: pattern of behaviour matters, not just
+        individual offences. Escalation in seriousness is a significant factor.
+        Returns dict with: pattern, signal, note.
+        """
+        if len(rec) < 2:
+            return {"pattern":"insufficient","signal":0.0,"note":"Fewer than 2 convictions — no pattern detectable."}
+        chronological = sorted(rec, key=lambda e: e["year"])
+        seriousness_scores = [_get_seriousness(e["offence"]) * e["cal_weight"] for e in chronological]
+        # Compare first third vs last third
+        n = len(seriousness_scores)
+        early = float(np.mean(seriousness_scores[:max(1,n//3)]))
+        late  = float(np.mean(seriousness_scores[n - max(1,n//3):]))
+        delta = late - early
+        # Gap in years between last two convictions (de-escalation by time gap)
+        year_gap = chronological[-1]["year"] - chronological[-2]["year"] if n>=2 else 0
+        if delta > 0.15:
+            pat = "escalating"
+            signal = float(np.clip(0.10 + delta * 0.40, 0.05, 0.35))
+            note = (f"Pattern shows escalation in offence seriousness "
+                    f"(early avg {early:.2f} → recent avg {late:.2f}). "
+                    f"Per Boutilier [2017] SCC 64: escalating pattern weighs in favour of DO designation.")
+        elif delta < -0.10:
+            pat = "de-escalating"
+            signal = float(np.clip(-0.08 - abs(delta)*0.25, -0.25, 0.0))
+            note = (f"Pattern shows de-escalation (early avg {early:.2f} → recent avg {late:.2f}). "
+                    f"Reduced weight per Boutilier — de-escalation is relevant to treatability inquiry.")
+        elif year_gap >= 8:
+            pat = "desistance"
+            signal = -0.12
+            note = (f"Last two convictions separated by {year_gap} years — extended gap suggests desistance. "
+                    f"Temporal attenuation applicable per age burnout (N15).")
+        else:
+            pat = "stable"
+            signal = 0.0
+            note = "Stable offence pattern — no significant escalation or de-escalation detected."
+        return {"pattern":pat,"signal":signal,"note":note}
+
     def _cr_feed_nodes():
-        """Derive N2 (violent history) and distortion node signals from the record."""
+        """Derive N2, N18 and distortion node signals from the calibrated criminal record.
+        Fixes: N2 signal now written to doc_adj (not cr_doc_adj) so run_inf() picks it up.
+        Enhanced: seriousness-weighted N2, escalation signal into N18, gang context into N14.
+        """
         rec = st.session_state.criminal_record
         if not rec:
             st.session_state.cr_doc_adj = {}
+            # Remove criminal record contributions from doc_adj
+            st.session_state.doc_adj = {
+                k:v for k,v in st.session_state.doc_adj.items()
+                if k not in [2, 7, 14, 12, 18]
+            }
             return
-        violent_types = ["assault","violence","weapon","robbery","forcible","aggravated","murder","manslaughter"]
+
+        cr_adj = {k:v for k,v in st.session_state.doc_adj.items()
+                  if k not in [2, 7, 14, 12, 18]}  # start fresh for CR-driven nodes
+
+        # ── N2: Violent history — seriousness-weighted calibrated signal ──────
+        violent_types = ["assault","violence","weapon","robbery","forcible","aggravated",
+                         "murder","manslaughter","sexual","arson","discharge","extortion",
+                         "kidnap","hostage","confinement"]
         violent = [e for e in rec if any(vt in e["offence"].lower() for vt in violent_types)]
         if violent:
-            mean_cal = float(np.mean([e["cal_weight"] for e in violent]))
-            n2_signal = float(np.clip(min(0.85, 0.25 + 0.15*len(violent)) * mean_cal, 0.05, 0.90))
-            st.session_state.cr_doc_adj[2] = n2_signal - st.session_state.posteriors.get(2, 0.08)
+            # Weighted severity: each entry contributes seriousness_weight * cal_weight
+            severity_scores = [_get_seriousness(e["offence"]) * e["cal_weight"] for e in violent]
+            # Boutilier: count matters but is bounded; severity of worst offences matters most
+            max_severity  = float(max(severity_scores))
+            mean_severity = float(np.mean(severity_scores))
+            count_bonus   = float(np.clip(0.05 * (len(violent) - 1), 0.0, 0.20))
+            n2_raw = float(np.clip(
+                0.20 + 0.45 * max_severity + 0.25 * mean_severity + count_bonus,
+                0.08, 0.90))
+            cr_adj[2] = n2_raw - st.session_state.posteriors.get(2, 0.08)
+            st.session_state.cr_doc_adj[2] = n2_raw
+
+        # ── N18: Dynamic risk — escalation signal ─────────────────────────────
+        esc = _detect_escalation(rec)
+        st.session_state.cr_doc_adj["escalation"] = esc
+        if abs(esc["signal"]) > 0.01:
+            cr_adj[18] = float(np.clip(esc["signal"], -0.30, 0.35))
+
+        # ── Gang / organized crime context → N14 boost ────────────────────────
+        gang_entries = [e for e in rec if e.get("gang", False)]
+        if gang_entries:
+            gang_factor = float(np.clip(0.08 * len(gang_entries), 0.0, 0.25))
+            cr_adj[14] = cr_adj.get(14, 0) + gang_factor
+
+        # ── Distortion aggregates → N7, N14, N12 ─────────────────────────────
         bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
         police_agg = float(np.mean([e["adj"]["police"] for e in rec]))
         gladue_agg = float(np.mean([e["adj"]["gladue"] for e in rec]))
-        cr_adj = dict(st.session_state.doc_adj)
         if bail_agg > 0.1:
             cr_adj[7]  = cr_adj.get(7,  0) + bail_agg * 0.12
         if police_agg > 0.1:
             cr_adj[14] = cr_adj.get(14, 0) + police_agg * 0.10
         if gladue_agg > 0.1:
             cr_adj[12] = cr_adj.get(12, 0) + gladue_agg * 0.08
+
         st.session_state.doc_adj = {k: float(np.clip(v, -0.4, 0.4)) for k,v in cr_adj.items()}
 
     # ── UI: Add conviction ─────────────────────────────────────────────────────
@@ -998,6 +1103,22 @@ with TABS[8]:
         cr_jurisdiction = st.selectbox("Province / jurisdiction",
             ["ON","BC","AB","QC","SK","MB","NS","NB","NL","PE","YT","NT","NU","Federal"],
             key="cr_jur")
+
+        cf1, cf2 = st.columns(2)
+        with cf1:
+            cr_seriousness = st.select_slider(
+                "Offence seriousness tier",
+                options=["Minor (0.15–0.25)","Moderate (0.35–0.50)","Significant (0.55–0.75)",
+                         "Serious violent (0.80–0.85)","Catastrophic (1.00)"],
+                value="Significant (0.55–0.75)", key="cr_seriousness",
+                help="Boutilier [2017] SCC 64 — offence seriousness determines base weight in pattern analysis"
+            )
+        with cf2:
+            cr_gang = st.checkbox(
+                "Gang / organized crime context",
+                value=False, key="cr_gang",
+                help="R v Lacasse [2015] SCC 64 — gang context aggravating; but also consider Le [2019] SCC 34 — may reflect over-policing of community rather than individual culpability"
+            )
 
         st.markdown("**Doctrinal reliability adjustments for this conviction**")
         st.caption("Each slider reflects the degree to which this specific conviction's evidentiary weight should be discounted based on the distortion nodes currently active in PARVIS.")
@@ -1036,12 +1157,23 @@ with TABS[8]:
 
         if st.button("Add to record", key="cr_add"):
             if cr_offence.strip():
+                # Map seriousness tier to numeric weight
+                _ser_map = {
+                    "Minor (0.15–0.25)": 0.20,
+                    "Moderate (0.35–0.50)": 0.42,
+                    "Significant (0.55–0.75)": 0.65,
+                    "Serious violent (0.80–0.85)": 0.82,
+                    "Catastrophic (1.00)": 1.00,
+                }
                 entry = {
-                    "offence":     cr_offence.strip(),
-                    "court":       cr_court.strip(),
-                    "year":        int(cr_year),
-                    "sentence":    cr_sentence.strip(),
-                    "jurisdiction": cr_jurisdiction,
+                    "offence":       cr_offence.strip(),
+                    "court":         cr_court.strip(),
+                    "year":          int(cr_year),
+                    "sentence":      cr_sentence.strip(),
+                    "jurisdiction":  cr_jurisdiction,
+                    "seriousness":   _ser_map.get(cr_seriousness, 0.65),
+                    "seriousness_label": cr_seriousness,
+                    "gang":          cr_gang,
                     "adj": {
                         "bail":   adj_bail,
                         "ewert":  adj_ewert,
@@ -1072,11 +1204,29 @@ with TABS[8]:
         mean_cal = float(np.mean(all_cal))
         mc_col = "#3B6D11" if mean_cal >= 0.7 else "#BA7517" if mean_cal >= 0.4 else "#A32D2D"
 
-        sc1,sc2,sc3 = st.columns(3)
+        esc_data = st.session_state.cr_doc_adj.get("escalation", {})
+        esc_pat  = esc_data.get("pattern","—")
+        esc_cols = {"escalating":"#A32D2D","de-escalating":"#3B6D11",
+                    "desistance":"#3B6D11","stable":"#888888","insufficient":"#BBBBBB"}
+        esc_col  = esc_cols.get(esc_pat,"#888")
+
+        sc1,sc2,sc3,sc4 = st.columns(4)
         sc1.metric("Total convictions", len(rec))
         sc2.metric("Mean calibrated weight", f"{mean_cal*100:.0f}%")
         sc3.metric("Record reliability tier",
             "High" if mean_cal>=0.7 else "Moderate" if mean_cal>=0.4 else "Low")
+        sc4.markdown(
+            f"<div style='font-size:.75rem;color:#888;margin-bottom:2px'>Pattern (Boutilier)</div>"
+            f"<div style='font-size:1.1rem;font-weight:700;color:{esc_col}'>{esc_pat.title()}</div>",
+            unsafe_allow_html=True)
+
+        if esc_data.get("note"):
+            esc_icon = "⚠️" if esc_pat=="escalating" else "✅" if esc_pat in ("de-escalating","desistance") else "ℹ️"
+            st.markdown(
+                f"<div style='background:#f8f8f8;border-left:3px solid {esc_col};"
+                f"border-radius:6px;padding:.5rem .9rem;font-size:.82rem;color:#444;margin-bottom:.6rem'>"
+                f"{esc_icon} <b>Pattern analysis:</b> {esc_data['note']}</div>",
+                unsafe_allow_html=True)
 
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
@@ -1114,6 +1264,10 @@ with TABS[8]:
                   <div>
                     <div style='font-weight:600;font-size:.95rem'>{e["offence"]}{doc_badge}</div>
                     <div style='font-size:.78rem;color:#777;margin-top:2px'>{e["year"]} · {e["court"]} · {e["jurisdiction"]} · {e.get("sentence","") or "Sentence not entered"}</div>
+                    <div style='margin-top:4px'>
+                      <span style='background:#f0f0f0;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#555'>⚖️ {e.get("seriousness_label","—")}</span>
+                      {"&nbsp;<span style=\'background:#FDECEA;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#A32D2D\'>🔴 Gang / organized crime context</span>" if e.get("gang") else ""}
+                    </div>
                   </div>
                   <div style='text-align:right;min-width:90px'>
                     <div style='font-size:1.35rem;font-weight:700;color:{col_c}'>{cal_pct:.0f}%</div>
