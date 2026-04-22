@@ -796,29 +796,38 @@ with TABS[6]:
       ctx.stroke();
     }}
 
-    // Axes
-    const axes = [
-      [1,0,0,"Risk (N2/3/4/18)", AXIS_RISK],
-      [-1,0,0,"Mitigation", AXIS_MIT],
-      [0,1,0,"|DO⟩ P=1.0", AXIS_POLE],
-      [0,-1,0,"|\u00acDO⟩ P=0.0", TEXT_MID],
-    ];
-    axes.forEach(([ax,ay,az,lbl,col]) => {{
-      const [sx, sy] = project(ax*0.88, ay*0.88, az*0.88, rot);
-      const [ox, oy] = project(0, 0, 0, rot);
-      ctx.beginPath();
-      ctx.moveTo(ox, oy);
-      ctx.lineTo(sx, sy);
-      ctx.strokeStyle = col + "88";
-      ctx.lineWidth = 1.2;
-      ctx.setLineDash([5, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = col;
-      ctx.font = "bold 13px -apple-system,sans-serif";
-      ctx.fillText(lbl, sx+6, sy+5);
-    }});
+    // Axes — separate horizontal (rotating) from vertical (fixed) to avoid label collision
+    // Horizontal: Risk axis (rotates)
+    const [rsx, rsy] = project(0.88, 0, 0, rot);
+    const [msx, msy] = project(-0.88, 0, 0, rot);
+    const [ox2, oy2] = project(0, 0, 0, rot);
+    ctx.beginPath(); ctx.moveTo(ox2,oy2); ctx.lineTo(rsx,rsy);
+    ctx.strokeStyle = AXIS_RISK+"99"; ctx.lineWidth=1.2;
+    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=AXIS_RISK; ctx.font="bold 12px -apple-system,sans-serif";
+    ctx.fillText("Risk", rsx+5, rsy+4);
 
+    ctx.beginPath(); ctx.moveTo(ox2,oy2); ctx.lineTo(msx,msy);
+    ctx.strokeStyle = AXIS_MIT+"99"; ctx.lineWidth=1.2;
+    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=AXIS_MIT; ctx.font="bold 12px -apple-system,sans-serif";
+    const mitLblW = ctx.measureText("Mitigation").width;
+    ctx.fillText("Mitigation", msx - mitLblW - 6, msy+4);
+
+    // Vertical axis — does NOT rotate, always clean
+    const [nax, nay] = project(0, 0.88, 0, 0);
+    const [sax, say] = project(0, -0.88, 0, 0);
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(nax,nay);
+    ctx.strokeStyle = AXIS_POLE+"55"; ctx.lineWidth=1.2;
+    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(sax,say);
+    ctx.strokeStyle = "#99999955"; ctx.lineWidth=1.2;
+    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+
+    // State vector — thick, prominent
+    const th = state.theta;
+    const ph = state.phi + rot;
+    const vx = Math.sin(th)*Math.cos(ph);
     // State vector — thick, prominent
     const th = state.theta;
     const ph = state.phi + rot;
@@ -849,10 +858,16 @@ with TABS[6]:
     ctx.fillStyle = riskCol;
     ctx.fill();
 
-    // Tip label (larger)
-    ctx.fillStyle = TEXT_DARK;
-    ctx.font = "bold 14px -apple-system,sans-serif";
-    ctx.fillText(`|\u03c8\u27e9  P(DO) = ${{(state.risk*100).toFixed(1)}}%`, vsx+12, vsy-8);
+    // Tip label — smart position + white pill for readability
+    const _lbl = `|ψ⟩  P(DO) = ${{(state.risk*100).toFixed(1)}}%`;
+    ctx.font = "bold 13px -apple-system,sans-serif";
+    const _lw = ctx.measureText(_lbl).width;
+    const _lx = vsx > cx ? vsx + 12 : vsx - _lw - 10;
+    const _ly = vsy < 80 ? vsy + 20 : vsy - 8;
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.fillRect(_lx - 3, _ly - 14, _lw + 6, 18);
+    ctx.fillStyle = riskCol;
+    ctx.fillText(_lbl, _lx, _ly);
 
     // Superposition ring
     if (state.si > 0.6) {{
@@ -873,15 +888,19 @@ with TABS[6]:
       ctx.setLineDash([]);
     }}
 
-    // Poles
-    const [nsx, nsy] = project(0, 0.93, 0, 0);
-    const [ssx, ssy] = project(0, -0.93, 0, 0);
+    // Poles — placed clearly above/below sphere, not overlapping axes
+    const [nsx2, nsy2] = project(0, 1.0, 0, 0);
+    const [ssx2, ssy2] = project(0, -1.0, 0, 0);
+    // North pole label: above the sphere
     ctx.fillStyle = AXIS_POLE;
     ctx.font = "bold 13px -apple-system,sans-serif";
-    ctx.fillText("P=1 · High", nsx+8, nsy+5);
+    ctx.textAlign = "center";
+    ctx.fillText("|DO⟩  P = 1.0  ↑ High", nsx2, nsy2 - 10);
+    // South pole label: below the sphere
     ctx.fillStyle = TEXT_MID;
     ctx.font = "13px -apple-system,sans-serif";
-    ctx.fillText("P=0 · Low", ssx+8, ssy+5);
+    ctx.fillText("|\u00acDO⟩  P = 0.0  ↓ Low", ssx2, ssy2 + 22);
+    ctx.textAlign = "left";
 
     // Centre dot
     ctx.beginPath();
@@ -894,13 +913,21 @@ with TABS[6]:
       `\u03b8 = ${{(state.theta*180/Math.PI).toFixed(1)}}\u00b0  \u00b7  \u03c6 = ${{((state.phi + rot)*180/Math.PI % 360).toFixed(1)}}\u00b0  \u00b7  SI = ${{state.si.toFixed(3)}}`;
   }}
 
-  // Animate — slow, gentle rotation
-  function animate() {{
+  // Animate — gentle oscillation (back and forth), not continuous loop
+  // This reveals different facets of the sphere, showing the belief
+  // state from multiple epistemic perspectives
+  let startTime = null;
+  function animate(timestamp) {{
+    if (!startTime) startTime = timestamp;
+    const elapsed = timestamp - startTime;
+    // Oscillate: ±35° with a slow 12-second period
+    const amplitude = 0.60;   // radians (~35°)
+    const period    = 12000;  // ms
+    angle = amplitude * Math.sin(2 * Math.PI * elapsed / period);
     drawSphere(angle);
-    angle += 0.004;   // ~0.25°/frame — tasteful, not distracting
     requestAnimationFrame(animate);
   }}
-  animate();
+  requestAnimationFrame(animate);
 }})();
 </script>
 """
