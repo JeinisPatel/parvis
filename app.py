@@ -935,9 +935,13 @@ with TABS[6]:
 
         # ── Why QBism over classical? ─────────────────────────────────────────
         with st.expander("❓ Why quantum values alongside classical Bayesian?", expanded=False):
-            st.markdown("""
+            # Pre-compute dynamic values to avoid format() conflicts with markdown tables
+            _si_str   = f"{si:.3f}"
+            _dn7_str  = f"{dn7*100:.1f}"
+            _si_state = "well resolved" if si > 0.7 else "in moderate superposition" if si > 0.4 else "near maximum pre-decisional ambiguity"
+            st.markdown(f"""
 **Classical Bayesian inference** (Variable Elimination — what Node 20 computes) gives you a single
-probability: *P(DO designation) = 24.9%*. This is mathematically rigorous and the core of PARVIS.
+probability: *P(DO designation) = {_dn7_str}%*. This is mathematically rigorous and the core of PARVIS.
 
 **But it has a structural limitation in legal settings:** it treats each node's posterior as a stable,
 independent belief state. In reality, the legal reasoning process is subject to:
@@ -955,19 +959,20 @@ generates measurable predictions about non-commutativity and contextual interfer
 classical Bayes cannot.
 
 **The Bloch sphere encodes this:**
-- The **state vector |ψ⟩** sits on the sphere. Its polar angle θ encodes the classical probability (P(DO) = cos²(θ/2)).
-  But its azimuthal angle φ and distance from the poles encode *how resolved* that belief actually is.
-- **Superposition index (SI) = |2·P - 1|** measures distance from the equator. SI=0 = maximum ambiguity.
-  SI=1 = fully resolved. In this case SI = {si:.3f}, meaning the system is **{"well resolved" if si > 0.7 else "in moderate superposition" if si > 0.4 else "near maximum pre-decisional ambiguity"}**.
+- The **state vector |ψ⟩** sits on the sphere. Its polar angle θ encodes the classical probability
+  (P(DO) = cos²(θ/2)), while its azimuthal angle φ and distance from the poles encode *how resolved*
+  that belief actually is.
+- **Superposition index (SI) = |2·P - 1|** measures distance from the equator. SI=0 = maximum
+  ambiguity. SI=1 = fully resolved. Current SI = **{_si_str}** — the system is **{_si_state}**.
 
-**The diagnostic value is not in changing the number.** Node 20 stays at {dn7*100:.1f}%. The value is in
-identifying whether the conditions that produced that number are epistemically stable — or whether
+**The diagnostic value is not in changing the number.** Node 20 stays at {_dn7_str}%. The value is
+in identifying whether the conditions that produced that number are epistemically stable — or whether
 the system has produced a precise answer from imprecise foundations.
 
-*Thesis reference: Appendix Q §AQ.3.3 — The four diagnostic conditions (prior contamination, order effects,
-contextual interference, belief stasis) each represent a departure from the classical independence assumption
-that Variable Elimination requires to be valid.*
-            """.format(si=si, dn7=dn7))
+*Thesis reference: Appendix Q §AQ.3.3 — The four diagnostic conditions (prior contamination, order
+effects, contextual interference, belief stasis) each represent a departure from the classical
+independence assumption that Variable Elimination requires to be valid.*
+            """)
 
     # ── Diagnostic conditions ─────────────────────────────────────────────────
     if diags:
