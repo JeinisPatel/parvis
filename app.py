@@ -705,226 +705,171 @@ with TABS[6]:
     })
 
     bloch_html = f"""
-<div style="display:flex;flex-direction:column;align-items:center;gap:0">
+<div style="display:flex;flex-direction:column;align-items:center">
   <canvas id="bloch" width="570" height="570"
     style="border-radius:14px;background:#ffffff;border:1px solid #e8e8e8;
-           box-shadow:0 2px 12px rgba(0,0,0,0.08)">
-  </canvas>
-  <div id="bloch-label" style="font-family:monospace;font-size:13px;color:#666;margin-top:6px;text-align:center"></div>
+           box-shadow:0 2px 12px rgba(0,0,0,0.08)"></canvas>
+  <div id="bloch-label"
+    style="font-family:monospace;font-size:13px;color:#555;margin-top:6px;text-align:center"></div>
 </div>
 <script>
 (function(){{
-  const state = {bloch_state};
+  const S = {bloch_state};
   const canvas = document.getElementById("bloch");
-  const ctx    = canvas.getContext("2d");
-  const W = canvas.width, H = canvas.height;
-  const cx = W/2, cy = H/2, R = 220;   // 50% larger radius
-  let angle = 0;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W=570, H=570, cx=285, cy=285, R=210;
 
-  // Palette: dark grey/black silhouette on white
-  const SPHERE_STROKE  = "rgba(0,0,0,0.12)";
-  const LAT_EQ_STROKE  = "rgba(0,0,0,0.28)";
-  const LAT_STROKE     = "rgba(0,0,0,0.09)";
-  const MERID_STROKE   = "rgba(0,0,0,0.06)";
-  const AXIS_RISK      = "#C0392B";    // red — risk axis
-  const AXIS_MIT       = "#1A6B35";    // green — mitigation axis
-  const AXIS_POLE      = "#1B2A4A";    // navy — poles
-  const TEXT_DARK      = "#1B2A4A";
-  const TEXT_MID       = "#555555";
+  // Colour palette — dark on white
+  const C_RISK  = "#C0392B";
+  const C_MIT   = "#1A6B35";
+  const C_POLE  = "#1B2A4A";
+  const C_MID   = "#666666";
+  const riskCol = S.risk>=0.55 ? "#C0392B" : S.risk>=0.35 ? "#B8850A" : "#1A6B35";
 
-  const riskCol = state.risk >= 0.55 ? "#C0392B" :
-                  state.risk >= 0.35 ? "#B8850A" : "#1A6B35";
-
-  function project(x, y, z, rotY) {{
-    const rx = x*Math.cos(rotY) - z*Math.sin(rotY);
-    const rz = x*Math.sin(rotY) + z*Math.cos(rotY);
-    const fov = 3.0;
-    const sx = cx + rx * R * fov / (fov + rz + 2);
-    const sy = cy - y * R * fov / (fov + rz + 2);
-    return [sx, sy, rz];
+  function proj(x,y,z,ry) {{
+    const rx = x*Math.cos(ry)-z*Math.sin(ry);
+    const rz = x*Math.sin(ry)+z*Math.cos(ry);
+    const f=3.2;
+    return [cx+rx*R*f/(f+rz+2), cy-y*R*f/(f+rz+2)];
   }}
 
-  function drawSphere(rot) {{
-    ctx.clearRect(0, 0, W, H);
+  function draw(rot) {{
+    ctx.clearRect(0,0,W,H);
 
-    // White background (already set by canvas style)
-    // Sphere outline
-    const grad = ctx.createRadialGradient(cx-50, cy-50, 20, cx, cy, R+10);
-    grad.addColorStop(0, "rgba(220,225,235,0.55)");
-    grad.addColorStop(0.7, "rgba(235,238,245,0.30)");
-    grad.addColorStop(1, "rgba(245,246,250,0.10)");
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI*2);
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.18)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    // Sphere fill
+    const g = ctx.createRadialGradient(cx-60,cy-60,20,cx,cy,R+10);
+    g.addColorStop(0,"rgba(210,218,232,0.45)");
+    g.addColorStop(1,"rgba(240,242,248,0.10)");
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+    ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle="rgba(0,0,0,0.15)"; ctx.lineWidth=1.5; ctx.stroke();
 
-    // Latitude circles
-    for (let lat = -60; lat <= 60; lat += 30) {{
-      const latR = Math.cos(lat * Math.PI/180);
-      const latY = Math.sin(lat * Math.PI/180);
-      const isEq = lat === 0;
-      ctx.beginPath();
-      let first = true;
-      for (let a = 0; a <= 360; a += 3) {{
-        const rad = a * Math.PI/180;
-        const [sx, sy] = project(latR*Math.cos(rad), latY, latR*Math.sin(rad), rot);
-        if (first) {{ ctx.moveTo(sx, sy); first=false; }}
-        else ctx.lineTo(sx, sy);
+    // Latitude rings
+    for(let lat=-60;lat<=60;lat+=30){{
+      const lr=Math.cos(lat*Math.PI/180), ly=Math.sin(lat*Math.PI/180);
+      const eq=lat===0;
+      ctx.beginPath(); let f2=true;
+      for(let a=0;a<=360;a+=3){{
+        const r=a*Math.PI/180;
+        const [sx,sy]=proj(lr*Math.cos(r),ly,lr*Math.sin(r),rot);
+        f2 ? (ctx.moveTo(sx,sy),f2=false) : ctx.lineTo(sx,sy);
       }}
       ctx.closePath();
-      ctx.strokeStyle = isEq ? LAT_EQ_STROKE : LAT_STROKE;
-      ctx.lineWidth = isEq ? 1.4 : 0.7;
-      ctx.stroke();
+      ctx.strokeStyle=eq?"rgba(0,0,0,0.25)":"rgba(0,0,0,0.07)";
+      ctx.lineWidth=eq?1.3:0.7; ctx.stroke();
     }}
 
-    // Meridian lines
-    for (let lon = 0; lon < 180; lon += 45) {{
-      const lonR = lon * Math.PI/180;
-      ctx.beginPath();
-      let first = true;
-      for (let a = 0; a <= 360; a += 3) {{
-        const rad = a * Math.PI/180;
-        const [sx, sy] = project(Math.sin(rad)*Math.cos(lonR+rot), Math.cos(rad), Math.sin(rad)*Math.sin(lonR+rot), 0);
-        if (first) {{ ctx.moveTo(sx, sy); first=false; }}
-        else ctx.lineTo(sx, sy);
+    // Meridians
+    for(let lon=0;lon<180;lon+=45){{
+      const lr2=lon*Math.PI/180;
+      ctx.beginPath(); let f3=true;
+      for(let a=0;a<=360;a+=3){{
+        const r=a*Math.PI/180;
+        const [sx,sy]=proj(Math.sin(r)*Math.cos(lr2+rot),Math.cos(r),Math.sin(r)*Math.sin(lr2+rot),0);
+        f3 ? (ctx.moveTo(sx,sy),f3=false) : ctx.lineTo(sx,sy);
       }}
-      ctx.strokeStyle = MERID_STROKE;
-      ctx.lineWidth = 0.7;
-      ctx.stroke();
+      ctx.strokeStyle="rgba(0,0,0,0.05)"; ctx.lineWidth=0.7; ctx.stroke();
     }}
 
-    // Axes — separate horizontal (rotating) from vertical (fixed) to avoid label collision
-    // Horizontal: Risk axis (rotates)
-    const [rsx, rsy] = project(0.88, 0, 0, rot);
-    const [msx, msy] = project(-0.88, 0, 0, rot);
-    const [ox2, oy2] = project(0, 0, 0, rot);
-    ctx.beginPath(); ctx.moveTo(ox2,oy2); ctx.lineTo(rsx,rsy);
-    ctx.strokeStyle = AXIS_RISK+"99"; ctx.lineWidth=1.2;
+    // Risk axis (rotates with sphere)
+    const [rx1,ry1]=proj(0.85,0,0,rot);
+    const [rx2,ry2]=proj(-0.85,0,0,rot);
+    const [ocx,ocy]=proj(0,0,0,rot);
+    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(rx1,ry1);
+    ctx.strokeStyle=C_RISK+"88"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle=AXIS_RISK; ctx.font="bold 12px -apple-system,sans-serif";
-    ctx.fillText("Risk", rsx+5, rsy+4);
+    ctx.fillStyle=C_RISK; ctx.font="bold 12px -apple-system,sans-serif";
+    ctx.fillText("Risk",rx1+5,ry1+4);
 
-    ctx.beginPath(); ctx.moveTo(ox2,oy2); ctx.lineTo(msx,msy);
-    ctx.strokeStyle = AXIS_MIT+"99"; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(rx2,ry2);
+    ctx.strokeStyle=C_MIT+"88"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle=AXIS_MIT; ctx.font="bold 12px -apple-system,sans-serif";
-    const mitLblW = ctx.measureText("Mitigation").width;
-    ctx.fillText("Mitigation", msx - mitLblW - 6, msy+4);
+    ctx.fillStyle=C_MIT; ctx.font="bold 12px -apple-system,sans-serif";
+    const mw2=ctx.measureText("Mitigation").width;
+    ctx.fillText("Mitigation",rx2-mw2-5,ry2+4);
 
-    // Vertical axis — does NOT rotate, always clean
-    const [nax, nay] = project(0, 0.88, 0, 0);
-    const [sax, say] = project(0, -0.88, 0, 0);
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(nax,nay);
-    ctx.strokeStyle = AXIS_POLE+"55"; ctx.lineWidth=1.2;
+    // Vertical axis (fixed — no rotation)
+    const [ax1,ay1]=proj(0,0.85,0,0);
+    const [ax2,ay2]=proj(0,-0.85,0,0);
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(ax1,ay1);
+    ctx.strokeStyle=C_POLE+"55"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(sax,say);
-    ctx.strokeStyle = "#99999955"; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(ax2,ay2);
+    ctx.strokeStyle=C_MID+"55"; ctx.lineWidth=1.1;
     ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
 
-    // State vector — thick, prominent
-    const th = state.theta;
-    const ph = state.phi + rot;
-    const vx = Math.sin(th)*Math.cos(ph);
-    // State vector — thick, prominent
-    const th = state.theta;
-    const ph = state.phi + rot;
-    const vx = Math.sin(th)*Math.cos(ph);
-    const vy = Math.cos(th);
-    const vz = Math.sin(th)*Math.sin(ph);
-    const [ox, oy]   = project(0, 0, 0, 0);
-    const [vsx, vsy] = project(vx*0.93, vy*0.93, vz*0.93, 0);
+    // Pole labels — centred, outside sphere
+    const [np1,np2]=proj(0,1.02,0,0);
+    const [sp1,sp2]=proj(0,-1.02,0,0);
+    ctx.textAlign="center";
+    ctx.fillStyle=C_POLE; ctx.font="bold 13px -apple-system,sans-serif";
+    ctx.fillText("|DO\u27e9  P=1.0  \u2191 High",np1,np2-12);
+    ctx.fillStyle=C_MID; ctx.font="13px -apple-system,sans-serif";
+    ctx.fillText("|\u00acDO\u27e9  P=0.0  \u2193 Low",sp1,sp2+24);
+    ctx.textAlign="left";
 
-    // Shadow/glow (subtle on white)
-    ctx.shadowColor = riskCol + "44";
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.moveTo(ox, oy);
-    ctx.lineTo(vsx, vsy);
-    ctx.strokeStyle = riskCol;
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    // State vector
+    const th=S.theta, ph=S.phi+rot;
+    const vvx=Math.sin(th)*Math.cos(ph);
+    const vvy=Math.cos(th);
+    const vvz=Math.sin(th)*Math.sin(ph);
+    const [ovx,ovy]=proj(0,0,0,0);
+    const [vpx,vpy]=proj(vvx*0.92,vvy*0.92,vvz*0.92,0);
+
+    // Glow
+    ctx.shadowColor=riskCol+"33"; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.moveTo(ovx,ovy); ctx.lineTo(vpx,vpy);
+    ctx.strokeStyle=riskCol; ctx.lineWidth=4; ctx.stroke();
+    ctx.shadowBlur=0;
 
     // Arrowhead
-    const ang = Math.atan2(vsy-oy, vsx-ox);
+    const ang2=Math.atan2(vpy-ovy,vpx-ovx);
     ctx.beginPath();
-    ctx.moveTo(vsx, vsy);
-    ctx.lineTo(vsx - 14*Math.cos(ang-0.4), vsy - 14*Math.sin(ang-0.4));
-    ctx.lineTo(vsx - 14*Math.cos(ang+0.4), vsy - 14*Math.sin(ang+0.4));
-    ctx.closePath();
-    ctx.fillStyle = riskCol;
-    ctx.fill();
+    ctx.moveTo(vpx,vpy);
+    ctx.lineTo(vpx-13*Math.cos(ang2-0.38),vpy-13*Math.sin(ang2-0.38));
+    ctx.lineTo(vpx-13*Math.cos(ang2+0.38),vpy-13*Math.sin(ang2+0.38));
+    ctx.closePath(); ctx.fillStyle=riskCol; ctx.fill();
 
-    // Tip label — smart position + white pill for readability
-    const _lbl = `|ψ⟩  P(DO) = ${{(state.risk*100).toFixed(1)}}%`;
-    ctx.font = "bold 13px -apple-system,sans-serif";
-    const _lw = ctx.measureText(_lbl).width;
-    const _lx = vsx > cx ? vsx + 12 : vsx - _lw - 10;
-    const _ly = vsy < 80 ? vsy + 20 : vsy - 8;
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
-    ctx.fillRect(_lx - 3, _ly - 14, _lw + 6, 18);
-    ctx.fillStyle = riskCol;
-    ctx.fillText(_lbl, _lx, _ly);
+    // Vector label with pill background
+    const lbl=`|\u03c8\u27e9  P(DO) = ${{(S.risk*100).toFixed(1)}}%`;
+    ctx.font="bold 13px -apple-system,sans-serif";
+    const lw=ctx.measureText(lbl).width;
+    const lx=vpx>cx ? vpx+11 : vpx-lw-11;
+    const ly=vpy<90 ? vpy+22 : vpy-9;
+    ctx.fillStyle="rgba(255,255,255,0.90)";
+    ctx.fillRect(lx-3,ly-14,lw+6,19);
+    ctx.fillStyle=riskCol; ctx.fillText(lbl,lx,ly);
 
-    // Superposition ring
-    if (state.si > 0.6) {{
-      const [eq1] = project(1, 0, 0, rot);
-      ctx.beginPath();
-      let first = true;
-      for (let a = 0; a <= 360; a += 4) {{
-        const rad = a * Math.PI/180;
-        const [sx, sy] = project(Math.cos(rad), 0, Math.sin(rad), rot);
-        if (first) {{ ctx.moveTo(sx, sy); first=false; }}
-        else ctx.lineTo(sx, sy);
+    // Superposition equatorial ring (when SI > 0.6)
+    if(S.si>0.6){{
+      ctx.beginPath(); let f4=true;
+      for(let a=0;a<=360;a+=4){{
+        const r=a*Math.PI/180;
+        const [sx,sy]=proj(Math.cos(r),0,Math.sin(r),rot);
+        f4 ? (ctx.moveTo(sx,sy),f4=false) : ctx.lineTo(sx,sy);
       }}
       ctx.closePath();
-      ctx.strokeStyle = "#B8850A88";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.strokeStyle="#B8850A66"; ctx.lineWidth=2;
+      ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
     }}
 
-    // Poles — placed clearly above/below sphere, not overlapping axes
-    const [nsx2, nsy2] = project(0, 1.0, 0, 0);
-    const [ssx2, ssy2] = project(0, -1.0, 0, 0);
-    // North pole label: above the sphere
-    ctx.fillStyle = AXIS_POLE;
-    ctx.font = "bold 13px -apple-system,sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("|DO⟩  P = 1.0  ↑ High", nsx2, nsy2 - 10);
-    // South pole label: below the sphere
-    ctx.fillStyle = TEXT_MID;
-    ctx.font = "13px -apple-system,sans-serif";
-    ctx.fillText("|\u00acDO⟩  P = 0.0  ↓ Low", ssx2, ssy2 + 22);
-    ctx.textAlign = "left";
-
     // Centre dot
-    ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI*2);
-    ctx.fillStyle = "#999";
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2);
+    ctx.fillStyle="#aaa"; ctx.fill();
 
-    // Update label
+    // Update sub-label
+    const deg=x=>((x*180/Math.PI)%360).toFixed(1);
     document.getElementById("bloch-label").textContent =
-      `\u03b8 = ${{(state.theta*180/Math.PI).toFixed(1)}}\u00b0  \u00b7  \u03c6 = ${{((state.phi + rot)*180/Math.PI % 360).toFixed(1)}}\u00b0  \u00b7  SI = ${{state.si.toFixed(3)}}`;
+      "\u03b8 = "+deg(S.theta)+"\u00b0  \u00b7  \u03c6 = "+deg(S.phi+rot)+"\u00b0  \u00b7  SI = "+S.si.toFixed(3);
   }}
 
-  // Animate — gentle oscillation (back and forth), not continuous loop
-  // This reveals different facets of the sphere, showing the belief
-  // state from multiple epistemic perspectives
-  let startTime = null;
-  function animate(timestamp) {{
-    if (!startTime) startTime = timestamp;
-    const elapsed = timestamp - startTime;
-    // Oscillate: ±35° with a slow 12-second period
-    const amplitude = 0.60;   // radians (~35°)
-    const period    = 12000;  // ms
-    angle = amplitude * Math.sin(2 * Math.PI * elapsed / period);
-    drawSphere(angle);
+  // Gentle oscillation — ±35° over 12 seconds
+  let t0=null;
+  function animate(ts){{
+    if(!t0) t0=ts;
+    const rot=0.60*Math.sin(2*Math.PI*(ts-t0)/12000);
+    draw(rot);
     requestAnimationFrame(animate);
   }}
   requestAnimationFrame(animate);
