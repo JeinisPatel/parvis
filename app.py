@@ -1324,23 +1324,37 @@ function copyTranscript(){
     document.getElementById('mic-status').textContent='Copied — paste into the text box below ↓';});}
 }
 </script>"""
-    st.components.v1.html(speech_html, height=120, scrolling=False)
+    st.components.v1.html(speech_html, height=125, scrolling=False)
+    st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
 
     # ── Text input ─────────────────────────────────────────────────────────────
+    # Larger text styling for the intake text area
+    st.markdown("""
+    <style>
+    div[data-testid="stTextArea"][aria-label="Case description"] textarea {
+        font-size: 1.05rem !important;
+        line-height: 1.65 !important;
+        padding: 12px 14px !important;
+        color: #1B2A4A !important;
+    }
+    </style>""", unsafe_allow_html=True)
+
     intake_text = st.text_area(
         "Case description",
         placeholder=(
             "e.g. Male offender, 38, Indigenous, Northern Ontario. "
-            "Prior record: aggravated assault 2016 (18 months custody), robbery 2019 (3 years federal). "
-            "Gladue report filed but not engaged by sentencing judge. "
-            "Bail denied 11 months pre-trial. PCL-R score 24. "
-            "No culturally appropriate treatment available in institution."
+            "Prior record: aggravated assault 2016 (18 months custody), "
+            "robbery 2019 (3 years federal). Gladue report filed but not "
+            "engaged by sentencing judge. Bail denied 11 months pre-trial. "
+            "PCL-R score 24. No culturally appropriate treatment available."
         ),
-        height=150,
+        height=180,
         key="intake_text",
         label_visibility="collapsed"
     )
+    st.markdown("<div style='height:.3rem'></div>", unsafe_allow_html=True)
 
+    st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
     ic1, ic2 = st.columns([2,1])
     with ic1:
         intake_provider = st.selectbox("Provider",
