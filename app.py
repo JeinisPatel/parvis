@@ -1354,67 +1354,65 @@ function copyTranscript(){
     )
     st.markdown("<div style='height:.3rem'></div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
-    ic1, ic2 = st.columns([2,1])
-    with ic1:
+    st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+    ip1, ip2, ip3 = st.columns([2, 2, 1])
+    with ip1:
         intake_provider = st.selectbox("Provider",
             ["claude","openai","gemini"],
             format_func=lambda x:{"claude":"Claude (Anthropic) ★","openai":"GPT-4o (OpenAI)","gemini":"Gemini 1.5 Pro"}[x],
             key="intake_provider", label_visibility="collapsed")
-    with ic2:
+    with ip2:
+        _key_label = {"claude":"Anthropic API key","openai":"OpenAI API key","gemini":"Google API key"}.get(intake_provider,"API key")
+        intake_ak = st.text_input(f"{_key_label} (or set in Streamlit secrets)",
+            type="password", key="intake_ak", label_visibility="collapsed",
+            placeholder=f"{_key_label} — optional if set in secrets")
+    with ip3:
         parse_btn = st.button("🔍 Parse & propose", key="intake_parse", use_container_width=True)
 
     if parse_btn and intake_text.strip():
         with st.spinner("Parsing case description…"):
             try:
-                import json, re as _re, anthropic as _ant
+                import json, re as _re
+                from document_analyzer import analyze_document
+
                 _PROMPT = (
                     "You are a Canadian criminal law expert helping populate a Bayesian sentencing "
-                    "network (PARVIS) from a plain-language case description. Extract information and "
-                    "return ONLY valid JSON — no markdown, no preamble:\n{\n"
-                    '  "age": <integer or null>,\n'
-                    '  "indigenous": <true/false>,\n'
-                    '  "province": <2-letter code or null>,\n'
-                    '  "gladue_report_filed": <true/false>,\n'
-                    '  "gladue_engaged": <true/false>,\n'
-                    '  "bail_denied_months": <integer or null>,\n'
-                    '  "pclr_score": <number or null>,\n'
-                    '  "static99r_score": <number or null>,\n'
-                    '  "fasd": <true/false>,\n'
-                    '  "intergenerational_trauma": <true/false>,\n'
-                    '  "no_cultural_treatment": <true/false>,\n'
-                    '  "ineffective_counsel": <true/false>,\n'
-                    '  "convictions": [{"offence":"","year":null,"sentence_type":"Federal custody|Provincial custody|CSO|Probation only|Fine only|Discharge|Other","sentence_detail":"","seriousness":"Minor|Moderate|Significant|Serious violent|Catastrophic","gang":false,"weapon":false,"domestic_violence":false,"child_victim":false,"position_of_trust":false}],\n'
-                    '  "gladue_factors": ["colonialism","poverty","residential_school","child_welfare","family_violence","substance_abuse","mental_health","lack_services","systemic_discrimination","loss_culture"],\n'
-                    '  "notes": "any caveats"\n}'
-                    "\n\nCase description:\n" + intake_text.strip()
+                    "network (PARVIS) from a plain-language case description. "
+                    "Extract ALL information present and return ONLY valid JSON — no markdown, no preamble, no explanation. "
+                    "Use null for any field not mentioned. JSON structure:\n"
+                    '{"age":null,"indigenous":false,"province":null,'
+                    '"gladue_report_filed":false,"gladue_engaged":false,'
+                    '"bail_denied_months":null,"pclr_score":null,"static99r_score":null,'
+                    '"fasd":false,"intergenerational_trauma":false,'
+                    '"no_cultural_treatment":false,"ineffective_counsel":false,'
+                    '"convictions":[{"offence":"","year":null,'
+                    '"sentence_type":"Federal custody (2+ years)","sentence_detail":"",'
+                    '"seriousness":"Significant","gang":false,"weapon":false,'
+                    '"domestic_violence":false,"child_victim":false,"position_of_trust":false}],'
+                    '"gladue_factors":[],'
+                    '"notes":""}\n\n'
+                    "sentence_type must be one of: Federal custody (2+ years), Provincial custody (< 2 years), "
+                    "Conditional sentence order (CSO), Probation only, Fine only, "
+                    "Absolute / conditional discharge, Time served, Other / unknown\n"
+                    "seriousness must be one of: Minor, Moderate, Significant, Serious violent, Catastrophic\n"
+                    "gladue_factors items from: colonialism, poverty, residential_school, child_welfare, "
+                    "family_violence, substance_abuse, mental_health, lack_services, "
+                    "systemic_discrimination, loss_culture\n\n"
+                    "Case description:\n" + intake_text.strip()
                 )
 
-                # Use Anthropic directly for reliability
-                ak_env = __import__("os").environ.get("ANTHROPIC_API_KEY","")
-                try:
-                    import streamlit as _st2
-                    ak_env = ak_env or _st2.secrets.get("ANTHROPIC_API_KEY","")
-                except Exception:
-                    pass
-
-                if not ak_env and intake_provider=="claude":
-                    st.warning("Add ANTHROPIC_API_KEY to Streamlit secrets for automatic parsing. For now, copy the JSON structure above and fill it manually.")
+                raw = analyze_document(
+                    file_content=_PROMPT,
+                    provider=intake_provider,
+                    api_key=intake_ak or None,
+                )
+                m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+                if m:
+                    parsed = json.loads(m.group(0))
+                    st.session_state.intake_parsed = parsed
+                    st.rerun()
                 else:
-                    client = _ant.Anthropic(api_key=ak_env)
-                    msg = client.messages.create(
-                        model="claude-opus-4-5",
-                        max_tokens=1200,
-                        messages=[{"role":"user","content":_PROMPT}]
-                    )
-                    raw = msg.content[0].text
-                    m = _re.search(r'\{.*\}', raw, _re.DOTALL)
-                    if m:
-                        parsed = json.loads(m.group(0))
-                        st.session_state.intake_parsed = parsed
-                        st.rerun()
-                    else:
-                        st.error("Could not extract structured values. Try rephrasing the description.")
+                    st.error("Could not extract structured values. Try rephrasing the description.")
             except Exception as ex:
                 st.error(f"Parse error: {ex}")
 
