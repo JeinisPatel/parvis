@@ -679,48 +679,280 @@ with TABS[5]:
 
 # ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
 with TABS[6]:
-    st.markdown("### Quantum Bayesianism (QBism) diagnostic layer")
+    st.markdown("### ⚛️ Quantum Bayesianism (QBism) diagnostic layer")
     st.caption("Appendix Q: *The Limits of Classical Bayesian Inference in Legally Distorted Systems* · Busemeyer & Bruza (2012) · Wojciechowski (2023)")
-    st.info("This layer does **not** alter the VE posterior. It identifies epistemic conditions requiring heightened scrutiny.")
-    diags=st.session_state.qdiags
-    if diags:
-        ov=diags.get("overall_flag","none")
-        cls={"high":"qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
-             "moderate":"qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
-             "none":"qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(ov,"qh")
-        st.markdown(f"<div class='{cls}'><b>Overall: {ov.upper()}</b> — {diags.get('summary','')}</div>",unsafe_allow_html=True)
-        si=diags.get("superposition_index",.5);dn7=P[20]
-        rw=sum(P.get(n,.5) for n in [2,3,4,18])/4
-        mw=sum(P.get(n,.5) for n in [5,6,10,12,14])/5
-        st.markdown("---")
+    st.info("This layer does **not** alter the VE posterior. It identifies epistemic conditions — cognitive and structural — that require heightened scrutiny in the legal reasoning process.")
+
+    # ── Live state: recompute from current posteriors every render ─────────────
+    diags = st.session_state.qdiags
+    dn7   = P[20]
+    rw    = sum(P.get(n, .5) for n in [2, 3, 4, 18]) / 4
+    mw    = sum(P.get(n, .5) for n in [5, 6, 10, 12, 14]) / 5
+    si    = diags.get("superposition_index", .5) if diags else abs(dn7 - 0.5) * 2
+    theta_deg = np.degrees(np.arccos(np.clip(1 - 2*dn7, -1, 1)))
+    phi_deg   = float(np.degrees(np.arctan2(rw, mw))) % 360
+
+    # ── Animated Bloch sphere (HTML/JS canvas) ────────────────────────────────
+    # Pre-compute the state vector endpoint for the current belief state
+    import json
+    bloch_state = json.dumps({
+        "theta": float(np.radians(theta_deg)),
+        "phi":   float(np.radians(phi_deg)),
+        "risk":  float(dn7),
+        "si":    float(si),
+        "rw":    float(rw),
+        "mw":    float(mw),
+    })
+
+    bloch_html = f"""
+<div style="display:flex;flex-direction:column;align-items:center;gap:0">
+  <canvas id="bloch" width="380" height="380"
+    style="border-radius:12px;background:linear-gradient(135deg,#0d1b2a 0%,#1a2f45 100%)">
+  </canvas>
+  <div id="bloch-label" style="font-family:monospace;font-size:12px;color:#aaa;margin-top:4px;text-align:center"></div>
+</div>
+<script>
+(function(){{
+  const state = {bloch_state};
+  const canvas = document.getElementById("bloch");
+  const ctx    = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const cx = W/2, cy = H/2, R = 150;
+  let angle = 0;   // azimuthal rotation offset for animation
+
+  // Color by risk level
+  const riskCol = state.risk >= 0.55 ? "#E05252" :
+                  state.risk >= 0.35 ? "#E09B2D" : "#4CAF50";
+
+  function project(x, y, z, rotY) {{
+    // Rotate around Y axis
+    const rx = x*Math.cos(rotY) - z*Math.sin(rotY);
+    const rz = x*Math.sin(rotY) + z*Math.cos(rotY);
+    // Simple perspective projection
+    const fov = 2.8;
+    const sx = cx + rx * R * fov / (fov + rz + 2);
+    const sy = cy - y * R * fov / (fov + rz + 2);
+    return [sx, sy, rz];
+  }}
+
+  function drawSphere(rot) {{
+    ctx.clearRect(0, 0, W, H);
+
+    // Sphere background
+    const grad = ctx.createRadialGradient(cx-40, cy-40, 10, cx, cy, R+10);
+    grad.addColorStop(0, "rgba(255,255,255,0.05)");
+    grad.addColorStop(1, "rgba(255,255,255,0.01)");
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI*2);
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Draw latitude circles (equator prominent)
+    for (let lat = -60; lat <= 60; lat += 30) {{
+      const latR = Math.cos(lat * Math.PI/180);
+      const latY = Math.sin(lat * Math.PI/180);
+      const isEq = lat === 0;
+      ctx.beginPath();
+      let first = true;
+      for (let a = 0; a <= 360; a += 4) {{
+        const rad = a * Math.PI/180;
+        const [sx, sy, sz] = project(latR*Math.cos(rad), latY, latR*Math.sin(rad), rot);
+        if (first) {{ ctx.moveTo(sx, sy); first=false; }}
+        else ctx.lineTo(sx, sy);
+      }}
+      ctx.closePath();
+      ctx.strokeStyle = isEq ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.08)";
+      ctx.lineWidth = isEq ? 1.5 : 0.8;
+      ctx.stroke();
+    }}
+
+    // Draw meridian lines
+    for (let lon = 0; lon < 180; lon += 45) {{
+      const lonR = lon * Math.PI/180;
+      ctx.beginPath();
+      let first = true;
+      for (let a = 0; a <= 360; a += 4) {{
+        const rad = a * Math.PI/180;
+        const [sx, sy, sz] = project(Math.sin(rad)*Math.cos(lonR+rot), Math.cos(rad), Math.sin(rad)*Math.sin(lonR+rot), 0);
+        if (first) {{ ctx.moveTo(sx, sy); first=false; }}
+        else ctx.lineTo(sx, sy);
+      }}
+      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }}
+
+    // Axes
+    const axes = [
+      [1,0,0,"R (Risk)","#E05252"],
+      [-1,0,0,"M (Mit)","#4CAF50"],
+      [0,1,0,"|DO⟩","#ffffff"],
+      [0,-1,0,"|¬DO⟩","#aaaaaa"],
+    ];
+    axes.forEach(([ax,ay,az,lbl,col]) => {{
+      const [sx, sy] = project(ax*0.9, ay*0.9, az*0.9, rot);
+      const [ox, oy] = project(0, 0, 0, rot);
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(sx, sy);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = col;
+      ctx.font = "bold 10px monospace";
+      ctx.fillText(lbl, sx+4, sy+4);
+    }});
+
+    // State vector
+    const th = state.theta;
+    const ph = state.phi + rot;
+    const vx = Math.sin(th)*Math.cos(ph);
+    const vy = Math.cos(th);
+    const vz = Math.sin(th)*Math.sin(ph);
+    const [ox, oy]  = project(0, 0, 0, 0);
+    const [vsx, vsy] = project(vx*0.95, vy*0.95, vz*0.95, 0);
+
+    // Glow
+    ctx.shadowColor = riskCol;
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(vsx, vsy);
+    ctx.strokeStyle = riskCol;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Tip dot
+    ctx.beginPath();
+    ctx.arc(vsx, vsy, 7, 0, Math.PI*2);
+    ctx.fillStyle = riskCol;
+    ctx.fill();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Label on vector tip
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText(`|ψ⟩ P(DO)=${{(state.risk*100).toFixed(1)}}%`, vsx+10, vsy-6);
+
+    // Superposition ring at equator if high SI
+    if (state.si > 0.6) {{
+      ctx.beginPath();
+      ctx.arc(cx, cy, R*0.15, 0, Math.PI*2);
+      ctx.strokeStyle = "rgba(255,200,50,0.5)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }}
+
+    // Poles
+    const [nsx, nsy] = project(0, 0.95, 0, 0);
+    const [ssx, ssy] = project(0, -0.95, 0, 0);
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px monospace";
+    ctx.fillText("P=1 (High)", nsx+6, nsy);
+    ctx.fillStyle = "#aaa";
+    ctx.fillText("P=0 (Low)", ssx+6, ssy);
+
+    // Update label
+    document.getElementById("bloch-label").textContent =
+      `θ=${{(state.theta*180/Math.PI).toFixed(1)}}° · φ=${{(state.phi*180/Math.PI + rot*180/Math.PI).toFixed(1)}}° · SI=${{state.si.toFixed(2)}}`;
+  }}
+
+  // Animate — slow, gentle rotation
+  function animate() {{
+    drawSphere(angle);
+    angle += 0.004;   // ~0.25°/frame — tasteful, not distracting
+    requestAnimationFrame(animate);
+  }}
+  animate();
+}})();
+</script>
+"""
+
+    # ── Layout: animated sphere + legend + state ──────────────────────────────
+    qb1, qb2 = st.columns([3, 2])
+
+    with qb1:
         st.markdown("#### Bloch sphere — quantum belief state |ψ⟩")
-        st.caption("State vector on Bloch sphere. Equator (θ=90°) = maximum superposition. Poles = fully resolved belief.")
-        cb,cc=st.columns([2,1])
-        with cb:
-            fb=draw_bloch_sphere(dn7,rw,mw,dn7,f"P(DO)={dn7*100:.1f}%")
-            st.pyplot(fb,use_container_width=True)
-        with cc:
-            fc=draw_comparison_chart(dn7,dn7,si)
-            st.pyplot(fc,use_container_width=True)
-            theta_deg=np.degrees(np.arccos(np.clip(1-2*dn7,-1,1)))
-            st.markdown(f"""**State vector:**\n- θ = `{theta_deg:.1f}°` (polar)\n- SI = `{si:.2f}`\n- |α|² = `{dn7:.3f}`\n- |β|² = `{1-dn7:.3f}`\n\n*AQ.3.3.5.2: pre-decisional ambiguity preserved as stable epistemic condition.*""")
+        st.caption("The state vector rotates slowly to illustrate the superposition of belief states. North pole = fully collapsed to DO (P=1). South pole = fully collapsed to no DO (P=0). Equator = maximum pre-decisional ambiguity (P=0.5).")
+        st.components.v1.html(bloch_html, height=430, scrolling=False)
+
+    with qb2:
+        st.markdown("#### State vector")
+        state_col = "#A32D2D" if dn7>=0.55 else "#BA7517" if dn7>=0.35 else "#3B6D11"
+        st.markdown(
+            f"<div style='background:#f8f8f8;border-radius:10px;padding:.8rem 1rem;margin-bottom:.6rem'>"
+            f"<div style='font-size:.72rem;color:#888;margin-bottom:3px'>Node 20 — DO designation risk</div>"
+            f"<div style='font-size:1.8rem;font-weight:800;font-family:monospace;color:{state_col}'>"
+            f"{dn7*100:.1f}%</div>"
+            f"<div style='font-size:.8rem;color:#555;margin-top:4px'>"
+            f"θ = {theta_deg:.1f}° · φ = {phi_deg:.1f}° · SI = {si:.3f}</div>"
+            f"</div>",
+            unsafe_allow_html=True)
+
+        # ── Tasteful legend ───────────────────────────────────────────────────
+        st.markdown("#### Legend")
+        legend_items = [
+            ("θ (theta)", "Polar angle from North Pole. θ=0° means P(DO)=1.0 (fully resolved to designation). θ=180° means P(DO)=0.0. θ=90° means P=0.5, maximum superposition.", "#185FA5"),
+            ("φ (phi)", "Azimuthal angle encoding the balance between the risk narrative (Node 2/3/4/18 aggregate) and the mitigation/distortion narrative (Node 5/6/10/12/14).", "#534AB7"),
+            ("|ψ⟩ (psi)", "The belief state vector. Its position on the sphere encodes both the probability estimate and the epistemic confidence in that estimate.", "#1B2A4A"),
+            ("SI — Superposition index", "Measures how far the belief state is from a classical resolved answer. SI=1.0 means maximum superposition (equator). SI=0.0 means fully resolved (pole). High SI signals the legal system is operating in a zone of genuine epistemic ambiguity.", "#BA7517"),
+            ("|DO⟩ / |¬DO⟩", "The two basis states: North Pole = certain DO designation, South Pole = certain no designation. Classical probability lives on this axis. The QBism layer asks whether the system has left this axis.", "#A32D2D"),
+            ("Equatorial ring", "Appears when SI > 0.6 — marks the zone of maximum pre-decisional ambiguity. Per AQ.3.3.5.2 this should be preserved as a stable epistemic condition, not artificially collapsed by the model.", "#BA7517"),
+        ]
+        for term, defn, col in legend_items:
+            st.markdown(
+                f"<div style='border-left:3px solid {col};padding:.35rem .7rem;"
+                f"margin-bottom:.4rem;background:#fafafa;border-radius:0 6px 6px 0'>"
+                f"<div style='font-size:.78rem;font-weight:700;color:{col}'>{term}</div>"
+                f"<div style='font-size:.73rem;color:#555;line-height:1.4'>{defn}</div>"
+                f"</div>",
+                unsafe_allow_html=True)
+
+        # Comparison chart (static matplotlib)
+        if diags:
+            fc = draw_comparison_chart(dn7, dn7, si)
+            st.pyplot(fc, use_container_width=True)
+
+    # ── Diagnostic conditions ─────────────────────────────────────────────────
+    if diags:
         st.markdown("---")
-        for ttl,key,doc in [("1. Prior contamination","prior_contamination","AQ.3.3.2 — Distorted priors propagated, not corrected"),
-                             ("2. Order effects","order_effects","AQ.3.3.3 — M₁M₂ρ ≠ M₂M₁ρ · sequence alters belief"),
-                             ("3. Contextual interference","contextual_interference","AQ.3.3.4 — P(H|C₁) ≠ P(H|C₂) · Kochen-Specker"),
-                             ("4. Belief stasis","belief_stasis","AQ.3.3.4 — SCE acknowledged but inert")]:
-            d=diags.get(key,{});sev=d.get("severity","none")
-            cs2={"high":"qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
-                 "moderate":"qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
-                 "none":"qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(sev,"qh")
+        ov = diags.get("overall_flag", "none")
+        cls = {"high":     "qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
+               "moderate": "qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
+               "none":     "qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(ov, "qh")
+        st.markdown(f"<div class='{cls}'><b>Overall: {ov.upper()}</b> — {diags.get('summary','')}</div>",
+                    unsafe_allow_html=True)
+        st.markdown("#### Diagnostic conditions")
+        for ttl, key, doc in [
+            ("1. Prior contamination",     "prior_contamination",    "AQ.3.3.2 — Distorted priors propagated, not corrected"),
+            ("2. Order effects",           "order_effects",          "AQ.3.3.3 — M₁M₂ρ ≠ M₂M₁ρ · sequence alters belief"),
+            ("3. Contextual interference", "contextual_interference","AQ.3.3.4 — P(H|C₁) ≠ P(H|C₂) · Kochen-Specker"),
+            ("4. Belief stasis",           "belief_stasis",          "AQ.3.3.4 — SCE acknowledged but inert"),
+        ]:
+            d = diags.get(key, {}); sev = d.get("severity", "none")
+            cs2 = {"high":     "qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
+                   "moderate": "qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
+                   "none":     "qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(sev, "qh")
             with st.expander(f"{ttl} — {sev.upper()}"):
-                st.markdown(f"<div class='{cs2}'>{doc}</div>",unsafe_allow_html=True)
-                for item in d.get("items",[]):
-                    if isinstance(item,str): st.markdown(f"▸ {item}")
-                    elif isinstance(item,dict):
-                        for k,v in item.items(): st.markdown(f"**{k}:** {v}")
+                st.markdown(f"<div class='{cs2}'>{doc}</div>", unsafe_allow_html=True)
+                for item in d.get("items", []):
+                    if isinstance(item, str): st.markdown(f"▸ {item}")
+                    elif isinstance(item, dict):
+                        for k, v in item.items(): st.markdown(f"**{k}:** {v}")
                 if not d.get("items"): st.success("No conditions flagged.")
-                st.caption(d.get("doctrine",""))
+                st.caption(d.get("doctrine", ""))
+    else:
+        st.info("Run inference on any tab to populate the QBism diagnostics. The state vector above updates in real time as you adjust case profile settings.")
 
 # ── T8: Document analysis ─────────────────────────────────────────────────────
 with TABS[7]:
