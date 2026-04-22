@@ -164,7 +164,7 @@ def dobar(p, label="DO designation risk"):
 
 # ── Session state ─────────────────────────────────────────────────────────────
 def _init():
-    defs = {"model":None,"engine":None,"profile_ev":{},"gladue_checked":set(),
+    defs = {"model":None,"engine":None,"profile_ev":{},"gladue_checked":set(),"criminal_record":[],"cr_doc_adj":{},
             "sce_checked":set(),"sce_values":{},"manual_ev":{},"doc_adj":{},"posteriors":{},
             "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[]}
     for k,v in defs.items():
@@ -427,7 +427,7 @@ except ImportError:
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 TABS=st.tabs(["🕸️ Architecture","📋 Case profile","🦅 Gladue factors",
               "⚖️ Morris / Ellis SCE","🔬 Evidence review","📊 Inference",
-              "⚛️ QBism diagnostics","📂 Document analysis","📄 Audit report"])
+              "⚛️ QBism diagnostics","📂 Document analysis","📜 Criminal record","📄 Audit report"])
 
 # ── T1: Architecture ──────────────────────────────────────────────────────────
 with TABS[0]:
@@ -929,8 +929,276 @@ with TABS[7]:
             "3. Redeploy — tracker activates automatically.</div>",
             unsafe_allow_html=True)
 
-# ── T9: Audit report ──────────────────────────────────────────────────────────
+# ── T9: Criminal record ──────────────────────────────────────────────────────
 with TABS[8]:
+    st.markdown("### Criminal record")
+    st.caption("Enter prior convictions and calibrate each entry's evidentiary weight against doctrinal distortion nodes.")
+    st.markdown(dobar(P[20]),unsafe_allow_html=True)
+
+    # ── Distortion node weights ───────────────────────────────────────────────
+    # Used to compute calibrated reliability for each conviction
+    pN7  = st.session_state.posteriors.get(7,  0.15)   # bail-denial cascade
+    pN6  = st.session_state.posteriors.get(6,  0.15)   # ineffective counsel
+    pN5  = st.session_state.posteriors.get(5,  0.10)   # invalid risk tools / Ewert
+    pN14 = st.session_state.posteriors.get(14, 0.15)   # over-policing
+    pN15 = st.session_state.posteriors.get(15, 0.40)   # temporal distortion / age
+    pN12 = st.session_state.posteriors.get(12, 0.15)   # Gladue misapplication
+
+    # ── Authoritative correction references ───────────────────────────────────
+    CORR_REFS = {
+        "bail":    ("Bail-denial cascade (N7)", "A32D2D", "R v Antic [2017] SCC 27; Tolppanen Report (2018)"),
+        "counsel": ("Ineffective counsel (N6)", "185FA5", "R v GDB [2000] 1 SCR 520; Strickland doctrine"),
+        "ewert":   ("Ewert tool invalidity (N5)", "185FA5", "Ewert v Canada [2018] SCC 30"),
+        "police":  ("Over-policing / record inflation (N14)", "185FA5", "R v Le [2019] SCC 34"),
+        "time":    ("Temporal attenuation (N15)", "185FA5", "R v Nur [2015] / Lloyd [2016] — age burnout"),
+        "gladue":  ("Gladue misapplication (N12)", "3B6D11", "R v Morris 2021 ONCA 680 para 97; Boutilier [2017] SCC 64"),
+    }
+
+    # ── Compute global reliability floor from current distortion posteriors ───
+    bail_factor    = float(np.clip(1.0 - 0.50*pN7 - 0.20*pN6, 0.30, 1.0))
+    ewert_factor   = float(np.clip(1.0 - 0.40*pN5,             0.40, 1.0))
+    police_factor  = float(np.clip(1.0 - 0.35*pN14,            0.50, 1.0))
+    gladue_factor  = float(np.clip(1.0 - 0.30*pN12,            0.55, 1.0))
+
+    # ── UI: Add conviction ─────────────────────────────────────────────────────
+    st.markdown("#### Add conviction")
+    with st.expander("➕ Enter a new conviction", expanded=len(st.session_state.criminal_record)==0):
+        ca1, ca2 = st.columns([2,1])
+        with ca1:
+            cr_offence   = st.text_input("Offence description", placeholder="e.g. Aggravated assault s.268 CC", key="cr_off")
+            cr_court     = st.text_input("Court", placeholder="e.g. Ontario Superior Court of Justice", key="cr_court")
+        with ca2:
+            cr_year      = st.number_input("Year of conviction", min_value=1950, max_value=2026, value=2015, step=1, key="cr_year")
+            cr_sentence  = st.text_input("Sentence", placeholder="e.g. 18 months custody", key="cr_sent")
+        cr_jurisdiction = st.selectbox("Province / jurisdiction",
+            ["ON","BC","AB","QC","SK","MB","NS","NB","NL","PE","YT","NT","NU","Federal"],
+            key="cr_jur")
+
+        st.markdown("**Doctrinal reliability adjustments for this conviction**")
+        st.caption("Each slider reflects the degree to which this specific conviction's evidentiary weight should be discounted based on the distortion nodes currently active in PARVIS.")
+
+        ca3, ca4 = st.columns(2)
+        with ca3:
+            adj_bail   = st.slider("Bail-denial / coercive plea reduction",  0.0, 1.0, min(pN7, 0.70),  0.05, key="cr_adj_bail",
+                help="R v Antic [2017] SCC 27 — conviction may reflect coercive plea under detention rather than genuine admission of guilt")
+            adj_ewert  = st.slider("Ewert tool-invalidity reduction",         0.0, 1.0, min(pN5, 0.50),  0.05, key="cr_adj_ewert",
+                help="Ewert v Canada [2018] SCC 30 — actuarial evidence underlying this conviction may carry reduced cultural validity")
+            adj_gladue = st.slider("Gladue misapplication reduction",         0.0, 1.0, min(pN12, 0.50), 0.05, key="cr_adj_gladue",
+                help="R v Morris 2021 ONCA 680 — contextual factors may have been ignored or misapplied at original sentencing")
+        with ca4:
+            adj_police = st.slider("Over-policing / record inflation reduction",0.0, 1.0, min(pN14, 0.50),0.05, key="cr_adj_police",
+                help="R v Le [2019] SCC 34 — conviction may be partly a product of racialised over-policing rather than actual criminogenic conduct")
+            adj_mm     = st.slider("Mandatory minimum distortion reduction",   0.0, 1.0, 0.0,             0.05, key="cr_adj_mm",
+                help="R v Nur [2015] / Lloyd [2016] — conviction may have been influenced by a now-struck mandatory minimum")
+            adj_time   = st.slider("Temporal attenuation (age / distance)",    0.0, 1.0, min(pN15*0.6, 0.80),0.05, key="cr_adj_time",
+                help="R v Boutilier [2017] SCC 64 — old convictions carry reduced weight especially where age burnout is active")
+
+        # Compute calibrated weight for this entry
+        raw_wt = 1.0
+        cal_wt = float(np.clip(
+            raw_wt * (1 - 0.55*adj_bail) * (1 - 0.40*adj_ewert) *
+            (1 - 0.35*adj_police) * (1 - 0.30*adj_gladue) *
+            (1 - 0.25*adj_mm) * (1 - 0.45*adj_time), 0.05, 1.0))
+        pct_ret = cal_wt * 100
+
+        col_ret = "#3B6D11" if pct_ret >= 70 else "#BA7517" if pct_ret >= 40 else "#A32D2D"
+        st.markdown(
+            f"<div style='background:#f4f6fa;border-radius:10px;padding:.7rem 1rem;margin-top:.5rem'>"
+            f"<span style='font-size:.78rem;color:#666'>Calibrated evidentiary weight: </span>"
+            f"<span style='font-size:1.4rem;font-weight:700;color:{col_ret}'>{pct_ret:.0f}%</span>"
+            f"<span style='font-size:.75rem;color:#888;margin-left:.5rem'>of nominal weight retained</span></div>",
+            unsafe_allow_html=True)
+
+        if st.button("Add to record", key="cr_add"):
+            if cr_offence.strip():
+                entry = {
+                    "offence":     cr_offence.strip(),
+                    "court":       cr_court.strip(),
+                    "year":        int(cr_year),
+                    "sentence":    cr_sentence.strip(),
+                    "jurisdiction": cr_jurisdiction,
+                    "adj": {
+                        "bail":   adj_bail,
+                        "ewert":  adj_ewert,
+                        "gladue": adj_gladue,
+                        "police": adj_police,
+                        "mm":     adj_mm,
+                        "time":   adj_time,
+                    },
+                    "raw_weight":  1.0,
+                    "cal_weight":  cal_wt,
+                }
+                st.session_state.criminal_record.append(entry)
+                # Feed calibrated N2 and distortion corrections back into the network
+                _cr_feed_nodes()
+                st.rerun()
+            else:
+                st.warning("Please enter an offence description.")
+
+    # ── Feed function: compute aggregate N2 and distortion signals ────────────
+    def _cr_feed_nodes():
+        """Derive N2 (violent history) and distortion node signals from the record."""
+        rec = st.session_state.criminal_record
+        if not rec:
+            st.session_state.cr_doc_adj = {}
+            return
+        # Violent history: mean calibrated weight of violent convictions
+        violent_types = ["assault","violence","weapon","robbery","forcible","aggravated","murder","manslaughter"]
+        violent = [e for e in rec if any(vt in e["offence"].lower() for vt in violent_types)]
+        if violent:
+            mean_cal = float(np.mean([e["cal_weight"] for e in violent]))
+            # N2 posterior: scaled by calibrated weight — max 0.85 for full record
+            n2_signal = float(np.clip(min(0.85, 0.25 + 0.15*len(violent)) * mean_cal, 0.05, 0.90))
+            st.session_state.cr_doc_adj[2] = n2_signal - st.session_state.posteriors.get(2, 0.08)
+        # Aggregate distortion signals into existing doc_adj
+        bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
+        police_agg = float(np.mean([e["adj"]["police"] for e in rec]))
+        gladue_agg = float(np.mean([e["adj"]["gladue"] for e in rec]))
+        # Apply as incremental boosts to distortion nodes
+        cr_adj = dict(st.session_state.doc_adj)
+        if bail_agg > 0.1:
+            cr_adj[7]  = cr_adj.get(7,  0) + bail_agg * 0.12
+        if police_agg > 0.1:
+            cr_adj[14] = cr_adj.get(14, 0) + police_agg * 0.10
+        if gladue_agg > 0.1:
+            cr_adj[12] = cr_adj.get(12, 0) + gladue_agg * 0.08
+        st.session_state.doc_adj = {k: float(np.clip(v, -0.4, 0.4)) for k,v in cr_adj.items()}
+
+    # ── Record table ──────────────────────────────────────────────────────────
+    rec = st.session_state.criminal_record
+    if rec:
+        st.markdown("---")
+        st.markdown(f"#### Calibrated criminal record — {len(rec)} conviction(s)")
+
+        # Summary stats
+        all_cal = [e["cal_weight"] for e in rec]
+        mean_cal = float(np.mean(all_cal))
+        mc_col = "#3B6D11" if mean_cal >= 0.7 else "#BA7517" if mean_cal >= 0.4 else "#A32D2D"
+
+        sc1,sc2,sc3 = st.columns(3)
+        sc1.metric("Total convictions", len(rec))
+        sc2.metric("Mean calibrated weight", f"{mean_cal*100:.0f}%")
+        sc3.metric("Record reliability tier",
+            "High" if mean_cal>=0.7 else "Moderate" if mean_cal>=0.4 else "Low")
+
+        st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+
+        # Per-conviction cards
+        for i, e in enumerate(rec):
+            cal_pct = e["cal_weight"] * 100
+            raw_pct = e["raw_weight"] * 100
+            col_c = "#3B6D11" if cal_pct >= 70 else "#BA7517" if cal_pct >= 40 else "#A32D2D"
+            adj = e["adj"]
+
+            # Build distortion flags
+            flags = []
+            if adj["bail"]   > 0.15: flags.append(f"⛓ Bail-denial {adj['bail']*100:.0f}%")
+            if adj["ewert"]  > 0.10: flags.append(f"📊 Ewert {adj['ewert']*100:.0f}%")
+            if adj["police"] > 0.10: flags.append(f"🔵 Over-policing {adj['police']*100:.0f}%")
+            if adj["gladue"] > 0.10: flags.append(f"🦅 Gladue {adj['gladue']*100:.0f}%")
+            if adj["mm"]     > 0.05: flags.append(f"⚖️ Mand min {adj['mm']*100:.0f}%")
+            if adj["time"]   > 0.10: flags.append(f"⏳ Temporal {adj['time']*100:.0f}%")
+
+            flag_html = "  ".join([f"<span style='background:#f0f0f0;border-radius:4px;padding:2px 8px;font-size:.72rem;color:#555'>{f}</span>" for f in flags]) if flags else "<span style='color:#aaa;font-size:.72rem'>No distortion flags</span>"
+
+            st.markdown(f"""<div style='border:1px solid #ddd;border-left:4px solid {col_c};
+                border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.7rem;background:#fafafa'>
+                <div style='display:flex;justify-content:space-between;align-items:flex-start'>
+                  <div>
+                    <div style='font-weight:600;font-size:.95rem'>{e['offence']}</div>
+                    <div style='font-size:.78rem;color:#777;margin-top:2px'>{e['year']} · {e['court']} · {e['jurisdiction']} · {e['sentence'] or 'Sentence not entered'}</div>
+                  </div>
+                  <div style='text-align:right;min-width:90px'>
+                    <div style='font-size:1.35rem;font-weight:700;color:{col_c}'>{cal_pct:.0f}%</div>
+                    <div style='font-size:.7rem;color:#aaa'>calibrated weight</div>
+                    <div style='font-size:.7rem;color:#ccc;text-decoration:line-through'>{raw_pct:.0f}% raw</div>
+                  </div>
+                </div>
+                <div style='margin-top:.55rem'>{flag_html}</div>
+                </div>""", unsafe_allow_html=True)
+
+            cb1, cb2 = st.columns([6,1])
+            with cb2:
+                if st.button("Remove", key=f"cr_del_{i}"):
+                    st.session_state.criminal_record.pop(i)
+                    _cr_feed_nodes()
+                    st.rerun()
+
+        # ── Document analysis integration ──────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 📂 Document-assisted calibration")
+        st.caption("Upload prior transcripts, SCE reports, or sentencing decisions. The document analyser will recommend weight adjustments for the record above.")
+
+        cr_up = st.file_uploader("Upload document for record analysis",
+            type=["txt","pdf","docx"], key="cr_doc_up")
+
+        if cr_up:
+            provider_cr = st.selectbox("AI provider", ["Claude (Anthropic) ★ recommended","GPT-4o (OpenAI)","Gemini (Google)"],
+                key="cr_provider")
+            if st.button("Analyse document for record calibration", key="cr_analyse"):
+                with st.spinner("Analysing document..."):
+                    try:
+                        from document_analyzer import analyze_document, extract_text_from_file
+                        raw_text = extract_text_from_file(cr_up)
+                        record_summary = "\n".join([
+                            f"{e['year']} — {e['offence']} ({e['jurisdiction']}) — current calibrated weight {e['cal_weight']*100:.0f}%"
+                            for e in st.session_state.criminal_record
+                        ]) or "No convictions entered yet."
+
+                        cr_prompt = (
+                            f"You are a Canadian criminal law expert assisting with a Dangerous Offender "
+                            f"sentencing analysis under PARVIS. The following criminal record has been entered:\n"
+                            f"{record_summary}\n\n"
+                            f"Review the uploaded document and recommend adjustments to the evidentiary weight "
+                            f"of each conviction based on what you find. Specifically look for: "
+                            f"(1) bail-denial or coercive plea conditions (Antic [2017] SCC 27), "
+                            f"(2) ineffective assistance of counsel (GDB [2000] 1 SCR 520), "
+                            f"(3) Gladue factor misapplication (Morris 2021 ONCA 680), "
+                            f"(4) over-policing patterns (Le [2019] SCC 34), "
+                            f"(5) mandatory minimum distortion (Nur/Lloyd), "
+                            f"(6) temporal attenuation — old convictions. "
+                            f"For each conviction, state: [KEEP / REDUCE / SIGNIFICANT REDUCTION] "
+                            f"and cite the specific passage or finding that supports the recommendation."
+                        )
+                        prov_key = provider_cr.split()[0].lower()
+                        result = analyze_document(
+                            file_content=raw_text,
+                            provider=prov_key,
+                            custom_prompt=cr_prompt,
+                        )
+                        st.session_state.cr_analysis = result
+                    except Exception as ex:
+                        st.error(f"Analysis error: {ex}")
+
+        if "cr_analysis" in st.session_state and st.session_state.cr_analysis:
+            st.markdown("**Document analysis — calibration recommendations:**")
+            st.markdown(f"<div class='at'>{st.session_state.cr_analysis}</div>",
+                unsafe_allow_html=True)
+            st.caption("Review recommendations above and adjust individual conviction sliders accordingly. Changes update Node 20 in real time.")
+
+        # ── Doctrinal footnotes ────────────────────────────────────────────────
+        with st.expander("📚 Doctrinal basis for record calibration"):
+            for key,(name,col,cite) in CORR_REFS.items():
+                st.markdown(f"<div style='border-left:3px solid #{col};padding:.4rem .8rem;"
+                    f"margin-bottom:.5rem'><b style='color:#{col}'>{name}</b><br>"
+                    f"<span style='font-size:.8rem;color:#555'>{cite}</span></div>",
+                    unsafe_allow_html=True)
+
+        if st.button("Clear entire record", key="cr_clear"):
+            st.session_state.criminal_record = []
+            st.session_state.cr_doc_adj = {}
+            st.session_state.doc_adj = {k:v for k,v in st.session_state.doc_adj.items() if k not in [7,14,12]}
+            st.rerun()
+
+    else:
+        st.info("No convictions entered yet. Use the form above to add prior criminal record entries.")
+
+    run_inf(); P=st.session_state.posteriors
+    st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
+
+
+# ── T9: Audit report ──────────────────────────────────────────────────────────
+with TABS[9]:
     st.markdown("### Audit report")
     st.caption("Full inference documentation — exportable for legal review and viva presentation.")
     Pa=st.session_state.posteriors;da=Pa[20];bla,bca,_=rb(da)
