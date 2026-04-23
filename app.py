@@ -131,6 +131,61 @@ div[data-testid="stSlider"][aria-label="N19 — No rehabilitation"] > div > div 
 }
 .stTabs [aria-selected="true"] {font-weight:700 !important}
 footer{visibility:hidden}#MainMenu{visibility:hidden}
+
+/* ── Thicker active tab indicator ── */
+.stTabs [aria-selected="true"] {
+  border-bottom: 3px solid #1B2A4A !important;
+  color: #1B2A4A !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+  color: #1B2A4A !important;
+  background: rgba(27,42,74,0.04) !important;
+  border-radius: 6px 6px 0 0 !important;
+}
+
+/* ── Warmer card/input borders ── */
+[data-testid="stSelectbox"] > div > div {
+  border-color: #C8C4BC !important;
+  border-radius: 8px !important;
+}
+[data-testid="stTextInput"] > div > div > input,
+[data-testid="stTextArea"] > div > div > textarea {
+  border-color: #C8C4BC !important;
+  border-radius: 8px !important;
+}
+[data-testid="stExpander"] {
+  border-color: #D8D4CC !important;
+  border-radius: 10px !important;
+}
+
+/* ── Metric cards ── */
+[data-testid="stMetric"] {
+  background: #FDFCFA !important;
+  border: 1px solid #E0DDD6 !important;
+  border-radius: 10px !important;
+  padding: 10px 14px !important;
+}
+
+/* ── Buttons ── */
+[data-testid="stButton"] > button {
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+}
+[data-testid="stDownloadButton"] > button {
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+}
+
+/* ── PARVIS footer style ── */
+.parvis-footer {
+  text-align: center;
+  padding: 1.2rem 0 0.4rem 0;
+  font-size: 0.73rem;
+  color: #BBBBBB;
+  letter-spacing: 0.4px;
+  border-top: 1px solid #ECEAE4;
+  margin-top: 1.5rem;
+}
 </style>""", unsafe_allow_html=True)
 
 TC = {"constraint":"#BA7517","risk":"#A32D2D","distortion":"#185FA5",
@@ -2691,6 +2746,14 @@ with TABS[11]:
             file_name=f"PARVIS_Audit_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
             mime="text/plain",
             use_container_width=True)
+
+    st.markdown(
+        "<div class='parvis-footer'>"
+        "P.A.R.V.I.S &nbsp;·&nbsp; Ethical AI Initiative &nbsp;·&nbsp; "
+        "University of London &nbsp;·&nbsp; "
+        "Jeinis Patel, PhD Candidate and Barrister &nbsp;·&nbsp; "
+        "Research use only &nbsp;·&nbsp; © 2026</div>",
+        unsafe_allow_html=True)
 
     with st.expander("⚛️ QBism diagnostics (.txt)"):
         qbo=format_report(st.session_state.qdiags) if st.session_state.qdiags else ""
