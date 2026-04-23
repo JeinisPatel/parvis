@@ -1336,73 +1336,65 @@ with TABS[2]:
     # ── Chat UI styling ───────────────────────────────────────────────────────
     st.markdown("""
 <style>
-/* ── Chat container ── */
+/* ── Header ── */
 .parvis-chat-header {
-  display:flex;align-items:center;gap:12px;
-  padding:.6rem 0 .8rem 0;
+  display:flex; align-items:center; gap:12px;
+  padding:.5rem 0 .7rem 0;
   border-bottom:1px solid rgba(0,0,0,.07);
-  margin-bottom:.8rem;
+  margin-bottom:.6rem;
 }
-.parvis-chat-title {
-  font-size:1.15rem;font-weight:700;color:#1B2A4A;letter-spacing:.3px;
-}
-.parvis-chat-subtitle {
-  font-size:.75rem;color:#999;margin-top:1px;
-}
+.parvis-chat-title  { font-size:1.1rem; font-weight:700; color:#1B2A4A; }
+.parvis-chat-subtitle { font-size:.73rem; color:#aaa; margin-top:1px; }
 .parvis-node20-pill {
-  margin-left:auto;font-size:.78rem;font-weight:700;
-  padding:3px 12px;border-radius:20px;
+  margin-left:auto; font-size:.77rem; font-weight:700;
+  padding:3px 12px; border-radius:20px;
 }
 
-/* ── Message bubbles ── */
+/* ── Message rows ── */
 [data-testid="stChatMessage"] {
-  padding: 0.2rem 0 !important;
+  padding: .25rem 0 !important;
+  gap: 8px !important;
 }
-/* User bubble — right aligned */
+
+/* ── USER messages — navy bubble right-aligned ── */
+[data-testid="stChatMessage"][data-role="user"],
+[data-testid="stChatMessageContent"] + [data-testid="stChatMessage"] {
+  flex-direction: row-reverse !important;
+}
+
+/* Target user message content by avatar data attribute */
+[data-testid="stChatMessage"]:has(img[alt="user avatar"]),
 [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
   flex-direction: row-reverse !important;
 }
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:last-child {
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"] {
   background: #1B2A4A !important;
-  color: white !important;
-  border-radius: 18px 18px 4px 18px !important;
-  padding: .55rem 1rem !important;
-  max-width: 75% !important;
+  border-radius: 18px 4px 18px 18px !important;
+  padding: .6rem 1rem !important;
+  max-width: 78% !important;
   margin-left: auto !important;
+  color: white !important;
+  border: none !important;
 }
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:last-child p {
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"] p,
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"] * {
   color: white !important;
 }
-/* PARVIS bubble — left aligned */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:last-child {
+
+/* ── PARVIS messages — warm card left-aligned ── */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stChatMessageContent"] {
   background: #FDFCFA !important;
   border: 1px solid #E8E4DC !important;
-  border-radius: 18px 18px 18px 4px !important;
-  padding: .55rem 1rem !important;
-  max-width: 85% !important;
-}
-
-/* ── Input bar row ── */
-.parvis-input-row {
-  display:flex;align-items:flex-end;gap:8px;
-  padding:.6rem .2rem .2rem .2rem;
-  border-top:1px solid rgba(0,0,0,.07);
-  margin-top:.5rem;
-}
-
-/* ── API settings compact ── */
-.parvis-api-bar {
-  display:flex;align-items:center;gap:8px;
-  padding:.4rem .6rem;
-  background:#F7F5F2;border-radius:8px;
-  margin-bottom:.6rem;font-size:.8rem;
+  border-radius: 4px 18px 18px 18px !important;
+  padding: .6rem 1rem !important;
+  max-width: 88% !important;
 }
 
 /* ── Proposal card ── */
 .parvis-proposal {
-  background:#F7F9FC;border-left:3px solid #185FA5;
-  border-radius:0 8px 8px 0;padding:.5rem .8rem;
-  margin:.4rem 0;font-size:.84rem;
+  background:#F0F5FF; border-left:3px solid #185FA5;
+  border-radius:0 8px 8px 0; padding:.5rem .8rem;
+  margin:.4rem 0; font-size:.84rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1673,7 +1665,7 @@ body { background: transparent; font-family: 'DM Sans', -apple-system, sans-seri
 
 <div id="voice-bar">
   <button id="mic-btn" onclick="toggleMic()">🎤 Dictate</button>
-  <div id="transcript-display">Speak your case description or question…</div>
+  <div id="transcript-display">Specify all applicable details of the offender's case.</div>
   <button id="copy-btn" onclick="copyText()">📋 Copy to chat</button>
 </div>
 
@@ -1741,7 +1733,7 @@ function toggleMic() {
       copyBtn.textContent = '📋 Copy to chat';
       copyBtn.className = '';
     } else {
-      display.textContent = 'Speak your case description or question…';
+      display.textContent = "Specify all applicable details of the offender's case.";
       display.className = '';
     }
   };
@@ -1766,7 +1758,7 @@ function copyText() {
     st.components.v1.html(voice_html, height=54, scrolling=False)
 
     # ── Chat input ────────────────────────────────────────────────────────────
-    if prompt := st.chat_input("Describe the case or ask a question — e.g. 'Male, 42, Indigenous, bail denied 8 months, PCL-R 22'"):
+    if prompt := st.chat_input("Specify all applicable details of the offender's case…"):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
         with st.spinner("PARVIS is thinking…"):
