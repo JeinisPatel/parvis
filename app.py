@@ -1549,6 +1549,26 @@ IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. Always maint
         return ctx
 
     # ── Chat history display ──────────────────────────────────────────────────
+    # Welcome message when no conversation yet
+    if not st.session_state.chat_history:
+        with st.chat_message("assistant", avatar="🔺"):
+            bl_w, bc_w, _ = rb(P[20])
+            st.markdown(f"""
+**Hello. I'm PARVIS.**
+
+The network is live — Node 20 is currently at **{P[20]*100:.1f}% ({bl_w})**.
+
+You can describe a case in plain language and I'll propose values across the network, or ask me to explain any node, doctrinal principle, or risk factor. Nothing changes until you confirm each suggestion.
+
+To get started, try something like:
+
+> *"The offender is 42, Indigenous, from Northern Manitoba. Bail denied for 9 months, PCL-R score 22, no Gladue report commissioned."*
+
+Or ask a question:
+
+> *"Why is Node 7 elevated and what does that mean for the DO risk?"*
+            """)
+
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"],
                 avatar="🔺" if msg["role"] == "assistant" else "👤"):
@@ -1591,166 +1611,159 @@ IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. Always maint
                             })
                             st.rerun()
 
-    # ── Voice mic — injected into parent chat input bar ──────────────────────
-    # Runs as zero-height JS. Finds Streamlit's chat input bar in the parent
-    # DOM and inserts the mic button directly inside it, flush with the send
-    # button. Status text appears above the bar via an injected div.
+    # ── Voice input bar ───────────────────────────────────────────────────────
     voice_html = """
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: transparent; font-family: 'DM Sans', -apple-system, sans-serif; }
+
+#voice-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #F7F5F2;
+  border: 1px solid #E0DDD6;
+  border-radius: 10px;
+  margin-bottom: 2px;
+}
+
+#mic-btn {
+  display: flex; align-items: center; gap: 7px;
+  background: #1B2A4A; color: white; border: none;
+  border-radius: 8px; padding: 6px 14px;
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  transition: background .18s, transform .1s;
+  white-space: nowrap; flex-shrink: 0;
+}
+#mic-btn:hover { background: #243860; transform: scale(1.03); }
+#mic-btn.listening {
+  background: #A32D2D;
+  animation: pulse 1.2s infinite;
+}
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(163,45,45,.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(163,45,45,0); }
+}
+
+#transcript-display {
+  flex: 1;
+  font-size: 12.5px;
+  color: #555;
+  font-style: italic;
+  min-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#transcript-display.done { color: #3B6D11; font-style: normal; font-weight: 500; }
+#transcript-display.error { color: #A32D2D; font-style: normal; }
+
+#copy-btn {
+  display: none;
+  background: #185FA5; color: white; border: none;
+  border-radius: 8px; padding: 6px 12px;
+  cursor: pointer; font-size: 12px; font-weight: 600;
+  white-space: nowrap; flex-shrink: 0;
+  transition: background .18s;
+}
+#copy-btn:hover { background: #1a6bb8; }
+#copy-btn.copied { background: #3B6D11; }
+</style>
+
+<div id="voice-bar">
+  <button id="mic-btn" onclick="toggleMic()">🎤 Dictate</button>
+  <div id="transcript-display">Speak your case description or question…</div>
+  <button id="copy-btn" onclick="copyText()">📋 Copy to chat</button>
+</div>
+
 <script>
-(function() {
+let recognition = null;
+let isListening  = false;
+let transcript   = '';
 
-  /* ── Inject styles into parent document ── */
-  const style = window.parent.document.createElement('style');
-  style.textContent = `
-    #parvis-mic-btn {
-      background: #1B2A4A; color: white; border: none;
-      border-radius: 50%; width: 32px; height: 32px; min-width: 32px;
-      cursor: pointer; font-size: 14px; line-height: 1;
-      display: flex; align-items: center; justify-content: center;
-      transition: background .2s, transform .15s;
-      box-shadow: 0 1px 4px rgba(0,0,0,.2);
-      flex-shrink: 0; margin-right: 4px;
-    }
-    #parvis-mic-btn:hover { transform: scale(1.1); }
-    #parvis-mic-btn.listening {
-      background: #A32D2D !important;
-      animation: parvisPulse 1.2s infinite;
-    }
-    @keyframes parvisPulse {
-      0%,100% { box-shadow: 0 0 0 0 rgba(163,45,45,.45); }
-      50%      { box-shadow: 0 0 0 8px rgba(163,45,45,0); }
-    }
-    #parvis-mic-status {
-      position: absolute; bottom: 100%; left: 0;
-      font-size: 11px; color: #888; font-style: italic;
-      padding: 2px 6px; pointer-events: none;
-      white-space: nowrap;
-    }
-  `;
-  window.parent.document.head.appendChild(style);
+const micBtn   = document.getElementById('mic-btn');
+const display  = document.getElementById('transcript-display');
+const copyBtn  = document.getElementById('copy-btn');
 
-  let recognition = null;
-  let isListening   = false;
-  let micBtn        = null;
+function toggleMic() {
+  if (isListening) { recognition.stop(); return; }
 
-  /* ── Find Streamlit's chat input textarea ── */
-  function getChatInput() {
-    const tas = window.parent.document.querySelectorAll('textarea');
-    for (const ta of tas) {
-      if (ta.placeholder && ta.placeholder.toLowerCase().includes('describe the case'))
-        return ta;
-    }
-    return tas[tas.length - 1] || null;
+  const hasSR = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+  if (!hasSR) {
+    display.textContent = 'Voice requires Chrome or Edge';
+    display.className = 'error';
+    return;
   }
 
-  /* ── Inject text using React's internal setter ── */
-  function injectText(text) {
-    const ta = getChatInput();
-    if (!ta) return;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype, 'value').set;
-    setter.call(ta, text);
-    ta.dispatchEvent(new Event('input',  { bubbles: true }));
-    ta.dispatchEvent(new Event('change', { bubbles: true }));
-    ta.focus();
-  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.continuous     = true;
+  recognition.interimResults = true;
+  recognition.lang           = 'en-CA';
 
-  /* ── Mount mic button into the chat input bar ── */
-  function mountMic() {
-    if (window.parent.document.getElementById('parvis-mic-btn')) return; // already mounted
+  recognition.onstart = () => {
+    isListening = true;
+    transcript  = '';
+    micBtn.textContent = '⏹ Stop';
+    micBtn.classList.add('listening');
+    display.textContent = 'Listening…';
+    display.className = '';
+    copyBtn.style.display = 'none';
+  };
 
-    const ta = getChatInput();
-    if (!ta) return;
-
-    /* Walk up to the flex row that holds the textarea + send button */
-    const bar = ta.closest('[data-testid="stChatInput"]') ||
-                ta.closest('.stChatInput') ||
-                ta.parentElement?.parentElement;
-    if (!bar) return;
-
-    /* Make bar position:relative so status can anchor to it */
-    bar.style.position = 'relative';
-
-    /* Status label above the bar */
-    const status = window.parent.document.createElement('div');
-    status.id = 'parvis-mic-status';
-    bar.appendChild(status);
-
-    /* Mic button */
-    micBtn = window.parent.document.createElement('button');
-    micBtn.id = 'parvis-mic-btn';
-    micBtn.title = 'Voice input (Chrome/Edge)';
-    micBtn.textContent = '🎤';
-    micBtn.onclick = toggleMic;
-
-    /* Insert before the send button (last child of bar) */
-    const sendBtn = bar.querySelector('button[kind="primaryFormSubmit"]') ||
-                    bar.querySelector('[data-testid="stChatInputSubmitButton"]') ||
-                    bar.lastElementChild;
-    bar.insertBefore(micBtn, sendBtn);
-  }
-
-  function setStatus(msg) {
-    const s = window.parent.document.getElementById('parvis-mic-status');
-    if (s) s.textContent = msg;
-  }
-
-  function toggleMic() {
-    if (isListening) { recognition.stop(); return; }
-
-    if (!('webkitSpeechRecognition' in window.parent ||
-          'SpeechRecognition' in window.parent)) {
-      setStatus('Voice requires Chrome or Edge');
-      return;
+  recognition.onresult = (e) => {
+    let interim = '', final = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
     }
+    transcript = final || interim;
+    display.textContent = transcript;
+  };
 
-    const SR = window.parent.SpeechRecognition ||
-               window.parent.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.continuous    = false;
-    recognition.interimResults = true;
-    recognition.lang          = 'en-CA';
+  recognition.onerror = (e) => {
+    display.textContent = 'Error: ' + e.error;
+    display.className = 'error';
+    isListening = false;
+    micBtn.textContent = '🎤 Dictate';
+    micBtn.classList.remove('listening');
+  };
 
-    recognition.onstart = () => {
-      isListening = true;
-      if (micBtn) { micBtn.textContent = '⏹'; micBtn.classList.add('listening'); }
-      setStatus('Listening…');
-    };
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.textContent = '🎤 Dictate';
+    micBtn.classList.remove('listening');
+    if (transcript.trim()) {
+      display.textContent = transcript;
+      display.className = 'done';
+      copyBtn.style.display = 'inline-block';
+      copyBtn.textContent = '📋 Copy to chat';
+      copyBtn.className = '';
+    } else {
+      display.textContent = 'Speak your case description or question…';
+      display.className = '';
+    }
+  };
 
-    recognition.onresult = (e) => {
-      let t = '';
-      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      injectText(t);
-      setStatus(e.results[e.results.length-1].isFinal ? '✓ Press Enter to send' : 'Listening…');
-    };
+  recognition.start();
+}
 
-    recognition.onerror = (e) => {
-      setStatus('Error: ' + e.error);
-      isListening = false;
-      if (micBtn) { micBtn.textContent = '🎤'; micBtn.classList.remove('listening'); }
-    };
-
-    recognition.onend = () => {
-      isListening = false;
-      if (micBtn) { micBtn.textContent = '🎤'; micBtn.classList.remove('listening'); }
-      setTimeout(() => setStatus(''), 3000);
-    };
-
-    recognition.start();
-  }
-
-  /* ── Poll until the chat input is rendered, then mount ── */
-  let attempts = 0;
-  const poll = setInterval(() => {
-    mountMic();
-    if (window.parent.document.getElementById('parvis-mic-btn') || ++attempts > 40)
-      clearInterval(poll);
-  }, 250);
-
-})();
+function copyText() {
+  if (!transcript.trim()) return;
+  navigator.clipboard.writeText(transcript).then(() => {
+    copyBtn.textContent = '✓ Copied!';
+    copyBtn.className = 'copied';
+    display.textContent = '✓ Paste into the chat box below (Cmd+V / Ctrl+V)';
+    setTimeout(() => {
+      copyBtn.textContent = '📋 Copy to chat';
+      copyBtn.className = '';
+    }, 3000);
+  });
+}
 </script>
 """
-    st.components.v1.html(voice_html, height=0, scrolling=False)
+    st.components.v1.html(voice_html, height=54, scrolling=False)
 
     # ── Chat input ────────────────────────────────────────────────────────────
     if prompt := st.chat_input("Describe the case or ask a question — e.g. 'Male, 42, Indigenous, bail denied 8 months, PCL-R 22'"):
