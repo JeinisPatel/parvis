@@ -1440,23 +1440,54 @@ with TABS[2]:
                 format_func=lambda x: {"claude": "Claude ★", "openai": "GPT-4o", "gemini": "Gemini"}[x],
                 key="chat_provider", label_visibility="collapsed")
 
-    # ── How it works (collapsible, hidden once conversation starts) ───────────
-    if not st.session_state.chat_history:
-        with st.expander("ℹ️ How PARVIS Chat works", expanded=True):
-            st.markdown("""
-**PARVIS Chat is fully context-aware.** Every message includes a live snapshot of the entire network:
-all 20 node posteriors, active Gladue factors, Morris/Ellis SCE, criminal record, and Node 20 output.
+    # ── How to use this assistant ─────────────────────────────────────────────
+    with st.expander("ℹ️ How to use this assistant", expanded=len(st.session_state.chat_history)==0):
+        st.markdown("""
+**This tab contains a Bayesian AI assistant** that requires an API key for your chosen LLM provider. Governed by Bayes, it does not encounter the hallucination and confabulation risks outlined in Chapter 4 of the thesis and the broader academic literature on the use of LLMs in law. That said, it knows the current state of your PARVIS network at all times — but the user remains in control of all input values. Its purpose is to advise the user of reasonable values.
+
+**What it can do:**
+- Answer questions about any node value, doctrinal principle, or network output
+- Explain *why* Node 20 is at its current level and which nodes are driving it
+- Accept a plain-language case description and propose values across all tabs
+- Suggest changes to the network — but only *propose* them; you confirm each one before anything changes
+
+**How to use it:**
+1. **Type or dictate** a case description or question in the chat box below
+2. If PARVIS suggests a change, a card appears with ✅ Apply / ✗ Decline buttons — nothing is written until you click Apply
+3. Navigate to any other tab to verify and fine-tune the populated values
+
+**Example prompts:**
+> *"The offender is 42, Indigenous, from Northern Manitoba. Two prior assault convictions, bail denied for 9 months, Gladue report filed but the judge only cited it in passing. PCL-R score 22."*
+
+> *"Why is Node 7 at 40% and what does that mean for the DO risk?"*
+
+> *"What Gladue factors are most relevant here given the criminal record?"*
+
+> *"If I remove the Ewert tool correction, what happens to Node 20?"*
+
+**API key required** — enter your Anthropic key in the ⚙️ API settings panel to activate the assistant.
+
+**Voice input:** click the 🎤 button in the input bar, speak your case description, and your words appear directly in the message field — no copy-paste needed.
+        """)
+
+    # ── How PARVIS Chat works ─────────────────────────────────────────────────
+    with st.expander("ℹ️ How PARVIS Chat works", expanded=len(st.session_state.chat_history)==0):
+        st.markdown("""
+**PARVIS Chat is fully context-aware.** Every message you send includes a live snapshot of the entire network:
+- All 20 node posteriors (risk factors and distortion corrections)
+- Active Gladue factors and Morris/Ellis SCE factors
+- Criminal record with calibrated weights and Boutilier pattern analysis
+- Connection strength, framework setting, and Node 20 output
 
 **What you can ask:**
-- *"Why is Node 7 at 40%?"* — PARVIS explains what's driving any node
-- *"Describe an Indigenous offender, 42, Ontario, bail denied 9 months, PCL-R 22"* — populates the network
-- *"What would happen if the Gladue report had been properly engaged?"*
+- *"Why is Node 7 at 40%?"* — PARVIS explains what's driving any node value
+- *"What would happen if the Gladue report had been properly engaged?"* — scenario reasoning
+- *"Explain what the superposition index of 0.50 means for this case"*
 - *"Which distortion corrections are most significant right now?"*
+- *"Describe an Indigenous offender, 42, Ontario, prior assault conviction, PCL-R 26"* — populates the network
 
-**When PARVIS proposes a change**, a confirmation card appears — nothing changes until you click ✅ Apply.
-
-**Voice:** click the 🎤 microphone button in the input bar, speak, and your words go directly into the message field.
-            """)
+**When PARVIS suggests a change to a node value**, it will show you a confirmation card with the current value, proposed value, and reason. **Nothing changes until you click ✅ Apply.**
+        """)
 
     # ── Build PARVIS context ──────────────────────────────────────────────────
     def _build_context() -> str:
@@ -1560,128 +1591,166 @@ IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. Always maint
                             })
                             st.rerun()
 
-    # ── Voice-to-chat component (injects directly into chat_input) ────────────
+    # ── Voice mic — injected into parent chat input bar ──────────────────────
+    # Runs as zero-height JS. Finds Streamlit's chat input bar in the parent
+    # DOM and inserts the mic button directly inside it, flush with the send
+    # button. Status text appears above the bar via an injected div.
     voice_html = """
-<style>
-  #parvis-mic {
-    background: #1B2A4A; color: white; border: none;
-    border-radius: 50%; width: 36px; height: 36px;
-    cursor: pointer; font-size: 15px;
-    display: flex; align-items: center; justify-content: center;
-    transition: background .2s, transform .1s;
-    box-shadow: 0 1px 4px rgba(0,0,0,.18);
-  }
-  #parvis-mic.listening { background: #A32D2D; animation: pulse 1.2s infinite; }
-  #parvis-mic:hover { transform: scale(1.08); }
-  @keyframes pulse {
-    0%,100% { box-shadow: 0 0 0 0 rgba(163,45,45,.4); }
-    50%      { box-shadow: 0 0 0 7px rgba(163,45,45,0); }
-  }
-  #parvis-mic-status {
-    font-size: 11px; color: #999; font-style: italic;
-    margin-left: 6px; line-height: 36px;
-  }
-  #mic-wrapper { display: flex; align-items: center; padding: 2px 0; }
-</style>
-
-<div id="mic-wrapper">
-  <button id="parvis-mic" title="Voice input" onclick="toggleMic()">🎤</button>
-  <span id="parvis-mic-status"></span>
-</div>
-
 <script>
-let recognition = null;
-let isListening = false;
+(function() {
 
-function getParentChatInput() {
-  try {
-    const allTextareas = window.parent.document.querySelectorAll('textarea');
-    for (const ta of allTextareas) {
-      if (ta.placeholder && (
-          ta.placeholder.toLowerCase().includes('describe the case') ||
-          ta.placeholder.toLowerCase().includes('ask a question') ||
-          ta.placeholder.toLowerCase().includes('parvis')
-      )) return ta;
+  /* ── Inject styles into parent document ── */
+  const style = window.parent.document.createElement('style');
+  style.textContent = `
+    #parvis-mic-btn {
+      background: #1B2A4A; color: white; border: none;
+      border-radius: 50%; width: 32px; height: 32px; min-width: 32px;
+      cursor: pointer; font-size: 14px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .2s, transform .15s;
+      box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      flex-shrink: 0; margin-right: 4px;
     }
-    // Fallback: last textarea in the page
-    return allTextareas[allTextareas.length - 1] || null;
-  } catch(e) { return null; }
-}
+    #parvis-mic-btn:hover { transform: scale(1.1); }
+    #parvis-mic-btn.listening {
+      background: #A32D2D !important;
+      animation: parvisPulse 1.2s infinite;
+    }
+    @keyframes parvisPulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(163,45,45,.45); }
+      50%      { box-shadow: 0 0 0 8px rgba(163,45,45,0); }
+    }
+    #parvis-mic-status {
+      position: absolute; bottom: 100%; left: 0;
+      font-size: 11px; color: #888; font-style: italic;
+      padding: 2px 6px; pointer-events: none;
+      white-space: nowrap;
+    }
+  `;
+  window.parent.document.head.appendChild(style);
 
-function injectText(text) {
-  const ta = getParentChatInput();
-  if (!ta) return;
-  // React-compatible injection
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    window.HTMLTextAreaElement.prototype, 'value'
-  ).set;
-  nativeSetter.call(ta, text);
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
-  ta.dispatchEvent(new Event('change', { bubbles: true }));
-  ta.focus();
-}
+  let recognition = null;
+  let isListening   = false;
+  let micBtn        = null;
 
-function toggleMic() {
-  const btn = document.getElementById('parvis-mic');
-  const status = document.getElementById('parvis-mic-status');
-
-  if (isListening) {
-    recognition.stop();
-    return;
+  /* ── Find Streamlit's chat input textarea ── */
+  function getChatInput() {
+    const tas = window.parent.document.querySelectorAll('textarea');
+    for (const ta of tas) {
+      if (ta.placeholder && ta.placeholder.toLowerCase().includes('describe the case'))
+        return ta;
+    }
+    return tas[tas.length - 1] || null;
   }
 
-  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-    status.textContent = 'Use Chrome or Edge for voice input';
-    return;
+  /* ── Inject text using React's internal setter ── */
+  function injectText(text) {
+    const ta = getChatInput();
+    if (!ta) return;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(ta, text);
+    ta.dispatchEvent(new Event('input',  { bubbles: true }));
+    ta.dispatchEvent(new Event('change', { bubbles: true }));
+    ta.focus();
   }
 
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.lang = 'en-CA';
+  /* ── Mount mic button into the chat input bar ── */
+  function mountMic() {
+    if (window.parent.document.getElementById('parvis-mic-btn')) return; // already mounted
 
-  recognition.onstart = () => {
-    isListening = true;
-    btn.textContent = '⏹';
-    btn.classList.add('listening');
-    status.textContent = 'Listening…';
-  };
+    const ta = getChatInput();
+    if (!ta) return;
 
-  recognition.onresult = (e) => {
-    let transcript = '';
-    for (let i = 0; i < e.results.length; i++) {
-      transcript += e.results[i][0].transcript;
+    /* Walk up to the flex row that holds the textarea + send button */
+    const bar = ta.closest('[data-testid="stChatInput"]') ||
+                ta.closest('.stChatInput') ||
+                ta.parentElement?.parentElement;
+    if (!bar) return;
+
+    /* Make bar position:relative so status can anchor to it */
+    bar.style.position = 'relative';
+
+    /* Status label above the bar */
+    const status = window.parent.document.createElement('div');
+    status.id = 'parvis-mic-status';
+    bar.appendChild(status);
+
+    /* Mic button */
+    micBtn = window.parent.document.createElement('button');
+    micBtn.id = 'parvis-mic-btn';
+    micBtn.title = 'Voice input (Chrome/Edge)';
+    micBtn.textContent = '🎤';
+    micBtn.onclick = toggleMic;
+
+    /* Insert before the send button (last child of bar) */
+    const sendBtn = bar.querySelector('button[kind="primaryFormSubmit"]') ||
+                    bar.querySelector('[data-testid="stChatInputSubmitButton"]') ||
+                    bar.lastElementChild;
+    bar.insertBefore(micBtn, sendBtn);
+  }
+
+  function setStatus(msg) {
+    const s = window.parent.document.getElementById('parvis-mic-status');
+    if (s) s.textContent = msg;
+  }
+
+  function toggleMic() {
+    if (isListening) { recognition.stop(); return; }
+
+    if (!('webkitSpeechRecognition' in window.parent ||
+          'SpeechRecognition' in window.parent)) {
+      setStatus('Voice requires Chrome or Edge');
+      return;
     }
-    injectText(transcript);
-    if (e.results[e.results.length - 1].isFinal) {
-      status.textContent = '✓ Done — press Enter to send';
-    } else {
-      status.textContent = 'Listening…';
-    }
-  };
 
-  recognition.onerror = (e) => {
-    status.textContent = 'Error: ' + e.error;
-    isListening = false;
-    btn.textContent = '🎤';
-    btn.classList.remove('listening');
-  };
+    const SR = window.parent.SpeechRecognition ||
+               window.parent.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.continuous    = false;
+    recognition.interimResults = true;
+    recognition.lang          = 'en-CA';
 
-  recognition.onend = () => {
-    isListening = false;
-    btn.textContent = '🎤';
-    btn.classList.remove('listening');
-    if (!status.textContent.includes('Done') && !status.textContent.includes('Error')) {
-      status.textContent = '';
-    }
-  };
+    recognition.onstart = () => {
+      isListening = true;
+      if (micBtn) { micBtn.textContent = '⏹'; micBtn.classList.add('listening'); }
+      setStatus('Listening…');
+    };
 
-  recognition.start();
-}
+    recognition.onresult = (e) => {
+      let t = '';
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      injectText(t);
+      setStatus(e.results[e.results.length-1].isFinal ? '✓ Press Enter to send' : 'Listening…');
+    };
+
+    recognition.onerror = (e) => {
+      setStatus('Error: ' + e.error);
+      isListening = false;
+      if (micBtn) { micBtn.textContent = '🎤'; micBtn.classList.remove('listening'); }
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      if (micBtn) { micBtn.textContent = '🎤'; micBtn.classList.remove('listening'); }
+      setTimeout(() => setStatus(''), 3000);
+    };
+
+    recognition.start();
+  }
+
+  /* ── Poll until the chat input is rendered, then mount ── */
+  let attempts = 0;
+  const poll = setInterval(() => {
+    mountMic();
+    if (window.parent.document.getElementById('parvis-mic-btn') || ++attempts > 40)
+      clearInterval(poll);
+  }, 250);
+
+})();
 </script>
 """
-    st.components.v1.html(voice_html, height=44, scrolling=False)
+    st.components.v1.html(voice_html, height=0, scrolling=False)
 
     # ── Chat input ────────────────────────────────────────────────────────────
     if prompt := st.chat_input("Describe the case or ask a question — e.g. 'Male, 42, Indigenous, bail denied 8 months, PCL-R 22'"):
