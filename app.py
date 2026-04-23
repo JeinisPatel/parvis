@@ -1432,10 +1432,10 @@ with TABS[2]:
                 format_func=lambda x: {"claude": "Claude ★", "openai": "GPT-4o", "gemini": "Gemini"}[x],
                 key="chat_provider", label_visibility="collapsed")
 
-    # ── How to use this assistant ─────────────────────────────────────────────
-    with st.expander("ℹ️ How to use this assistant", expanded=len(st.session_state.chat_history)==0):
+    # ── Single combined info expander ────────────────────────────────────────
+    with st.expander("ℹ️ About PARVIS Chat", expanded=len(st.session_state.chat_history)==0):
         st.markdown("""
-**This tab contains a Bayesian AI assistant** that requires an API key for your chosen LLM provider. Governed by Bayes, it does not encounter the hallucination and confabulation risks outlined in Chapter 4 of the thesis and the broader academic literature on the use of LLMs in law. That said, it knows the current state of your PARVIS network at all times — but the user remains in control of all input values. Its purpose is to advise the user of reasonable values.
+**This tab contains a Bayesian AI assistant** grounded in the PARVIS 20-node network. It does not hallucinate or confabulate in the way general LLMs do — it knows the current state of your network at all times and its purpose is to advise on reasonable values. The user remains in control of all inputs.
 
 **What it can do:**
 - Answer questions about any node value, doctrinal principle, or network output
@@ -1444,41 +1444,20 @@ with TABS[2]:
 - Suggest changes to the network — but only *propose* them; you confirm each one before anything changes
 
 **How to use it:**
-1. **Type or dictate** a case description or question in the chat box below
-2. If PARVIS suggests a change, a card appears with ✅ Apply / ✗ Decline buttons — nothing is written until you click Apply
+1. Type or dictate a case description or question in the input below
+2. If PARVIS suggests a change, a confirmation card appears — nothing is written until you click ✅ Apply
 3. Navigate to any other tab to verify and fine-tune the populated values
+
+**Context-aware:** every message includes a live snapshot of all 20 node posteriors, active Gladue factors, Morris/Ellis SCE factors, criminal record, connection strength, and Node 20 output.
 
 **Example prompts:**
 > *"The offender is 42, Indigenous, from Northern Manitoba. Two prior assault convictions, bail denied for 9 months, Gladue report filed but the judge only cited it in passing. PCL-R score 22."*
 
 > *"Why is Node 7 at 40% and what does that mean for the DO risk?"*
 
-> *"What Gladue factors are most relevant here given the criminal record?"*
-
 > *"If I remove the Ewert tool correction, what happens to Node 20?"*
 
-**API key required** — enter your Anthropic key in the ⚙️ API settings panel to activate the assistant.
-
-**Voice input:** click the 🎤 button in the input bar, speak your case description, and your words appear directly in the message field — no copy-paste needed.
-        """)
-
-    # ── How PARVIS Chat works ─────────────────────────────────────────────────
-    with st.expander("ℹ️ How PARVIS Chat works", expanded=len(st.session_state.chat_history)==0):
-        st.markdown("""
-**PARVIS Chat is fully context-aware.** Every message you send includes a live snapshot of the entire network:
-- All 20 node posteriors (risk factors and distortion corrections)
-- Active Gladue factors and Morris/Ellis SCE factors
-- Criminal record with calibrated weights and Boutilier pattern analysis
-- Connection strength, framework setting, and Node 20 output
-
-**What you can ask:**
-- *"Why is Node 7 at 40%?"* — PARVIS explains what's driving any node value
-- *"What would happen if the Gladue report had been properly engaged?"* — scenario reasoning
-- *"Explain what the superposition index of 0.50 means for this case"*
-- *"Which distortion corrections are most significant right now?"*
-- *"Describe an Indigenous offender, 42, Ontario, prior assault conviction, PCL-R 26"* — populates the network
-
-**When PARVIS suggests a change to a node value**, it will show you a confirmation card with the current value, proposed value, and reason. **Nothing changes until you click ✅ Apply.**
+**Voice:** click 🎤 Dictate, speak, then copy to the chat input below. **API key** required — enter it in ⚙️ API settings above.
         """)
 
     # ── Build PARVIS context ──────────────────────────────────────────────────
@@ -1756,6 +1735,7 @@ function copyText() {
 </script>
 """
     st.components.v1.html(voice_html, height=54, scrolling=False)
+    st.markdown("<style>[data-testid='stChatInput']{margin-top:-18px !important;border-top:none !important;}</style>", unsafe_allow_html=True)
 
     # ── Chat input ────────────────────────────────────────────────────────────
     if prompt := st.chat_input("Specify all applicable details of the offender's case…"):
