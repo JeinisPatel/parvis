@@ -1332,123 +1332,141 @@ with TABS[8]:
 
 # ── T3: Intake (Chat) — PARVIS assistant ────────────────────────────────────
 with TABS[2]:
-    st.markdown("### 💬 Intake (Chat)")
 
-    # ── How it works ──────────────────────────────────────────────────────────
-    with st.expander("ℹ️ How to use this assistant", expanded=len(st.session_state.get("chat_history",[]))==0):
-        st.markdown("""
-**This tab contains a Bayesian AI assistant** that requires an API key for your chosen LLM provider. Governed by Bayes, it does not encounter the hallucination and confabulation risks outlined in Chapter 4 of the thesis and the broader academic literature on the use of LLMs in law. That said, it knows the current state of your PARVIS network at all times — but the user remains in control of all input values. Its purpose is to advise the user of reasonable values.
+    # ── Chat UI styling ───────────────────────────────────────────────────────
+    st.markdown("""
+<style>
+/* ── Chat container ── */
+.parvis-chat-header {
+  display:flex;align-items:center;gap:12px;
+  padding:.6rem 0 .8rem 0;
+  border-bottom:1px solid rgba(0,0,0,.07);
+  margin-bottom:.8rem;
+}
+.parvis-chat-title {
+  font-size:1.15rem;font-weight:700;color:#1B2A4A;letter-spacing:.3px;
+}
+.parvis-chat-subtitle {
+  font-size:.75rem;color:#999;margin-top:1px;
+}
+.parvis-node20-pill {
+  margin-left:auto;font-size:.78rem;font-weight:700;
+  padding:3px 12px;border-radius:20px;
+}
 
-**What it can do:**
-- Answer questions about any node value, doctrinal principle, or network output
-- Explain *why* Node 20 is at its current level and which nodes are driving it
-- Accept a plain-language case description and propose values across all tabs
-- Suggest changes to the network — but only *propose* them; you confirm each one before anything changes
+/* ── Message bubbles ── */
+[data-testid="stChatMessage"] {
+  padding: 0.2rem 0 !important;
+}
+/* User bubble — right aligned */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+  flex-direction: row-reverse !important;
+}
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:last-child {
+  background: #1B2A4A !important;
+  color: white !important;
+  border-radius: 18px 18px 4px 18px !important;
+  padding: .55rem 1rem !important;
+  max-width: 75% !important;
+  margin-left: auto !important;
+}
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:last-child p {
+  color: white !important;
+}
+/* PARVIS bubble — left aligned */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:last-child {
+  background: #FDFCFA !important;
+  border: 1px solid #E8E4DC !important;
+  border-radius: 18px 18px 18px 4px !important;
+  padding: .55rem 1rem !important;
+  max-width: 85% !important;
+}
 
-**How to use it:**
-1. **Type or dictate** a case description or question in the chat box below
-2. If PARVIS suggests a change, a card appears with ✅ Apply / ✗ Decline buttons — nothing is written until you click Apply
-3. Navigate to any other tab to verify and fine-tune the populated values
+/* ── Input bar row ── */
+.parvis-input-row {
+  display:flex;align-items:flex-end;gap:8px;
+  padding:.6rem .2rem .2rem .2rem;
+  border-top:1px solid rgba(0,0,0,.07);
+  margin-top:.5rem;
+}
 
-**Example prompts:**
-> *"The offender is 42, Indigenous, from Northern Manitoba. Two prior assault convictions, bail denied for 9 months, Gladue report filed but the judge only cited it in passing. PCL-R score 22."*
+/* ── API settings compact ── */
+.parvis-api-bar {
+  display:flex;align-items:center;gap:8px;
+  padding:.4rem .6rem;
+  background:#F7F5F2;border-radius:8px;
+  margin-bottom:.6rem;font-size:.8rem;
+}
 
-> *"Why is Node 7 at 40% and what does that mean for the DO risk?"*
+/* ── Proposal card ── */
+.parvis-proposal {
+  background:#F7F9FC;border-left:3px solid #185FA5;
+  border-radius:0 8px 8px 0;padding:.5rem .8rem;
+  margin:.4rem 0;font-size:.84rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
-> *"What Gladue factors are most relevant here given the criminal record?"*
-
-> *"If I remove the Ewert tool correction, what happens to Node 20?"*
-
-**API key required** — enter your Anthropic key in the ⚙️ API settings panel to activate the assistant.
-        """)
-
-    st.markdown(dobar(P[20]), unsafe_allow_html=True)
-
-    # ── Initialise session state ──────────────────────────────────────────────
+    # ── Session state ─────────────────────────────────────────────────────────
     if "chat_history"        not in st.session_state: st.session_state.chat_history = []
     if "chat_pending_action" not in st.session_state: st.session_state.chat_pending_action = None
     if "chat_ak"             not in st.session_state: st.session_state.chat_ak = ""
+    if "voice_inject"        not in st.session_state: st.session_state.voice_inject = ""
 
-    # ── API key (top, compact) ────────────────────────────────────────────────
+    # ── Header row ────────────────────────────────────────────────────────────
+    bl, bc, bg = rb(P[20])
+    st.markdown(f"""
+<div class="parvis-chat-header">
+  <div>
+    <div class="parvis-chat-title">💬 Intake (Chat)</div>
+    <div class="parvis-chat-subtitle">Context-aware · {len(st.session_state.chat_history)//2} exchange(s) · Bayesian network live</div>
+  </div>
+  <div class="parvis-node20-pill" style="background:{bg};color:{bc};border:1px solid {bc}44">
+    Node 20 &nbsp;{P[20]*100:.1f}% &nbsp;{bl}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # ── API settings (compact bar) ────────────────────────────────────────────
     with st.expander("⚙️ API settings", expanded=not st.session_state.chat_ak):
-        ck1, ck2 = st.columns([3,1])
+        ck1, ck2 = st.columns([3, 1])
         with ck1:
             st.session_state.chat_ak = st.text_input(
-                "Anthropic API key (or set ANTHROPIC_API_KEY in Streamlit secrets)",
+                "API key",
                 type="password", value=st.session_state.chat_ak,
                 key="chat_ak_input", label_visibility="collapsed",
                 placeholder="Anthropic API key — leave blank if set in Streamlit secrets")
         with ck2:
-            chat_provider = st.selectbox("Provider",["claude","openai","gemini"],
-                format_func=lambda x:{"claude":"Claude ★","openai":"GPT-4o","gemini":"Gemini"}[x],
+            chat_provider = st.selectbox("Provider", ["claude", "openai", "gemini"],
+                format_func=lambda x: {"claude": "Claude ★", "openai": "GPT-4o", "gemini": "Gemini"}[x],
                 key="chat_provider", label_visibility="collapsed")
 
-    # ── Speech-to-text widget ─────────────────────────────────────────────────
-    speech_html = """
-<div style='margin:6px 0 10px 0'>
-  <div style='display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap'>
-    <button id='mic-btn2' onclick='toggleMic2()' style='background:#1B2A4A;color:white;
-      border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px'>
-      🎤 <span id='mic-label2'>Dictate</span>
-    </button>
-    <button id='copy-btn2' onclick='copyChat2()' style='background:#185FA5;color:white;
-      border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;display:none'>
-      📋 Copy to chat
-    </button>
-    <span id='mic-status2' style='font-size:12px;color:#888;font-style:italic'></span>
-  </div>
-  <div id='transcript-box2' style='min-height:28px;padding:6px 12px;background:#f8f8f8;
-    border:1px solid #e0e0e0;border-radius:8px;font-size:13px;color:#333;
-    white-space:pre-wrap;display:none'></div>
-</div>
-<script>
-let recog2=null,running2=false;
-function toggleMic2(){
-  if(!('webkitSpeechRecognition' in window||'SpeechRecognition' in window)){
-    document.getElementById('mic-status2').textContent='Use Chrome or Edge for dictation';return;}
-  if(running2){recog2.stop();return;}
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  recog2=new SR();recog2.continuous=true;recog2.interimResults=true;recog2.lang='en-CA';
-  recog2.onresult=e=>{
-    let t='';for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;
-    const box=document.getElementById('transcript-box2');
-    box.textContent=t;box.style.display='block';};
-  recog2.onerror=e=>{document.getElementById('mic-status2').textContent='Error: '+e.error;running2=false;};
-  recog2.onend=()=>{running2=false;
-    document.getElementById('mic-label2').textContent='Dictate';
-    document.getElementById('mic-btn2').style.background='#1B2A4A';
-    const t=document.getElementById('transcript-box2').textContent;
-    if(t.trim()){
-      document.getElementById('mic-status2').textContent='Ready — click Copy to chat ↓';
-      document.getElementById('copy-btn2').style.display='inline-block';
-    }};
-  recog2.start();running2=true;
-  document.getElementById('mic-label2').textContent='Stop';
-  document.getElementById('mic-btn2').style.background='#A32D2D';
-  document.getElementById('mic-status2').textContent='Listening…';
-}
-function copyChat2(){
-  const t=document.getElementById('transcript-box2').textContent;
-  if(t.trim()){
-    navigator.clipboard.writeText(t).then(()=>{
-      document.getElementById('mic-status2').textContent='✓ Copied — paste into the chat box below (Cmd+V or Ctrl+V)';
-      document.getElementById('copy-btn2').style.background='#3B6D11';
-    });
-  }
-}
-</script>"""
-    st.components.v1.html(speech_html, height=90, scrolling=False)
+    # ── How it works (collapsible, hidden once conversation starts) ───────────
+    if not st.session_state.chat_history:
+        with st.expander("ℹ️ How PARVIS Chat works", expanded=True):
+            st.markdown("""
+**PARVIS Chat is fully context-aware.** Every message includes a live snapshot of the entire network:
+all 20 node posteriors, active Gladue factors, Morris/Ellis SCE, criminal record, and Node 20 output.
 
-    # ── Build PARVIS context for system prompt ────────────────────────────────
+**What you can ask:**
+- *"Why is Node 7 at 40%?"* — PARVIS explains what's driving any node
+- *"Describe an Indigenous offender, 42, Ontario, bail denied 9 months, PCL-R 22"* — populates the network
+- *"What would happen if the Gladue report had been properly engaged?"*
+- *"Which distortion corrections are most significant right now?"*
+
+**When PARVIS proposes a change**, a confirmation card appears — nothing changes until you click ✅ Apply.
+
+**Voice:** click the 🎤 microphone button in the input bar, speak, and your words go directly into the message field.
+            """)
+
+    # ── Build PARVIS context ──────────────────────────────────────────────────
     def _build_context() -> str:
         Pa = st.session_state.posteriors
         cr = st.session_state.criminal_record
         cG = [f for f in GF if f["id"] in st.session_state.gladue_checked]
         cS = [f for f in SF if f["id"] in st.session_state.sce_checked]
-        esc = st.session_state.cr_doc_adj.get("escalation",{})
-
-        ctx = f"""You are PARVIS — the Probabilistic and Analytical Reasoning Virtual Intelligence System, 
-a Bayesian sentencing assistant for Canadian Dangerous Offender proceedings. You are built on a 
+        esc = st.session_state.cr_doc_adj.get("escalation", {})
+        ctx = f"""You are PARVIS — the Probabilistic and Analytical Reasoning Virtual Intelligence System,
+a Bayesian sentencing assistant for Canadian Dangerous Offender proceedings. You are built on a
 20-node pgmpy Bayesian network grounded in the Tetrad doctrinal framework.
 
 CURRENT NETWORK STATE:
@@ -1484,7 +1502,6 @@ CRIMINAL RECORD ({len(cr)} conviction(s)):"""
             ctx += f"\nPattern (Boutilier): {esc.get('pattern','—').title()}"
         else:
             ctx += "\nNo convictions entered."
-
         ctx += """
 
 YOUR ROLE:
@@ -1497,113 +1514,203 @@ YOUR ROLE:
    You may propose multiple changes, one JSON block per change.
    Never apply changes yourself — the user must confirm each one.
 
-IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. This distinction is the 
-thesis's central normative contribution. Always maintain this framing in your responses."""
+IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. Always maintain this framing."""
         return ctx
 
-    # ── How it works panel ────────────────────────────────────────────────────
-    with st.expander("ℹ️ How PARVIS Chat works", expanded=len(st.session_state.chat_history)==0):
-        st.markdown("""
-**PARVIS Chat is fully context-aware.** Every message you send includes a live snapshot of the entire network:
-- All 20 node posteriors (risk factors and distortion corrections)
-- Active Gladue factors and Morris/Ellis SCE factors
-- Criminal record with calibrated weights and Boutilier pattern analysis
-- Connection strength, framework setting, and Node 20 output
+    # ── Chat history display ──────────────────────────────────────────────────
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"],
+                avatar="🔺" if msg["role"] == "assistant" else "👤"):
+            st.markdown(msg["content"])
 
-**What you can ask:**
-- *"Why is Node 7 at 40%?"* — PARVIS explains what's driving any node value
-- *"What would happen if the Gladue report had been properly engaged?"* — scenario reasoning
-- *"Explain what the superposition index of 0.50 means for this case"*
-- *"Which distortion corrections are most significant right now?"*
-- *"Describe an Indigenous offender, 42, Ontario, prior assault conviction, PCL-R 26"* — populates the network
+            # Proposal confirmation cards
+            if msg["role"] == "assistant" and msg.get("proposals"):
+                for pi, prop in enumerate(msg["proposals"]):
+                    nid = prop.get("node")
+                    val = prop.get("value")
+                    reason = prop.get("reason", "")
+                    nm = NODE_META.get(nid, {}).get("name", "?") if nid else "?"
+                    cur = P.get(nid, 0.5) if nid else 0.5
+                    col_p = "#A32D2D" if val and val > cur else "#3B6D11"
+                    arrow = "↑" if val and val > cur else "↓"
+                    msg_id = msg.get("id", pi)
+                    st.markdown(
+                        f"<div class='parvis-proposal'>"
+                        f"<b>Proposed:</b> N{nid} {nm} {arrow} "
+                        f"<b style='color:{col_p}'>{val*100:.0f}%</b> "
+                        f"(current: {cur*100:.0f}%) — {reason}</div>",
+                        unsafe_allow_html=True)
+                    bc1, bc2 = st.columns([1, 4])
+                    with bc1:
+                        if st.button(f"✅ Apply", key=f"chat_apply_{msg_id}_{pi}_{nid}"):
+                            st.session_state.profile_ev[nid] = float(val)
+                            run_inf()
+                            st.session_state.chat_history.append({
+                                "role": "assistant",
+                                "content": f"✅ Applied — N{nid} ({nm}) set to **{val*100:.0f}%**. Node 20 updated to **{st.session_state.posteriors[20]*100:.1f}%**.",
+                                "proposals": []
+                            })
+                            st.rerun()
+                    with bc2:
+                        if st.button(f"✗ Decline", key=f"chat_decline_{msg_id}_{pi}_{nid}"):
+                            st.session_state.chat_history.append({
+                                "role": "assistant",
+                                "content": f"Understood — N{nid} ({nm}) left at {cur*100:.0f}%.",
+                                "proposals": []
+                            })
+                            st.rerun()
 
-**When PARVIS suggests a change to a node value**, it will show you a confirmation card with the current value, proposed value, and reason. **Nothing changes until you click ✅ Apply.**
+    # ── Voice-to-chat component (injects directly into chat_input) ────────────
+    voice_html = """
+<style>
+  #parvis-mic {
+    background: #1B2A4A; color: white; border: none;
+    border-radius: 50%; width: 36px; height: 36px;
+    cursor: pointer; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .2s, transform .1s;
+    box-shadow: 0 1px 4px rgba(0,0,0,.18);
+  }
+  #parvis-mic.listening { background: #A32D2D; animation: pulse 1.2s infinite; }
+  #parvis-mic:hover { transform: scale(1.08); }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(163,45,45,.4); }
+    50%      { box-shadow: 0 0 0 7px rgba(163,45,45,0); }
+  }
+  #parvis-mic-status {
+    font-size: 11px; color: #999; font-style: italic;
+    margin-left: 6px; line-height: 36px;
+  }
+  #mic-wrapper { display: flex; align-items: center; padding: 2px 0; }
+</style>
 
-**Dictation:** click **🎤 Dictate**, speak your case description, then click **📋 Copy to chat** and paste into the chat box below.
-        """)
+<div id="mic-wrapper">
+  <button id="parvis-mic" title="Voice input" onclick="toggleMic()">🎤</button>
+  <span id="parvis-mic-status"></span>
+</div>
 
-    # ── Display chat history ──────────────────────────────────────────────────
-    chat_container = st.container()
-    with chat_container:
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"],
-                avatar="⚖️" if msg["role"]=="assistant" else "👤"):
-                st.markdown(msg["content"])
+<script>
+let recognition = null;
+let isListening = false;
 
-                # Show confirm buttons for any proposed changes in assistant messages
-                if msg["role"]=="assistant" and msg.get("proposals"):
-                    for pi, prop in enumerate(msg["proposals"]):
-                        nid = prop.get("node")
-                        val = prop.get("value")
-                        reason = prop.get("reason","")
-                        nm = NODE_META.get(nid,{}).get("name","?") if nid else "?"
-                        cur = P.get(nid, 0.5) if nid else 0.5
-                        col_p = "#A32D2D" if val and val > cur else "#3B6D11"
-                        arrow = "↑" if val and val > cur else "↓"
-                        msg_id = msg.get("id", pi)
+function getParentChatInput() {
+  try {
+    const allTextareas = window.parent.document.querySelectorAll('textarea');
+    for (const ta of allTextareas) {
+      if (ta.placeholder && (
+          ta.placeholder.toLowerCase().includes('describe the case') ||
+          ta.placeholder.toLowerCase().includes('ask a question') ||
+          ta.placeholder.toLowerCase().includes('parvis')
+      )) return ta;
+    }
+    // Fallback: last textarea in the page
+    return allTextareas[allTextareas.length - 1] || null;
+  } catch(e) { return null; }
+}
 
-                        st.markdown(
-                            f"<div style='background:#f8f8f8;border-left:3px solid {col_p};"
-                            f"border-radius:6px;padding:.5rem .8rem;margin:.3rem 0;font-size:.85rem'>"
-                            f"<b>Proposed:</b> N{nid} {nm} {arrow} "
-                            f"<b style='color:{col_p}'>{val*100:.0f}%</b> "
-                            f"(current: {cur*100:.0f}%) — {reason}</div>",
-                            unsafe_allow_html=True)
+function injectText(text) {
+  const ta = getParentChatInput();
+  if (!ta) return;
+  // React-compatible injection
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype, 'value'
+  ).set;
+  nativeSetter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.dispatchEvent(new Event('change', { bubbles: true }));
+  ta.focus();
+}
 
-                        bc1, bc2 = st.columns([1,4])
-                        with bc1:
-                            if st.button(f"✅ Apply", key=f"chat_apply_{msg_id}_{pi}_{nid}"):
-                                st.session_state.profile_ev[nid] = float(val)
-                                run_inf()
-                                st.session_state.chat_history.append({
-                                    "role": "assistant",
-                                    "content": f"✅ Applied — N{nid} ({nm}) set to **{val*100:.0f}%**. Node 20 updated to **{st.session_state.posteriors[20]*100:.1f}%**.",
-                                    "proposals": []
-                                })
-                                st.rerun()
-                        with bc2:
-                            if st.button(f"✗ Decline", key=f"chat_decline_{msg_id}_{pi}_{nid}"):
-                                st.session_state.chat_history.append({
-                                    "role": "assistant",
-                                    "content": f"Understood — N{nid} ({nm}) left at {cur*100:.0f}%.",
-                                    "proposals": []
-                                })
-                                st.rerun()
+function toggleMic() {
+  const btn = document.getElementById('parvis-mic');
+  const status = document.getElementById('parvis-mic-status');
 
-    # ── Pending confirmation (for bulk proposals from intake-style messages) ──
+  if (isListening) {
+    recognition.stop();
+    return;
+  }
+
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    status.textContent = 'Use Chrome or Edge for voice input';
+    return;
+  }
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-CA';
+
+  recognition.onstart = () => {
+    isListening = true;
+    btn.textContent = '⏹';
+    btn.classList.add('listening');
+    status.textContent = 'Listening…';
+  };
+
+  recognition.onresult = (e) => {
+    let transcript = '';
+    for (let i = 0; i < e.results.length; i++) {
+      transcript += e.results[i][0].transcript;
+    }
+    injectText(transcript);
+    if (e.results[e.results.length - 1].isFinal) {
+      status.textContent = '✓ Done — press Enter to send';
+    } else {
+      status.textContent = 'Listening…';
+    }
+  };
+
+  recognition.onerror = (e) => {
+    status.textContent = 'Error: ' + e.error;
+    isListening = false;
+    btn.textContent = '🎤';
+    btn.classList.remove('listening');
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    btn.textContent = '🎤';
+    btn.classList.remove('listening');
+    if (!status.textContent.includes('Done') && !status.textContent.includes('Error')) {
+      status.textContent = '';
+    }
+  };
+
+  recognition.start();
+}
+</script>
+"""
+    st.components.v1.html(voice_html, height=44, scrolling=False)
+
     # ── Chat input ────────────────────────────────────────────────────────────
-    if prompt := st.chat_input("Describe the case or ask a question — e.g. 'Male, 42, Indigenous, bail denied 8 months, Gladue not engaged, PCL-R 22'"):
-        # Add user message
-        st.session_state.chat_history.append({"role":"user","content":prompt})
+    if prompt := st.chat_input("Describe the case or ask a question — e.g. 'Male, 42, Indigenous, bail denied 8 months, PCL-R 22'"):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
 
-        # Build API call
         with st.spinner("PARVIS is thinking…"):
             try:
                 import anthropic as _ant, json as _json, re as _re
 
-                # Resolve API key
                 ak = st.session_state.chat_ak
                 if not ak:
-                    try: ak = st.secrets.get("ANTHROPIC_API_KEY","")
+                    try: ak = st.secrets.get("ANTHROPIC_API_KEY", "")
                     except Exception: pass
                 if not ak:
-                    import os; ak = os.environ.get("ANTHROPIC_API_KEY","")
+                    import os; ak = os.environ.get("ANTHROPIC_API_KEY", "")
 
                 if not ak:
                     st.session_state.chat_history.append({
-                        "role":"assistant",
-                        "content":"⚠️ No API key found. Please enter your Anthropic API key in the ⚙️ API settings panel above.",
-                        "proposals":[]
+                        "role": "assistant",
+                        "content": "⚠️ No API key found. Please enter your Anthropic API key in the ⚙️ API settings panel above.",
+                        "proposals": []
                     })
                     st.rerun()
                 else:
                     client = _ant.Anthropic(api_key=ak)
-
-                    # Build messages for API
                     messages = []
-                    for m in st.session_state.chat_history[:-1]:  # exclude latest user msg
+                    for m in st.session_state.chat_history[:-1]:
                         messages.append({"role": m["role"], "content": m["content"]})
-                    messages.append({"role":"user","content":prompt})
+                    messages.append({"role": "user", "content": prompt})
 
                     response = client.messages.create(
                         model="claude-opus-4-5",
@@ -1613,32 +1720,29 @@ thesis's central normative contribution. Always maintain this framing in your re
                     )
                     raw = response.content[0].text
 
-                    # Parse any PROPOSED_CHANGES blocks
                     proposals = []
                     for m2 in _re.finditer(r'PROPOSED_CHANGES:\s*(\{[^}]+\})', raw):
-                        try:
-                            proposals.append(_json.loads(m2.group(1)))
-                        except Exception:
-                            pass
+                        try: proposals.append(_json.loads(m2.group(1)))
+                        except Exception: pass
 
                     import time
                     st.session_state.chat_history.append({
                         "role": "assistant",
                         "content": raw,
                         "proposals": proposals,
-                        "id": int(time.time()*1000)
+                        "id": int(time.time() * 1000)
                     })
                     st.rerun()
 
             except Exception as ex:
                 st.session_state.chat_history.append({
-                    "role":"assistant",
-                    "content":f"⚠️ Error: {ex}",
-                    "proposals":[]
+                    "role": "assistant",
+                    "content": f"⚠️ Error: {ex}",
+                    "proposals": []
                 })
                 st.rerun()
 
-    # Clear chat button
+    # ── Clear conversation ────────────────────────────────────────────────────
     if st.session_state.chat_history:
         if st.button("🗑 Clear conversation", key="chat_clear"):
             st.session_state.chat_history = []
