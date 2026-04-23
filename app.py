@@ -953,6 +953,8 @@ with TABS[10]:
 
     with qb2:
         st.markdown("#### State vector")
+        from quantum_diagnostics import density_matrix_summary as _dms
+        _dm = _dms(dn7)
         state_col = "#A32D2D" if dn7>=0.55 else "#BA7517" if dn7>=0.35 else "#3B6D11"
         st.markdown(
             f"<div style='background:#f8f8f8;border-radius:10px;padding:.8rem 1rem;margin-bottom:.6rem'>"
@@ -960,8 +962,24 @@ with TABS[10]:
             f"<div style='font-size:1.8rem;font-weight:800;font-family:monospace;color:{state_col}'>"
             f"{dn7*100:.1f}%</div>"
             f"<div style='font-size:.8rem;color:#555;margin-top:4px'>"
-            f"θ = {theta_deg:.1f}° · φ = {phi_deg:.1f}° · SI = {si:.3f}</div>"
+            f"θ = {theta_deg:.1f}° &nbsp;·&nbsp; φ = {phi_deg:.1f}° &nbsp;·&nbsp; SI = {si:.3f}</div>"
             f"</div>",
+            unsafe_allow_html=True)
+
+        # ── Density matrix — always visible ──────────────────────────────────
+        st.markdown(
+            f"<div style='background:#F7F5F2;border:1px solid #E0DDD6;border-radius:8px;"
+            f"padding:.65rem 1rem;margin-bottom:.5rem;font-size:.78rem'>"
+            f"<div style='font-weight:700;color:#1B2A4A;margin-bottom:4px'>Density matrix ρ</div>"
+            f"<div style='font-family:monospace;color:#333;margin-bottom:4px'>"
+            f"ρ = [[{_dm['rho'][0][0]:.3f}, &nbsp;{_dm['rho'][0][1]:.3f}]<br>"
+            f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[{_dm['rho'][1][0]:.3f}, &nbsp;{_dm['rho'][1][1]:.3f}]]"
+            f"</div>"
+            f"<div style='color:#666'>"
+            f"Coherence: <b>{_dm['coherence']}</b> &nbsp;·&nbsp; "
+            f"Purity Tr(ρ²): <b>{_dm['purity']}</b><br>"
+            f"<span style='color:#888;font-style:italic'>{_dm['interpretation']}</span>"
+            f"</div></div>",
             unsafe_allow_html=True)
 
         # ── Tasteful legend ───────────────────────────────────────────────────
@@ -973,6 +991,9 @@ with TABS[10]:
             ("SI — Superposition index", "Measures how far the belief state is from a classical resolved answer. SI=1.0 means maximum superposition (equator). SI=0.0 means fully resolved (pole). High SI signals the legal system is operating in a zone of genuine epistemic ambiguity.", "#BA7517"),
             ("|DO⟩ / |¬DO⟩", "The two basis states: North Pole = certain DO designation, South Pole = certain no designation. Classical probability lives on this axis. The QBism layer asks whether the system has left this axis.", "#A32D2D"),
             ("Equatorial ring", "Appears when SI > 0.6 — marks the zone of maximum pre-decisional ambiguity. Per AQ.3.3.5.2 this should be preserved as a stable epistemic condition, not artificially collapsed by the model.", "#BA7517"),
+            ("ρ — Density matrix", "The 2×2 matrix encoding the full belief state. Diagonal entries are P(DO) and P(¬DO). Off-diagonal entries are the coherence terms — non-zero coherence means the belief state is genuinely superposed, not merely uncertain. A diagonal ρ (coherence = 0) is a classically resolved state. Reference: Nielsen & Chuang (2000) §2.4; Busemeyer & Bruza (2012) §2.3.", "#0F6E56"),
+            ("Coherence", "The off-diagonal term of ρ — √(P(DO) · P(¬DO)). Maximum at P=0.5 (0.500), zero at the poles. Measures how much the belief state is genuinely holding both conclusions simultaneously, as opposed to simply being uncertain between them. A court deciding on a high-coherence belief state is resolving ambiguity the evidence has not resolved.", "#0F6E56"),
+            ("Purity Tr(ρ²)", "Ranges from 0.5 (maximally mixed — maximum uncertainty) to 1.0 (pure state — fully resolved). Purity below 0.75 indicates the belief state is insufficiently resolved to support a high-confidence designation. The VE posterior may be numerically precise while the underlying epistemic state remains impure. This is the thesis's core claim about the limits of classical inference in distorted legal systems.", "#0F6E56"),
         ]
         for term, defn, col in legend_items:
             st.markdown(
