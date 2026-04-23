@@ -381,7 +381,7 @@ with ct:
         style="height:3.2rem;width:3.2rem;object-fit:contain;
                margin:0 -1px;vertical-align:middle;
                transform:translateY(0.25rem);
-               filter:invert(1) contrast(2.2);opacity:0.92"
+               mix-blend-mode:multiply;opacity:0.88"
         alt="Ethical AI" /><span>.R.V.I.S</span>
     </div>
     <div class="ps"><em>Probabilistic and Analytical Reasoning Virtual Intelligence System</em> &nbsp;·&nbsp;
