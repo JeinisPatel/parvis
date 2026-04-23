@@ -241,7 +241,7 @@ def dobar(p, label="DO designation risk", show_cr=False):
 def _init():
     defs = {"model":None,"engine":None,"profile_ev":{},"gladue_checked":set(),"criminal_record":[],"cr_doc_adj":{},"saved_scenarios":{},
             "sce_checked":set(),"sce_values":{},"manual_ev":{},"doc_adj":{},"posteriors":{},
-            "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[]}
+            "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[],"qbism_plain":"","qbism_dm":{}}
     for k,v in defs.items():
         if k not in st.session_state: st.session_state[k]=v
 _init()
@@ -1057,6 +1057,79 @@ independence assumption that Variable Elimination requires to be valid.*
                         for k, v in item.items(): st.markdown(f"**{k}:** {v}")
                 if not d.get("items"): st.success("No conditions flagged.")
                 st.caption(d.get("doctrine", ""))
+
+        # ── Plain language NLP layer ──────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 🗣️ Plain language interpretation")
+        st.caption("Translates the QBism diagnostic into plain English for judges, counsel, and lay readers. Requires an API key.")
+
+        # API key resolution
+        _plak = st.session_state.get("chat_ak", "")
+        if not _plak:
+            try: _plak = st.secrets.get("ANTHROPIC_API_KEY", "")
+            except Exception: pass
+        if not _plak:
+            import os; _plak = os.environ.get("ANTHROPIC_API_KEY", "")
+
+        if not _plak:
+            st.warning("Enter your Anthropic API key in the Intake (Chat) tab — ⚙️ API settings — to enable plain language output.")
+        else:
+            if st.button("🗣️ Generate plain language report", key="qbism_plain_btn"):
+                with st.spinner("Translating diagnostics into plain English…"):
+                    try:
+                        import anthropic as _ant
+                        from quantum_diagnostics import build_plain_language_prompt, density_matrix_summary
+
+                        _prompt = build_plain_language_prompt(diags, P)
+                        _client = _ant.Anthropic(api_key=_plak)
+                        _resp   = _client.messages.create(
+                            model="claude-opus-4-5",
+                            max_tokens=1200,
+                            messages=[{"role": "user", "content": _prompt}]
+                        )
+                        _plain_text = _resp.content[0].text
+                        st.session_state["qbism_plain"] = _plain_text
+
+                        # Also store density matrix summary
+                        _dm = density_matrix_summary(P[20])
+                        st.session_state["qbism_dm"] = _dm
+
+                    except Exception as _ex:
+                        st.error(f"Error generating plain language report: {_ex}")
+
+            # Display cached plain language output
+            if st.session_state.get("qbism_plain"):
+                _dm = st.session_state.get("qbism_dm", {})
+                # Density matrix callout
+                if _dm:
+                    st.markdown(
+                        f"<div style='background:#F7F5F2;border:1px solid #E0DDD6;border-radius:8px;"
+                        f"padding:.6rem 1rem;margin-bottom:.8rem;font-size:.8rem;font-family:monospace'>"
+                        f"<b>Density matrix ρ</b> &nbsp;·&nbsp; "
+                        f"Coherence: {_dm['coherence']} &nbsp;·&nbsp; "
+                        f"Purity: {_dm['purity']} &nbsp;·&nbsp; "
+                        f"{_dm['interpretation']}<br>"
+                        f"ρ = [[{_dm['rho'][0][0]:.3f}, {_dm['rho'][0][1]:.3f}], "
+                        f"[{_dm['rho'][1][0]:.3f}, {_dm['rho'][1][1]:.3f}]]"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+                # Plain language report
+                st.markdown(
+                    f"<div style='background:#FDFCFA;border:1px solid #E8E4DC;border-radius:12px;"
+                    f"padding:1.2rem 1.4rem;line-height:1.7'>"
+                    f"{st.session_state['qbism_plain'].replace(chr(10), '<br>')}"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+                # Download button
+                st.download_button(
+                    "📄 Download plain language report (.txt)",
+                    data=st.session_state["qbism_plain"].encode(),
+                    file_name=f"PARVIS_QBism_PlainLanguage_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                    mime="text/plain",
+                    key="qbism_plain_dl"
+                )
     else:
         st.info("Run inference on any tab to populate the QBism diagnostics. The state vector above updates in real time as you adjust case profile settings.")
 

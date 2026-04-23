@@ -23,6 +23,126 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 
 
+# ── Density matrix ────────────────────────────────────────────────────────────
+def compute_density_matrix(p_high: float) -> np.ndarray:
+    """
+    Compute the 2x2 density matrix ρ for the belief state.
+
+    For a pure state |ψ⟩ = α|DO⟩ + β|¬DO⟩ where |α|² = p_high:
+        ρ = |ψ⟩⟨ψ| = [[p_high,        sqrt(p_high*(1-p_high))],
+                       [sqrt(p_high*(1-p_high)), 1-p_high       ]]
+
+    The off-diagonal terms (coherences) encode superposition.
+    A diagonal ρ (coherences → 0) represents a classically resolved belief state.
+    Maximum coherence at p_high = 0.5 (equator of Bloch sphere).
+
+    For a mixed state representing genuine judicial uncertainty, ρ is still
+    positive semi-definite and Hermitian, with Tr(ρ) = 1.
+
+    Reference: Busemeyer & Bruza (2012) §2.3; Nielsen & Chuang (2000) §2.4
+    """
+    alpha_sq = float(np.clip(p_high, 0.0, 1.0))
+    beta_sq  = 1.0 - alpha_sq
+    coherence = float(np.sqrt(alpha_sq * beta_sq))   # off-diagonal term
+    rho = np.array([
+        [alpha_sq,  coherence],
+        [coherence, beta_sq  ]
+    ])
+    return rho
+
+
+def density_matrix_summary(p_high: float) -> Dict:
+    """Return density matrix with interpretive metadata."""
+    rho = compute_density_matrix(p_high)
+    coherence = rho[0, 1]
+    purity = float(np.trace(rho @ rho))  # Tr(ρ²) — 1.0 = pure state, 0.5 = maximally mixed
+    return {
+        "rho": rho.tolist(),
+        "coherence": round(coherence, 4),
+        "purity": round(purity, 4),
+        "interpretation": (
+            "Pure state — belief fully coherent (maximum superposition)" if purity > 0.95
+            else "Near-pure state — high epistemic coherence" if purity > 0.75
+            else "Mixed state — partial decoherence, belief partially resolved" if purity > 0.55
+            else "Highly mixed state — belief approaching classical resolution"
+        ),
+    }
+
+
+# ── Plain language NLP generator ──────────────────────────────────────────────
+def build_plain_language_prompt(diags: Dict, posteriors: Dict) -> str:
+    """
+    Build the system + user prompt for the plain language NLP layer.
+    Returns a formatted string ready to send to the Claude API.
+    """
+    do_p     = posteriors.get(20, 0.5)
+    si       = diags.get("superposition_index", 0.5)
+    ov_flag  = diags.get("overall_flag", "none")
+    summary  = diags.get("summary", "")
+
+    pc   = diags.get("prior_contamination", {})
+    oe   = diags.get("order_effects", {})
+    ci   = diags.get("contextual_interference", {})
+    bs   = diags.get("belief_stasis", {})
+
+    dm   = density_matrix_summary(do_p)
+
+    prompt = f"""You are a plain-language translator for PARVIS — a Bayesian sentencing tool used
+in Canadian Dangerous Offender proceedings. Your task is to translate a technical
+QBism (Quantum Bayesianism) diagnostic report into clear, accessible language for
+a judge, Crown counsel, or defence barrister who has no background in probability
+theory or quantum mechanics.
+
+RULES:
+- Never use the words "quantum", "superposition", "Bloch sphere", "density matrix",
+  "eigenvalue", "Hilbert space", or any physics jargon.
+- Do not say "the model" or "the algorithm" — say "the analysis" or "PARVIS".
+- Write in plain, direct English. Short paragraphs. No bullet point walls.
+- Each diagnostic section should be 2-4 sentences maximum.
+- Do not hedge excessively. Be direct about what the findings mean.
+- End with a single "Bottom line" paragraph of 2-3 sentences.
+- Tone: a senior barrister explaining a technical issue to a judge in clear terms.
+
+DIAGNOSTIC DATA:
+Overall flag:         {ov_flag.upper()}
+DO designation risk:  {do_p*100:.1f}%
+Ambiguity index:      {si:.2f} / 1.0  ({
+    "High — competing conclusions remain genuinely open" if si > 0.6
+    else "Moderate ambiguity" if si > 0.35
+    else "Low — analysis has largely resolved toward one conclusion"
+})
+Belief coherence:     {dm['purity']:.2f} / 1.0  ({dm['interpretation']})
+
+PRIOR CONTAMINATION — {pc.get('severity','none').upper()} — Flagged: {pc.get('flagged', False)}
+Items: {pc.get('items', [])}
+
+ORDER EFFECTS — {oe.get('severity','none').upper()} — Flagged: {oe.get('flagged', False)}
+Items: {oe.get('items', [])}
+
+CONTEXTUAL INTERFERENCE — {ci.get('severity','none').upper()} — Flagged: {ci.get('flagged', False)}
+Items: {ci.get('items', [])}
+
+BELIEF STASIS — {bs.get('severity','none').upper()} — Flagged: {bs.get('flagged', False)}
+Items: {bs.get('items', [])}
+
+IMPORTANT FRAMING: The numerical output ({do_p*100:.1f}%) is mathematically valid.
+These diagnostics do not change that number. They identify whether the reasoning
+process that produced it is epistemically trustworthy — or whether structural
+features of the legal system may have shaped it in ways that warrant closer
+scrutiny before it informs a judicial decision.
+
+Now write the plain language report. Use the following section headings exactly:
+## What the analysis found
+## Reliability of the risk reading
+## Prior contamination
+## Sequencing of evidence
+## Contextual sensitivity
+## Belief stasis
+## Bottom line
+"""
+    return prompt
+
+
 # ── Diagnostic thresholds ─────────────────────────────────────────────────────
 PRIOR_CONTAMINATION_THRESHOLD = 0.65  # Nodes above this are suspect if no evidence entered
 ORDER_EFFECT_DELTA = 0.08             # Meaningful shift in posterior from reordering
