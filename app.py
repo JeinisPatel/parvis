@@ -970,9 +970,30 @@ with TABS[1]:
 
 # ── T2: Case profile ──────────────────────────────────────────────────────────
 with TABS[2]:
-    st.markdown("### Case profile")
-    st.caption("Each field maps to network nodes and drives Variable Elimination.")
-    # ── Case identifier (Mark 8) — surfaces in Summary tab headline ──
+    # ════════════════════════════════════════════════════════════════════════
+    # Profile tab — workbench-but-quieter input language (Mark 8 redesign)
+    # All widget keys preserved; pev[N] math unchanged.
+    # ════════════════════════════════════════════════════════════════════════
+
+    # ── Tab title + caption ───────────────────────────────────────────────
+    st.markdown(
+        "<h2 style='font-family:Fraunces,Georgia,serif;font-size:1.7rem;"
+        "font-weight:500;letter-spacing:-0.005em;margin:0 0 4px 0'>"
+        "Case profile</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.92rem;color:#707070;margin-bottom:22px;line-height:1.6;"
+        "max-width:880px'>"
+        "Each field maps to one or more nodes in the network. Adjustments "
+        "here drive Variable Elimination immediately; the live posterior "
+        "strip below the form reflects the current state."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Case identifier row ───────────────────────────────────────────────
     _ci_col1, _ci_col2 = st.columns([2, 1])
     with _ci_col1:
         st.text_input("Case identifier", key="case_id",
@@ -980,47 +1001,299 @@ with TABS[2]:
     with _ci_col2:
         st.text_input("Jurisdiction / location", key="case_jur",
                       placeholder="e.g. Calgary · Alberta")
-    st.markdown(dobar(P[20]),unsafe_allow_html=True)
-    c1,c2=st.columns(2);pev={}
-    with c1:
-        st.markdown("##### Offender characteristics")
-        age=st.slider("Age at sentencing",18,80,35,key="age")
-        st.caption(f"Node 15 — age {age}: {'strong burnout attenuation' if age>=55 else 'moderate' if age>=45 else 'minimal'}")
-        identity=st.selectbox("Identity background",["Not recorded / unknown",
-            "Indigenous — s.718.2(e) + Gladue applies","Black — Morris IRCA framework",
-            "Other racialized — Morris framework","Non-racialized, socially disadvantaged — Ellis",
-            "No identified systemic disadvantage"],key="id_bg")
-        pclr=st.slider("PCL-R score",0,40,20,key="pclr")
-        st.caption(f"N3: {'High ≥30 — Ewert/Larsen caveat APPLIES' if pclr>=30 else 'Moderate' if pclr>=20 else 'Low'}")
-        s99=st.slider("Static-99R score",0,12,3,key="s99")
-        st.caption(f"N4: {'High ≥6' if s99>=6 else 'Moderate' if s99>=4 else 'Low'} — Ewert validation caveat")
-        violence=st.selectbox("Serious violence history",["None","Minor/historical","Moderate","Serious","Established pattern"],key="viol")
-        fasd=st.selectbox("FASD diagnosis",["None / not assessed","Suspected, undiagnosed","Confirmed diagnosis"],key="fasd")
-        st.markdown("##### Dynamic risk · Node 18")
-        sub=st.selectbox("Substance use",["None / in remission","Low","Moderate","High — dependency"],key="sub")
-        peers=st.selectbox("Antisocial peer associations",["None identified","Some — limited","Strong — primary network"],key="peers")
-        stab=st.selectbox("Employment / housing stability",["Stable","Marginal","Unstable / homeless"],key="stab")
-    with c2:
-        st.markdown("##### Procedural integrity · Distortion nodes")
-        det=st.slider("Pre-trial detention (days)",0,730,60,key="det")
-        st.caption(f"N7: {'HIGH — coercive plea cascade risk' if det>90 else 'Moderate' if det>30 else 'Low'} ({det} days)")
-        counsel=st.selectbox("Quality of defence counsel",["Adequate","Marginal",
-            "Inadequate — no cultural investigation","Ineffective — constitutional breach"],key="counsel")
-        gr=st.selectbox("Gladue / SCE report commissioned",["Yes — full report before court",
-            "Partial / summary only","No report commissioned","Report commissioned, disregarded"],key="gr")
-        tools=st.selectbox("Risk tools applied",["Culturally validated only","Mix — partially qualified",
-            "Standard, no cultural qualification","No actuarial tools"],key="tools")
-        pol=st.selectbox("Over-policing indicator",["No evidence","Some — marginal",
-            "Strong — documented over-surveillance"],key="pol")
-        prov=st.selectbox("Province of prosecution",["Low DO designation rate","Medium rate",
-            "High DO designation rate"],key="prov")
-        st.markdown("##### Rehabilitative context · Nodes 11, 19")
-        prog=st.selectbox("Indigenous / cultural programming",["Yes — full culturally grounded",
-            "Limited availability","No culturally appropriate programming"],key="prog")
-        st.caption("Natomagan 2022 ABCA 48: absence is systemic failure, not offender characteristic")
-        rehab=st.selectbox("Rehabilitation engagement",["Strong — consistent","Moderate","Minimal",
-            "None — apparent refusal","Anomalously positive (gaming risk)"],key="rehab")
 
+    # Visual separator below case-id
+    st.markdown(
+        "<div style='border-bottom:1px solid #EFEDE7;margin:12px 0 26px 0'></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Two-column body ───────────────────────────────────────────────────
+    pev = {}
+    c1, c2 = st.columns(2)
+
+    # Severity-word colour helper for doctrinal captions
+    def _sev_caption(severity_word, severity_color, body_text, nid_tag=None):
+        nid_html = (f"<span style='font-family:JetBrains Mono,monospace;"
+                    f"font-size:0.7rem;color:#9E9E9E;margin-right:6px'>{nid_tag}</span>"
+                    if nid_tag else "")
+        return (
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.78rem;color:#707070;margin-top:-4px;margin-bottom:10px;"
+            f"line-height:1.5'>"
+            f"{nid_html}"
+            f"<span style='color:{severity_color};font-style:normal;font-weight:500'>"
+            f"{severity_word}</span> — {body_text}"
+            f"</div>"
+        )
+
+    # Section-head helper — emits a coloured stripe + title block
+    def _section_head(stripe_color, title, subtitle, node_tags):
+        return (
+            f"<div style='display:grid;grid-template-columns:8px 1fr;gap:14px;"
+            f"align-items:baseline;margin-bottom:14px;padding-bottom:8px;"
+            f"border-bottom:1px solid #EFEDE7'>"
+            f"<div style='width:4px;height:22px;border-radius:2px;align-self:center;"
+            f"background:{stripe_color}'></div>"
+            f"<div>"
+            f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+            f"font-weight:500;color:#1A1A1A;letter-spacing:-0.005em'>{title}"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+            f"color:#707070;margin-left:8px;letter-spacing:0;font-weight:500'>"
+            f"{node_tags}</span></div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.82rem;color:#707070;margin-top:2px;line-height:1.5'>"
+            f"{subtitle}</div>"
+            f"</div></div>"
+        )
+
+    with c1:
+        # ─── Section: Offender characteristics (risk stripe) ───────────────
+        st.markdown(
+            _section_head(
+                "#A32D2D",
+                "Offender characteristics",
+                "Demographic and clinical features mapped to risk and burnout nodes.",
+                "N3 · N4 · N9 · N15"
+            ),
+            unsafe_allow_html=True,
+        )
+
+        age = st.slider("Age at sentencing", 18, 80, 35, key="age")
+        # Doctrinal caption — severity word breaks out in mitigation green/warm/risk
+        if age >= 55:
+            sev_word, sev_col, sev_body = "Strong", "#3B6D11", f"burnout attenuation active ({age} years). Temporal distortion node weighted high."
+        elif age >= 45:
+            sev_word, sev_col, sev_body = "Moderate", "#BA7517", f"partial burnout attenuation ({age} years)."
+        else:
+            sev_word, sev_col, sev_body = "Minimal", "#707070", f"burnout attenuation — temporal distortion node weighted at default ({age} years)."
+        st.markdown(_sev_caption(sev_word, sev_col, sev_body, "N15"),
+                    unsafe_allow_html=True)
+
+        identity = st.selectbox(
+            "Identity background",
+            ["Not recorded / unknown",
+             "Indigenous — s.718.2(e) + Gladue applies",
+             "Black — Morris IRCA framework",
+             "Other racialized — Morris framework",
+             "Non-racialized, socially disadvantaged — Ellis",
+             "No identified systemic disadvantage"],
+            key="id_bg")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>"
+            "framework gate</div>",
+            unsafe_allow_html=True,
+        )
+
+        pclr = st.slider("PCL-R score", 0, 40, 20, key="pclr")
+        if pclr >= 30:
+            sev_word, sev_col, sev_body = "High ≥30", "#A32D2D", "<em>Ewert/Larsen</em> adversarial-allegiance caveat APPLIES."
+        elif pclr >= 20:
+            sev_word, sev_col, sev_body = "Moderate", "#BA7517", "<em>Ewert/Larsen</em> caveat partially applies."
+        else:
+            sev_word, sev_col, sev_body = "Low", "#3B6D11", "below threshold for adversarial-allegiance concern."
+        st.markdown(_sev_caption(sev_word, sev_col, sev_body, "N3"),
+                    unsafe_allow_html=True)
+
+        s99 = st.slider("Static-99R score", 0, 12, 3, key="s99")
+        if s99 >= 6:
+            sev_word, sev_col, sev_body = "High ≥6", "#A32D2D", "<em>Ewert</em> validation caveat applies independently of score."
+        elif s99 >= 4:
+            sev_word, sev_col, sev_body = "Moderate", "#BA7517", "<em>Ewert</em> validation caveat applies."
+        else:
+            sev_word, sev_col, sev_body = "Low", "#3B6D11", "<em>Ewert</em> validation caveat applies independently of score."
+        st.markdown(_sev_caption(sev_word, sev_col, sev_body, "N4"),
+                    unsafe_allow_html=True)
+
+        violence = st.selectbox(
+            "Serious violence history",
+            ["None", "Minor/historical", "Moderate", "Serious", "Established pattern"],
+            key="viol")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N2</div>",
+            unsafe_allow_html=True,
+        )
+
+        fasd = st.selectbox(
+            "FASD diagnosis",
+            ["None / not assessed", "Suspected, undiagnosed", "Confirmed diagnosis"],
+            key="fasd")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:18px;text-align:right'>N9</div>",
+            unsafe_allow_html=True,
+        )
+
+        # ─── Section: Dynamic risk (risk stripe) ───────────────────────────
+        st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            _section_head(
+                "#A32D2D",
+                "Dynamic risk",
+                "Substance, peer, and stability features aggregated into the dynamic-risk composite.",
+                "N18"
+            ),
+            unsafe_allow_html=True,
+        )
+
+        sub = st.selectbox(
+            "Substance use",
+            ["None / in remission", "Low", "Moderate", "High — dependency"],
+            key="sub")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>"
+            "→ N18</div>",
+            unsafe_allow_html=True,
+        )
+
+        peers = st.selectbox(
+            "Antisocial peer associations",
+            ["None identified", "Some — limited", "Strong — primary network"],
+            key="peers")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>"
+            "→ N18</div>",
+            unsafe_allow_html=True,
+        )
+
+        stab = st.selectbox(
+            "Employment / housing stability",
+            ["Stable", "Marginal", "Unstable / homeless"],
+            key="stab")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>"
+            "→ N18</div>",
+            unsafe_allow_html=True,
+        )
+
+    with c2:
+        # ─── Section: Procedural integrity (distortion stripe) ─────────────
+        st.markdown(
+            _section_head(
+                "#185FA5",
+                "Procedural integrity",
+                "Distortion-typed nodes — encode whether the record was generated under coercion, contamination, or systemic bias.",
+                "N5 · N6 · N7 · N12 · N14 · N16"
+            ),
+            unsafe_allow_html=True,
+        )
+
+        det = st.slider("Pre-trial detention (days)", 0, 730, 60, key="det")
+        if det > 180:
+            sev_word, sev_col, sev_body = "Severe", "#A32D2D", f"<em>Antic</em> [2017] coercive-plea cascade risk acute ({det} days)."
+        elif det > 90:
+            sev_word, sev_col, sev_body = "High", "#A32D2D", f"<em>Antic</em> [2017] coercive-plea cascade risk active ({det} days)."
+        elif det > 30:
+            sev_word, sev_col, sev_body = "Moderate", "#BA7517", f"<em>Antic</em> [2017] coercive-plea cascade risk emerging ({det} days)."
+        else:
+            sev_word, sev_col, sev_body = "Low", "#3B6D11", f"below threshold for coercive-plea concern ({det} days)."
+        st.markdown(_sev_caption(sev_word, sev_col, sev_body, "N7"),
+                    unsafe_allow_html=True)
+
+        counsel = st.selectbox(
+            "Quality of defence counsel",
+            ["Adequate", "Marginal",
+             "Inadequate — no cultural investigation",
+             "Ineffective — constitutional breach"],
+            key="counsel")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N6</div>",
+            unsafe_allow_html=True,
+        )
+
+        gr = st.selectbox(
+            "Gladue / SCE report commissioned",
+            ["Yes — full report before court",
+             "Partial / summary only",
+             "No report commissioned",
+             "Report commissioned, disregarded"],
+            key="gr")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N12</div>",
+            unsafe_allow_html=True,
+        )
+
+        tools = st.selectbox(
+            "Risk tools applied",
+            ["Culturally validated only", "Mix — partially qualified",
+             "Standard, no cultural qualification", "No actuarial tools"],
+            key="tools")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N5</div>",
+            unsafe_allow_html=True,
+        )
+
+        pol = st.selectbox(
+            "Over-policing indicator",
+            ["No evidence", "Some — marginal",
+             "Strong — documented over-surveillance"],
+            key="pol")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N14</div>",
+            unsafe_allow_html=True,
+        )
+
+        prov = st.selectbox(
+            "Province of prosecution",
+            ["Low DO designation rate", "Medium rate", "High DO designation rate"],
+            key="prov")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:18px;text-align:right'>N16</div>",
+            unsafe_allow_html=True,
+        )
+
+        # ─── Section: Rehabilitative context (mitigation stripe) ───────────
+        st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            _section_head(
+                "#3B6D11",
+                "Rehabilitative context",
+                "Cultural programming availability and engagement — Natomagan §48 frames absence as systemic, not individual.",
+                "N11 · N19"
+            ),
+            unsafe_allow_html=True,
+        )
+
+        prog = st.selectbox(
+            "Indigenous / cultural programming",
+            ["Yes — full culturally grounded",
+             "Limited availability",
+             "No culturally appropriate programming"],
+            key="prog")
+        st.markdown(
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.78rem;color:#707070;margin-top:-4px;margin-bottom:10px;"
+            "line-height:1.5'>"
+            "<span style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-right:6px'>N11</span>"
+            "Per <em>Natomagan</em> 2022 ABCA 48 — absence is systemic failure, "
+            "not an offender characteristic."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        rehab = st.selectbox(
+            "Rehabilitation engagement",
+            ["Strong — consistent", "Moderate", "Minimal",
+             "None — apparent refusal", "Anomalously positive (gaming risk)"],
+            key="rehab")
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N19</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Posterior calculation (preserved byte-for-byte) ────────────────────
     ir=identity in ["Indigenous — s.718.2(e) + Gladue applies","Black — Morris IRCA framework","Other racialized — Morris framework"]
     pev[2]={"None":.08,"Minor/historical":.25,"Moderate":.50,"Serious":.78,"Established pattern":.90}[violence]
     pev[3]=.82 if pclr>=30 else .55 if pclr>=20 else .30 if pclr>=10 else .12
@@ -1045,70 +1318,495 @@ with TABS[2]:
     st.session_state.profile_ev=pev
     run_inf();P=st.session_state.posteriors
     bl2,bc2,_=rb(P[20])
-    st.success(f"Node 20 — DO designation risk: **{P[20]*100:.1f}%** · {bl2}")
+
+    # ── Slim live-result strip — replaces st.success() ────────────────────
+    st.markdown("<div style='margin-top:24px'></div>", unsafe_allow_html=True)
+    _band_text = {
+        "Low": "belief largely resolved",
+        "Moderate": "belief partially resolved",
+        "Elevated": "belief shifted toward designation",
+        "High": "strong indication of designation",
+    }.get(bl2, bl2)
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:1fr auto;"
+        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+        f"border-radius:8px;padding:11px 18px'>"
+        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+        f"Node 20 · DO designation risk"
+        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+        f"</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.86rem;color:#2F5C2A'>{bl2} — {_band_text}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 # ── T3: Gladue ────────────────────────────────────────────────────────────────
 with TABS[5]:
-    st.markdown("### Gladue factors")
-    st.caption("*R v Gladue* [1999] · *R v Ipeelee* [2012] · No causation requirement")
-    st.markdown(dobar(P[20]),unsafe_allow_html=True)
-    secs={}
-    for f in GF: secs.setdefault(f["sec"],[]).append(f)
-    cg=set()
-    c1,c2=st.columns(2)
-    for sec,facs in secs.items():
-        t=c1 if facs[0]["col"]==1 else c2
-        with t:
-            st.markdown(f"<div class='sh'>{sec}</div>",unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════════════════════
+    # Gladue tab — checklist-of-factors layout (Mark 8 redesign)
+    # All widget keys (gl_{factor_id}) preserved via the GF iteration.
+    # ════════════════════════════════════════════════════════════════════════
+
+    # ── Tab title + caption ───────────────────────────────────────────────
+    st.markdown(
+        "<h2 style='font-family:Fraunces,Georgia,serif;font-size:1.7rem;"
+        "font-weight:500;letter-spacing:-0.005em;margin:0 0 4px 0'>"
+        "Gladue factors</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.92rem;color:#707070;margin-bottom:18px;line-height:1.6;"
+        "max-width:880px'>"
+        "Eighteen factor categories drawn from the Gladue / Ipeelee jurisprudence, "
+        "organised into the seven thematic areas a Gladue report is expected "
+        "to address. Check each factor for which the case file contains "
+        "substantive evidence — not whether the offender belongs to a "
+        "population to which the factor commonly applies."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Doctrinal anchor strip ────────────────────────────────────────────
+    st.markdown(
+        "<div style='background:#EAF3DE;border:1px solid #B8CDA8;"
+        "border-left:3px solid #3B6D11;border-radius:6px;padding:10px 18px;"
+        "margin-bottom:22px;font-size:0.84rem;color:#3A3A3A;line-height:1.55;"
+        "max-width:880px'>"
+        "<strong style='color:#3B6D11;font-weight:600'>Binding authorities.</strong> "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Gladue</em> [1999] 1 SCR 688 · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Ipeelee</em> [2012] 1 SCR 433 · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Anderson</em> [2014] 2 SCR 167. "
+        "No causation requirement — discernible nexus per "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>Ipeelee</em> §83 "
+        "is sufficient to engage the framework."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Build factor groupings + run checkboxes ────────────────────────────
+    # Group factors by section, preserving original col-assignment
+    secs = {}
+    for f in GF:
+        secs.setdefault(f["sec"], []).append(f)
+
+    # ── Pre-render: collect checkbox state in a hidden two-column wrapper ──
+    # We use Streamlit's native columns + checkboxes (preserves keys), but
+    # wrap each section in styled markdown shells around the native widgets.
+    cg = set()
+    c1, c2 = st.columns(2)
+
+    # Section type → stripe colour map.
+    # Five mitigation-green sections, one mitigation-green (Cultural), one
+    # distortion-blue (Systemic justice — feeds N12/N14 distortion correction).
+    _section_color = {
+        "Intergenerational trauma":   "#3B6D11",   # mitigation
+        "Cultural disconnection":     "#3B6D11",   # mitigation
+        "Childhood & family":         "#3B6D11",   # mitigation
+        "Socioeconomic":              "#3B6D11",   # mitigation
+        "Substance & mental health":  "#3B6D11",   # mitigation
+        "Systemic justice":           "#185FA5",   # distortion
+    }
+    # Subtitle helper — small descriptive line under each section title
+    _section_subtitle = {
+        "Intergenerational trauma":   "Direct and inherited trauma — residential schools, Sixties Scoop, displacement.",
+        "Cultural disconnection":     "Severance from language, identity, and ceremonial practice.",
+        "Childhood & family":         "Family violence and care-system involvement during formative years.",
+        "Socioeconomic":              "Poverty, housing, employment, and educational deprivation.",
+        "Substance & mental health":  "Trauma-linked substance use and untreated mental health conditions.",
+        "Systemic justice":           "Over-policing and prior procedural failures — feed distortion-corrections.",
+    }
+    # Aggregate node-tag for each section
+    _section_nodes = {
+        "Intergenerational trauma":   "→ N10",
+        "Cultural disconnection":     "→ N11 · N12",
+        "Childhood & family":         "→ N10",
+        "Socioeconomic":              "→ N10 · N18",
+        "Substance & mental health":  "→ N10 · N18",
+        "Systemic justice":           "→ N12 · N14",
+    }
+
+    def _gladue_section_open(stripe_color, title, subtitle, node_tags, count_str, has_checked):
+        """Render the opening div of a section card, before native checkboxes."""
+        count_bg = "#EAF3DE" if has_checked else "#FFFFFF"
+        count_color = "#3B6D11" if has_checked else "#707070"
+        count_border = "#B8CDA8" if has_checked else "#E0DDD6"
+        return (
+            f"<div style='background:#FFFFFF;border:1px solid #E0DDD6;"
+            f"border-radius:8px;overflow:hidden;margin-bottom:18px'>"
+            f"<div style='display:grid;grid-template-columns:4px 1fr auto;"
+            f"gap:14px;align-items:center;padding:12px 16px;"
+            f"background:#FBFAF7;border-bottom:1px solid #EFEDE7'>"
+            f"<div style='width:4px;height:28px;border-radius:2px;align-self:center;"
+            f"background:{stripe_color}'></div>"
+            f"<div style='font-family:Fraunces,Georgia,serif;font-size:0.98rem;"
+            f"font-weight:500;color:#1A1A1A'>{title}"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+            f"color:#9E9E9E;margin-left:6px;font-weight:500'>{node_tags}</span></div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+            f"padding:2px 8px;border-radius:9px;background:{count_bg};"
+            f"color:{count_color};border:1px solid {count_border};font-weight:500'>"
+            f"{count_str}</div>"
+            f"</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.78rem;color:#707070;padding:8px 16px 4px 16px;"
+            f"line-height:1.5'>{subtitle}</div>"
+            f"<div style='padding:4px 12px 8px 12px'>"
+        )
+
+    # Track per-section render order matching original col= assignment
+    # Original: col=1 → c1 left column, col=2 → c2 right column
+    _ordered_sections = []
+    _seen = set()
+    for f in GF:
+        if f["sec"] not in _seen:
+            _seen.add(f["sec"])
+            _ordered_sections.append((f["sec"], f["col"]))
+
+    for sec, col in _ordered_sections:
+        facs = secs[sec]
+        target_col = c1 if col == 1 else c2
+
+        # Pre-compute count
+        n_checked = sum(1 for f in facs if f["id"] in st.session_state.gladue_checked)
+        n_total = len(facs)
+        count_str = f"{n_checked} of {n_total}"
+        has_checked = n_checked > 0
+
+        with target_col:
+            # Open the section card (HTML)
+            st.markdown(
+                _gladue_section_open(
+                    _section_color.get(sec, "#3B6D11"),
+                    sec,
+                    _section_subtitle.get(sec, ""),
+                    _section_nodes.get(sec, ""),
+                    count_str,
+                    has_checked,
+                ),
+                unsafe_allow_html=True,
+            )
+
+            # Native Streamlit checkboxes — preserves keys, state, behaviour.
+            # The label includes node weight so the user sees contribution inline.
             for f in facs:
-                if st.checkbox(f"{f['l']} · N{f['n']} (+{f['w']*100:.0f}%)",key=f"gl_{f['id']}",
-                               value=f["id"] in st.session_state.gladue_checked): cg.add(f["id"])
-    st.session_state.gladue_checked=cg
-    run_inf();P=st.session_state.posteriors
-    st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
+                lbl = f"{f['l']} · N{f['n']} (+{f['w']*100:.0f}%)"
+                if st.checkbox(
+                    lbl,
+                    key=f"gl_{f['id']}",
+                    value=f["id"] in st.session_state.gladue_checked,
+                ):
+                    cg.add(f["id"])
+
+            # Close the section card
+            st.markdown("</div></div>", unsafe_allow_html=True)
+
+    # Update session state with current checked set
+    st.session_state.gladue_checked = cg
+    run_inf()
+    P = st.session_state.posteriors
+    bl, _bc, _bg = rb(P[20])
+
+    # ── Coverage summary panel ────────────────────────────────────────────
+    n_total_factors = len(GF)
+    n_checked_factors = len(cg)
+    n_total_sections = len(_ordered_sections)
+    n_active_sections = sum(
+        1 for sec, _col in _ordered_sections
+        if any(f["id"] in cg for f in secs[sec])
+    )
+
+    st.markdown("<div style='margin:24px 0 12px 0'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='background:#FBFAF7;border:1px solid #E0DDD6;"
+        f"border-radius:8px;padding:18px 22px;margin-bottom:20px'>"
+        f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.15rem;"
+        f"font-weight:500;color:#1A1A1A;margin-bottom:6px'>"
+        f"<span style='font-family:JetBrains Mono,monospace;font-weight:600;"
+        f"color:#3B6D11'>{n_checked_factors}</span> of "
+        f"<span style='font-family:JetBrains Mono,monospace;font-weight:600;"
+        f"color:#3B6D11'>{n_total_factors}</span> factors checked across "
+        f"<span style='font-family:JetBrains Mono,monospace;font-weight:600;"
+        f"color:#3B6D11'>{n_active_sections}</span> of "
+        f"<span style='font-family:JetBrains Mono,monospace;font-weight:600;"
+        f"color:#3B6D11'>{n_total_sections}</span> sections</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.86rem;color:#707070;line-height:1.5'>"
+        f"The <em style='color:#1A1A1A'>Anderson</em> [2014] §22 obligation is to address all "
+        f"reasonably available factors in a Gladue report. Coverage above 6 "
+        f"factors with breadth across multiple thematic areas is a typical "
+        f"threshold for a well-supported analysis."
+        f"</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Slim live-result strip ────────────────────────────────────────────
+    _band_text = {
+        "Low": f"belief largely resolved · {n_checked_factors} Gladue factor(s) active",
+        "Moderate": f"belief partially resolved · {n_checked_factors} factor(s)",
+        "Elevated": f"belief shifted · {n_checked_factors} factor(s)",
+        "High": f"strong indication · {n_checked_factors} factor(s)",
+    }.get(bl, bl)
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:1fr auto;"
+        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+        f"border-radius:8px;padding:11px 18px;margin-bottom:24px'>"
+        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+        f"Node 20 · DO designation risk"
+        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+        f"</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.86rem;color:#2F5C2A'>{bl} — {_band_text}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Ipeelee §60 reminder at bottom ────────────────────────────────────
+    st.markdown(
+        "<div style='padding:14px 20px;background:#FBFAF7;border:1px solid #E0DDD6;"
+        "border-radius:8px;font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.84rem;color:#707070;line-height:1.55;max-width:880px'>"
+        "<strong style='color:#1A1A1A;font-style:normal'>Reminder — Ipeelee §60.</strong> "
+        "Counsel and the court should consider the unique systemic and "
+        "background factors which may have played a role in bringing the "
+        "offender before the court, even where they fall outside the "
+        "categories tabulated above. The list is illustrative, not "
+        "exhaustive — case-specific factors that do not map cleanly to a "
+        "checkbox here may still be entered in <em style='color:#3A3A3A'>Intake (Chat)</em> "
+        "for narrative inclusion in the report."
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 # ── T4: Morris/Ellis SCE ──────────────────────────────────────────────────────
 with TABS[6]:
-    st.markdown("### Morris / Ellis SCE")
-    st.caption("*R v Morris* 2021 ONCA 680 · *R v Ellis* 2022 BCCA 278")
-    st.markdown(dobar(P[20]),unsafe_allow_html=True)
-    c1,c2=st.columns([1,2])
-    with c1:
-        fw=st.radio("Framework",["Morris","Ellis","Both"],
-                    index=["morris","ellis","both"].index((st.session_state.scefw or "morris").lower() if (st.session_state.scefw or "morris").lower() in ["morris","ellis","both"] else 0),key="scefw_r")
-        st.session_state.scefw=fw.lower()
-    with c2:
-        if (st.session_state.scefw or "morris").lower()!="ellis":
-            st.markdown("**Morris para 97 — connection gate**")
-            conn=st.select_slider("Connection strength",["none","absent","weak","moderate","strong","direct"],
-                                  value=st.session_state.conn,key="conn_s")
-            st.session_state.conn=conn
-            st.info(f"Weight multiplier: **{cmult():.0%}** — {'full belief revision obligation' if cmult()>=.9 else 'partial' if cmult()>=.6 else 'limited'}")
-        if (st.session_state.scefw or "morris").lower()!="morris":
-            nx_v=st.selectbox("Ellis deprivation nexus",["none","peripheral","relevant","central"],
-                              index=["none","peripheral","relevant","central"].index(st.session_state.enex),key="enex_s")
-            st.session_state.enex=nx_v
-    st.markdown("---")
-    # ── SCE factors as continuous sliders (0 = absent, 1 = fully established) ──
-    ss={}
+    # ════════════════════════════════════════════════════════════════════════
+    # SCE tab — full visual rebuild (Mark 8)
+    # All session-state keys preserved: scefw, conn, enex, sce_values, sce_checked
+    # All widget keys preserved: scefw_r, conn_s, enex_s, sce_{factor_id}
+    # cmult() / emult() / SF filter logic byte-for-byte preserved.
+    # ════════════════════════════════════════════════════════════════════════
+
+    # ── Tab title + caption ───────────────────────────────────────────────
+    st.markdown(
+        "<h2 style='font-family:Fraunces,Georgia,serif;font-size:1.7rem;"
+        "font-weight:500;letter-spacing:-0.005em;margin:0 0 4px 0'>"
+        "Social context evidence</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.92rem;color:#707070;margin-bottom:18px;line-height:1.6;"
+        "max-width:880px'>"
+        "<em>Morris</em> and <em>Ellis</em> are the two principal frameworks "
+        "Canadian courts use to weigh systemic and structural factors in "
+        "sentencing. Each factor is entered as a continuous evidentiary "
+        "strength (0 = absent, 1 = fully established), allowing partial-"
+        "evidence cases to register without the binary on/off limitation "
+        "of a checklist."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Doctrinal anchor strip ────────────────────────────────────────────
+    st.markdown(
+        "<div style='background:#E8F0FA;border:1px solid #C7D3E5;"
+        "border-left:3px solid #185FA5;border-radius:6px;padding:10px 18px;"
+        "margin-bottom:22px;font-size:0.84rem;color:#3A3A3A;line-height:1.55;"
+        "max-width:880px'>"
+        "<strong style='color:#185FA5;font-weight:600'>Binding authorities.</strong> "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Morris</em> 2021 ONCA 680 — racialized offenders · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Ellis</em> 2022 BCCA 278 — non-racialized deprivation · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Anderson</em> [2014] 2 SCR 167 — IRCA framework. "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>Morris</em> para 97 establishes the connection-gate "
+        "doctrine governing how systemic context is weighted into sentencing."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Command panel: framework selector + connection gate ───────────────
+    cmd_c1, cmd_c2 = st.columns([1, 2])
+    with cmd_c1:
+        st.markdown(
+            "<div style='font-size:0.66rem;text-transform:uppercase;"
+            "letter-spacing:0.14em;color:#707070;font-weight:600;"
+            "margin-bottom:6px'>Active framework</div>",
+            unsafe_allow_html=True,
+        )
+        fw = st.radio(
+            "Framework",
+            ["Morris", "Ellis", "Both"],
+            index=["morris","ellis","both"].index(
+                (st.session_state.scefw or "morris").lower()
+                if (st.session_state.scefw or "morris").lower() in ["morris","ellis","both"]
+                else 0
+            ),
+            key="scefw_r",
+            label_visibility="collapsed",
+            horizontal=True,
+        )
+        st.session_state.scefw = fw.lower()
+        # Framework-specific descriptive caption
+        _fw_caption = {
+            "morris": "<em>Morris</em> applies to racialized offenders.",
+            "ellis":  "<em>Ellis</em> applies to non-racialized offenders with deprivation backgrounds.",
+            "both":   "<strong style='font-style:normal;color:#1A1A1A'>Both</strong> shows all sections — useful for full-record review and audit preparation.",
+        }.get(st.session_state.scefw, "")
+        st.markdown(
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.78rem;color:#707070;margin-top:6px;line-height:1.55'>"
+            f"{_fw_caption}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with cmd_c2:
+        if (st.session_state.scefw or "morris").lower() != "ellis":
+            st.markdown(
+                "<div style='display:flex;justify-content:space-between;"
+                "align-items:baseline;margin-bottom:6px'>"
+                "<span style='font-size:0.86rem;font-weight:600;color:#1A1A1A'>"
+                "Morris para 97 — connection gate</span>"
+                "<span style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.78rem;color:#707070'>R v Morris §97</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            conn = st.select_slider(
+                "Connection strength",
+                ["none","absent","weak","moderate","strong","direct"],
+                value=st.session_state.conn, key="conn_s",
+                label_visibility="collapsed",
+            )
+            st.session_state.conn = conn
+            _cm = cmult()
+            _cm_desc = ("full belief revision obligation" if _cm >= .9
+                        else "partial belief revision obligation" if _cm >= .6
+                        else "limited belief revision obligation")
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;"
+                f"align-items:baseline;font-size:0.84rem;margin-top:6px'>"
+                f"<span style='color:#707070'>Weight multiplier (cmult)</span>"
+                f"<span style='font-family:JetBrains Mono,monospace;"
+                f"font-weight:600;color:#185FA5'>{_cm:.2f}</span></div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#707070;margin-top:2px;line-height:1.5'>"
+                f"{_cm_desc}. SCE corrections weighted at {_cm*100:.0f}% of established evidentiary strength."
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+        if (st.session_state.scefw or "morris").lower() != "morris":
+            st.markdown(
+                "<div style='display:flex;justify-content:space-between;"
+                "align-items:baseline;margin-top:14px;margin-bottom:6px'>"
+                "<span style='font-size:0.86rem;font-weight:600;color:#1A1A1A'>"
+                "Ellis deprivation nexus</span>"
+                "<span style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.78rem;color:#707070'>R v Ellis 2022 BCCA 278</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            nx_v = st.selectbox(
+                "Ellis deprivation nexus",
+                ["none","peripheral","relevant","central"],
+                index=["none","peripheral","relevant","central"].index(st.session_state.enex),
+                key="enex_s",
+                label_visibility="collapsed",
+            )
+            st.session_state.enex = nx_v
+            _em = emult()
+            st.markdown(
+                f"<div style='display:flex;justify-content:space-between;"
+                f"align-items:baseline;font-size:0.84rem;margin-top:6px'>"
+                f"<span style='color:#707070'>Weight multiplier (emult)</span>"
+                f"<span style='font-family:JetBrains Mono,monospace;"
+                f"font-weight:600;color:#534AB7'>{_em:.2f}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+    # Visual separator
+    st.markdown(
+        "<div style='border-top:1px solid #EFEDE7;margin:24px 0 18px 0'></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── SCE factors as continuous sliders (logic preserved) ──────────────
+    ss = {}
     for f in SF:
-        fw2=(st.session_state.scefw or "morris").lower()
-        show=fw2=="both" or (fw2=="morris" and f["fw"]!="ellis") or (fw2=="ellis" and f["fw"]!="morris")
-        if show: ss.setdefault(f["sec"],[]).append(f)
+        fw2 = (st.session_state.scefw or "morris").lower()
+        show = (fw2 == "both"
+                or (fw2 == "morris" and f["fw"] != "ellis")
+                or (fw2 == "ellis" and f["fw"] != "morris"))
+        if show:
+            ss.setdefault(f["sec"], []).append(f)
 
     sce_vals = dict(st.session_state.get("sce_values", {}))
-    st.markdown("<div style='font-size:12px;color:#888;margin-bottom:8px'>"
-                "Slide each factor from <b>0</b> (absent) → <b>0.5</b> (partial) → <b>1.0</b> (fully established). "
-                "Partial values encode degrees of evidentiary strength.</div>",
-                unsafe_allow_html=True)
 
-    cols3=st.columns(3)
-    for i,(sec,facs) in enumerate(ss.items()):
-        with cols3[i%3]:
-            st.markdown(f"<div class='sh'>{sec}</div>",unsafe_allow_html=True)
+    # Section type header — explains the slider register
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.86rem;color:#707070;margin-bottom:14px;line-height:1.55;"
+        "max-width:880px'>"
+        "Slide each factor from "
+        "<strong style='font-style:normal;color:#1A1A1A'>0</strong> (absent) → "
+        "<strong style='font-style:normal;color:#1A1A1A'>0.5</strong> (partial) → "
+        "<strong style='font-style:normal;color:#1A1A1A'>1.0</strong> (fully established). "
+        "Partial values encode degrees of evidentiary strength rather than binary presence."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Section → framework mapping for visual treatment
+    def _sce_section_framework(facs):
+        """Return (framework_key, stripe_color, pill_label, pill_color)."""
+        # Determine which framework owns this section based on its factors
+        fws = set(f["fw"] for f in facs)
+        if fws == {"ellis"}:
+            return ("ellis", "#534AB7", "ELLIS", "#ECE9F7")
+        elif fws == {"both"}:
+            return ("both", "#993C1D", "BOTH", "#FAEEDA")
+        else:
+            return ("morris", "#185FA5", "MORRIS", "#E8F0FA")
+
+    # Render section cards in a 3-column grid (preserves cols3 layout intent)
+    cols3 = st.columns(3)
+    for i, (sec, facs) in enumerate(ss.items()):
+        fw_key, stripe_col, pill_label, pill_bg = _sce_section_framework(facs)
+        # Pill text colour matches stripe
+        pill_text_col = stripe_col
+        # Pill border
+        pill_border = {"#185FA5": "#C7D3E5", "#534AB7": "#C9C0E5", "#993C1D": "#E5CC95"}.get(stripe_col, "#E0DDD6")
+
+        with cols3[i % 3]:
+            # Section header card
+            st.markdown(
+                f"<div style='background:#FFFFFF;border:1px solid #E0DDD6;"
+                f"border-radius:8px;overflow:hidden;margin-bottom:16px'>"
+                f"<div style='display:grid;grid-template-columns:4px 1fr auto;"
+                f"gap:12px;align-items:center;padding:12px 14px;"
+                f"background:#FBFAF7;border-bottom:1px solid #EFEDE7'>"
+                f"<div style='width:4px;height:24px;border-radius:2px;align-self:center;"
+                f"background:{stripe_col}'></div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:0.95rem;"
+                f"font-weight:500;color:#1A1A1A'>{sec}</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.66rem;"
+                f"padding:2px 8px;border-radius:9px;background:{pill_bg};"
+                f"color:{pill_text_col};border:1px solid {pill_border};font-weight:600;"
+                f"letter-spacing:0.04em'>{pill_label}</div>"
+                f"</div>"
+                f"<div style='padding:8px 14px 6px 14px'>",
+                unsafe_allow_html=True,
+            )
+
+            # Render the native sliders inside the card body
             for f in facs:
-                fw2=(st.session_state.scefw or "morris").lower()
-                col_sce = "#185FA5" if fw2=="morris" or f["fw"]=="both" else "#534AB7"
+                fw2 = (st.session_state.scefw or "morris").lower()
+                col_sce = "#185FA5" if (fw2 == "morris" or f["fw"] == "both") else "#534AB7"
                 cur_val = sce_vals.get(f["id"], 0.0)
                 v = st.slider(
                     f"{f['l']} · N{f['n']}",
@@ -1118,45 +1816,308 @@ with TABS[6]:
                 )
                 sce_vals[f["id"]] = v
                 if v > 0.01:
-                    pct = f"+{v*f['w']*cmult()*100:.1f}pp" if fw2!="ellis" else f"+{v*f['w']*emult()*100:.1f}pp"
+                    pct = (f"+{v*f['w']*cmult()*100:.1f}pp"
+                           if fw2 != "ellis"
+                           else f"+{v*f['w']*emult()*100:.1f}pp")
+                    # Tier dots — 5-segment progress indicator
+                    n_dots = min(int(v*5)+1, 5)
+                    dots_html = "".join([
+                        f"<span style='display:inline-block;width:5px;height:5px;"
+                        f"border-radius:50%;background:{col_sce};margin-right:3px'></span>"
+                        if d < n_dots else
+                        f"<span style='display:inline-block;width:5px;height:5px;"
+                        f"border-radius:50%;background:#E0DDD6;margin-right:3px'></span>"
+                        for d in range(5)
+                    ])
                     st.markdown(
-                        f"<div style='font-size:.68rem;color:{col_sce};"
-                        f"margin-top:-12px;margin-bottom:4px'>"
-                        f"{'●' * min(int(v*5)+1, 5)} {v*100:.0f}% established · {pct}</div>",
-                        unsafe_allow_html=True
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"align-items:baseline;margin-top:-12px;margin-bottom:8px;"
+                        f"font-size:0.74rem'>"
+                        f"<span style='color:#707070;font-family:Fraunces,serif;"
+                        f"font-style:italic'>"
+                        f"<span style='display:inline-block;vertical-align:middle;"
+                        f"margin-right:6px'>{dots_html}</span>"
+                        f"{v*100:.0f}% established</span>"
+                        f"<span style='font-family:JetBrains Mono,monospace;"
+                        f"color:{col_sce};font-weight:500'>{pct}</span></div>",
+                        unsafe_allow_html=True,
                     )
+
+            # Close section card
+            st.markdown("</div></div>", unsafe_allow_html=True)
 
     st.session_state.sce_values = sce_vals
     # Keep sce_checked in sync for backwards compatibility with QBism diagnostics
-    st.session_state.sce_checked = {fid for fid,v in sce_vals.items() if v > 0.01}
-    run_inf();P=st.session_state.posteriors
-    st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
+    st.session_state.sce_checked = {fid for fid, v in sce_vals.items() if v > 0.01}
+    run_inf()
+    P = st.session_state.posteriors
+    bl_sce, _bc_sce, _bg_sce = rb(P[20])
+
+    # ── Slim live-result strip ───────────────────────────────────────────
+    _n_active = len(st.session_state.sce_checked)
+    _band_text_sce = {
+        "Low":      f"belief largely resolved · {_n_active} factor(s) active",
+        "Moderate": f"belief partially resolved · {_n_active} factor(s)",
+        "Elevated": f"belief shifted · {_n_active} factor(s)",
+        "High":     f"strong indication · {_n_active} factor(s)",
+    }.get(bl_sce, bl_sce)
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:1fr auto;"
+        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+        f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
+        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+        f"Node 20 · DO designation risk"
+        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+        f"</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.86rem;color:#2F5C2A'>{bl_sce} — {_band_text_sce}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 # ── T5: Evidence review ───────────────────────────────────────────────────────
 with TABS[7]:
-    st.markdown("### Evidence review")
-    st.caption("Fine-tune node probabilities. Values auto-set from Case Profile and Gladue/SCE tabs.")
-    st.markdown(dobar(P[20]),unsafe_allow_html=True)
-    ev_nodes=[n for n in NODE_META if NODE_META[n]["ev"]]
-    rn=[n for n in ev_nodes if NODE_META[n]["type"]=="risk"]
-    dn=[n for n in ev_nodes if NODE_META[n]["type"]!="risk"]
-    man=dict(st.session_state.manual_ev)
-    c1,c2=st.columns(2)
-    def slgrp(nodes,cont,label):
-        with cont:
-            st.markdown(f"##### {label}")
+    # ════════════════════════════════════════════════════════════════════════
+    # Risk & Distortions tab — visual rebuild (Mark 8)
+    # All logic preserved: ev_nodes filter, manual_ev override detection,
+    # reset-to-priors button. Widget keys preserved (ev_{nid}, rst).
+    # ════════════════════════════════════════════════════════════════════════
+
+    # ── Tab title + caption ───────────────────────────────────────────────
+    st.markdown(
+        "<h2 style='font-family:Fraunces,Georgia,serif;font-size:1.7rem;"
+        "font-weight:500;letter-spacing:-0.005em;margin:0 0 4px 0'>"
+        "Risk &amp; distortions</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.92rem;color:#707070;margin-bottom:18px;line-height:1.6;"
+        "max-width:880px'>"
+        "Per-node manual override surface. Each slider sets P(High) for an "
+        "evidence-bearing node directly, bypassing the upstream computations "
+        "from Profile, Gladue, SCE, Criminal Record, and Documents. Use "
+        "sparingly and only with case-specific evidence that warrants "
+        "departure from the network's automatic calculations."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Scope disclaimer (override register explanation) ──────────────────
+    st.markdown(
+        "<div style='background:#E8F0FA;border:1px solid #C7D3E5;"
+        "border-left:3px solid #185FA5;border-radius:6px;padding:12px 18px;"
+        "margin-bottom:22px;font-size:0.86rem;color:#3A3A3A;line-height:1.55;"
+        "max-width:880px'>"
+        "<strong style='color:#185FA5;font-weight:600'>Override surface.</strong> "
+        "Adjustments here override values computed from other tabs. The network "
+        "preserves the original computed value alongside the manual override. "
+        "Document the reasoning for any override in the Report tab — the audit "
+        "log captures both the original computed value and your adjustment. "
+        "Reset all overrides to defaults below."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Compute override status from current state ────────────────────────
+    ev_nodes = [n for n in NODE_META if NODE_META[n]["ev"]]
+    n_overrides = sum(
+        1 for nid in ev_nodes
+        if abs(P.get(nid, .5) - st.session_state.profile_ev.get(nid, .5)) > .015
+        and nid in st.session_state.manual_ev
+    )
+    n_total = len(ev_nodes)
+
+    # ── Override status + reset action ────────────────────────────────────
+    osc1, osc2 = st.columns([3, 1])
+    with osc1:
+        _override_color = "#BA7517" if n_overrides > 0 else "#3B6D11"
+        st.markdown(
+            f"<div style='background:#FFFFFF;border:1px solid #E0DDD6;"
+            f"border-radius:8px;padding:14px 20px;margin-bottom:20px'>"
+            f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.1rem;"
+            f"font-weight:500;color:#1A1A1A;margin-bottom:4px'>"
+            f"<span style='font-family:JetBrains Mono,monospace;font-weight:600;"
+            f"color:{_override_color}'>{n_overrides}</span> of "
+            f"<span style='font-family:JetBrains Mono,monospace;font-weight:600;"
+            f"color:#1A1A1A'>{n_total}</span> nodes manually overridden</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.84rem;color:#707070;line-height:1.5'>"
+            f"Manual overrides represent your judgment that the case file "
+            f"warrants a departure from the value computed from Profile / "
+            f"Gladue / SCE inputs."
+            f"</div></div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Build the slider rows by node type ────────────────────────────────
+    # Group evidence-bearing nodes by NODE_META type
+    nodes_by_type = {}
+    for nid in ev_nodes:
+        t = NODE_META[nid]["type"]
+        nodes_by_type.setdefault(t, []).append(nid)
+
+    # Section metadata for each node type
+    _type_meta = {
+        "risk":       ("#A32D2D", "Risk factor nodes",         "Pattern-of-violence and clinical risk indicators."),
+        "distortion": ("#185FA5", "Systemic distortion nodes", "Procedural and structural distortions affecting the record."),
+        "mitigation": ("#3B6D11", "Mitigation",                "Background factors weighing against designation."),
+        "dual":       ("#534AB7", "Dual (risk + mitigation)",  "Factors that elevate risk if untreated, mitigate if accommodated."),
+        "special":    ("#0F6E56", "Causal detector",           "Specialised detector nodes — pattern-recognition rather than direct evidence."),
+    }
+    # Render order: risk first, then distortion (the largest two), then mitigation/dual/special
+    _render_order = ["risk", "distortion", "mitigation", "dual", "special"]
+
+    man = dict(st.session_state.manual_ev)
+
+    # Render the section cards in 2 columns
+    rsc_c1, rsc_c2 = st.columns(2)
+
+    def _render_section(nodes, type_key, container):
+        """Render a section card with coloured stripe + native sliders inside."""
+        if not nodes:
+            return
+        stripe_col, title, subtitle = _type_meta.get(type_key, ("#707070", type_key, ""))
+        # Build the node-tag string
+        nodes_tag = " · ".join(f"N{n}" for n in nodes)
+        # Count overrides in this section
+        n_section_overrides = sum(
+            1 for nid in nodes
+            if abs(P.get(nid, .5) - st.session_state.profile_ev.get(nid, .5)) > .015
+            and nid in st.session_state.manual_ev
+        )
+        with container:
+            st.markdown(
+                f"<div style='background:#FFFFFF;border:1px solid #E0DDD6;"
+                f"border-radius:8px;overflow:hidden;margin-bottom:18px'>"
+                f"<div style='display:grid;grid-template-columns:4px 1fr auto;"
+                f"gap:14px;align-items:center;padding:12px 16px;"
+                f"background:#FBFAF7;border-bottom:1px solid #EFEDE7'>"
+                f"<div style='width:4px;height:28px;border-radius:2px;align-self:center;"
+                f"background:{stripe_col}'></div>"
+                f"<div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:0.98rem;"
+                f"font-weight:500;color:#1A1A1A'>{title}"
+                f"<span style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+                f"color:#9E9E9E;margin-left:6px;font-weight:500'>{nodes_tag}</span></div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#707070;margin-top:2px'>{subtitle}</div>"
+                f"</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+                f"padding:2px 8px;border-radius:9px;"
+                f"background:{'#FAEEDA' if n_section_overrides else '#FFFFFF'};"
+                f"color:{'#BA7517' if n_section_overrides else '#707070'};"
+                f"border:1px solid {'#E5CC95' if n_section_overrides else '#E0DDD6'};"
+                f"font-weight:500'>"
+                f"{n_section_overrides} override{'s' if n_section_overrides != 1 else ''}</div>"
+                f"</div>"
+                f"<div style='padding:12px 16px 6px 16px'>",
+                unsafe_allow_html=True,
+            )
+
+            # Native sliders inside the card
             for nid in nodes:
-                m=NODE_META[nid];col=TC[m["type"]];cur=P.get(nid,.5)
-                v=st.slider(f"N{nid} — {m['short']}",0.0,1.0,float(cur),.01,key=f"ev_{nid}",format="%.2f",label_visibility="visible")
-                st.markdown(f"<div style='font-size:.72rem;color:{col};margin-top:-12px;margin-bottom:6px'>P(High) = {v*100:.0f}%</div>",unsafe_allow_html=True)
-                if abs(v-st.session_state.profile_ev.get(nid,.5))>.015: man[nid]=v
-    slgrp(rn,c1,"Risk factor nodes"); slgrp(dn,c2,"Systemic distortion nodes")
-    st.session_state.manual_ev=man
-    if st.button("Reset all to priors",key="rst"):
-        for k in ["profile_ev","manual_ev","doc_adj"]: st.session_state[k]={}
-        st.session_state.gladue_checked=set();st.session_state.sce_checked=set()
-        st.rerun()
+                m = NODE_META[nid]
+                col = TC[m["type"]]
+                cur = P.get(nid, .5)
+                upstream = st.session_state.profile_ev.get(nid, .5)
+                is_overridden = (abs(cur - upstream) > .015 and nid in st.session_state.manual_ev)
+
+                v = st.slider(
+                    f"N{nid} — {m['short']}",
+                    0.0, 1.0, float(cur), .01,
+                    key=f"ev_{nid}", format="%.2f",
+                    label_visibility="visible"
+                )
+
+                # Inline value/state display below slider
+                if is_overridden:
+                    delta = v - upstream
+                    delta_str = f"+{delta:.2f}" if delta > 0 else f"{delta:.2f}"
+                    st.markdown(
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"align-items:baseline;margin-top:-12px;margin-bottom:8px;"
+                        f"font-size:0.74rem'>"
+                        f"<span style='color:#BA7517;font-family:Fraunces,serif;"
+                        f"font-style:italic'>"
+                        f"<strong style='font-style:normal;font-family:JetBrains Mono,monospace;"
+                        f"font-size:0.66rem;text-transform:uppercase;letter-spacing:0.06em;"
+                        f"background:#FAEEDA;color:#BA7517;border:1px solid #E5CC95;"
+                        f"padding:1px 6px;border-radius:8px;margin-right:6px'>override</strong>"
+                        f"upstream: {upstream*100:.0f}%</span>"
+                        f"<span style='font-family:JetBrains Mono,monospace;"
+                        f"color:{col};font-weight:600'>P(High) = {v*100:.0f}% · "
+                        f"<span style='color:#BA7517'>{delta_str}</span></span></div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<div style='display:flex;justify-content:space-between;"
+                        f"align-items:baseline;margin-top:-12px;margin-bottom:8px;"
+                        f"font-size:0.74rem'>"
+                        f"<span style='color:#707070;font-family:Fraunces,serif;"
+                        f"font-style:italic'>upstream value</span>"
+                        f"<span style='font-family:JetBrains Mono,monospace;"
+                        f"color:{col};font-weight:500'>P(High) = {v*100:.0f}%</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # Preserved logic: detect manual overrides
+                if abs(v - st.session_state.profile_ev.get(nid, .5)) > .015:
+                    man[nid] = v
+
+            st.markdown("</div></div>", unsafe_allow_html=True)
+
+    # Render order — distribute sections across 2 columns
+    # Risk + Mitigation in left column, Distortion + Dual + Special in right
+    _left_types  = ["risk", "mitigation"]
+    _right_types = ["distortion", "dual", "special"]
+
+    for tk in _left_types:
+        _render_section(nodes_by_type.get(tk, []), tk, rsc_c1)
+    for tk in _right_types:
+        _render_section(nodes_by_type.get(tk, []), tk, rsc_c2)
+
+    # Save manual_ev state
+    st.session_state.manual_ev = man
+
+    # ── Reset action ──────────────────────────────────────────────────────
+    rsc1, rsc2, rsc3 = st.columns([1, 1, 2])
+    with rsc1:
+        if st.button("Reset all to priors", key="rst"):
+            for k in ["profile_ev", "manual_ev", "doc_adj"]:
+                st.session_state[k] = {}
+            st.session_state.gladue_checked = set()
+            st.session_state.sce_checked = set()
+            st.rerun()
+
+    # ── Run inference + slim live-result strip ────────────────────────────
     run_inf()
+    P = st.session_state.posteriors
+    bl_rd, _bc_rd, _bg_rd = rb(P[20])
+    _band_text_rd = {
+        "Low":      f"belief largely resolved · {n_overrides} manual override(s)",
+        "Moderate": f"belief partially resolved · {n_overrides} override(s)",
+        "Elevated": f"belief shifted · {n_overrides} override(s)",
+        "High":     f"strong indication · {n_overrides} override(s)",
+    }.get(bl_rd, bl_rd)
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:1fr auto;"
+        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+        f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
+        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+        f"Node 20 · DO designation risk"
+        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+        f"</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.86rem;color:#2F5C2A'>{bl_rd} — {_band_text_rd}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 # ── T6: Inference ─────────────────────────────────────────────────────────────
 with TABS[8]:
@@ -2729,11 +3690,53 @@ function copyText() {
 
 # ── T9: Criminal record ──────────────────────────────────────────────────────
 with TABS[4]:
-    st.markdown("### Criminal record")
-    st.caption("Enter prior convictions and calibrate each entry's evidentiary weight against doctrinal distortion nodes.")
-    st.markdown(dobar(P[20], show_cr=True),unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════════════════════
+    # Criminal Record tab — full visual rebuild (Mark 8)
+    # All substantive logic preserved byte-for-byte: pN extractions,
+    # CORR_REFS, factor math, SERIOUSNESS dict, _get_seriousness,
+    # _detect_escalation, _cr_feed_nodes, calibrated-weight calculation,
+    # entry dict, document-assisted calibration, per-conviction analysis.
+    # All widget keys preserved.
+    # ════════════════════════════════════════════════════════════════════════
 
-    # ── Distortion node weights ───────────────────────────────────────────────
+    # ── Tab title + caption ───────────────────────────────────────────────
+    st.markdown(
+        "<h2 style='font-family:Fraunces,Georgia,serif;font-size:1.7rem;"
+        "font-weight:500;letter-spacing:-0.005em;margin:0 0 4px 0'>"
+        "Criminal record</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.92rem;color:#707070;margin-bottom:18px;line-height:1.6;"
+        "max-width:880px'>"
+        "Each conviction enters the network as a weighted contribution to "
+        "the pattern-of-violence and dynamic-risk nodes. Convictions can "
+        "carry reduced evidentiary weight where doctrinal distortions are "
+        "active — <em>Antic</em> [2017] for coercive pleas, <em>Ewert</em> [2018] "
+        "for tool invalidity, <em>Le</em> [2019] for over-policing, <em>Morris</em> "
+        "2021 for Gladue misapplication."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Doctrinal anchor strip ────────────────────────────────────────────
+    st.markdown(
+        "<div style='background:#E8F0FA;border:1px solid #C7D3E5;"
+        "border-left:3px solid #185FA5;border-radius:6px;padding:10px 18px;"
+        "margin-bottom:22px;font-size:0.84rem;color:#3A3A3A;line-height:1.55;"
+        "max-width:880px'>"
+        "<strong style='color:#185FA5;font-weight:600'>Binding authorities.</strong> "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Boutilier</em> [2017] SCC 64 — pattern analysis · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Antic</em> [2017] SCC 27 — bail/coercive plea · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>R v Le</em> [2019] SCC 34 — over-policing · "
+        "<em style='font-family:Fraunces,serif;font-style:italic;color:#1A1A1A'>Ewert v Canada</em> [2018] SCC 30 — actuarial validity. "
+        "Each conviction is calibrated against the live distortion-node posteriors before contributing to N2/N18."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Distortion node weights (preserved) ───────────────────────────────
     # Used to compute calibrated reliability for each conviction
     pN7  = st.session_state.posteriors.get(7,  0.15)   # bail-denial cascade
     pN6  = st.session_state.posteriors.get(6,  0.15)   # ineffective counsel
@@ -2742,7 +3745,7 @@ with TABS[4]:
     pN15 = st.session_state.posteriors.get(15, 0.40)   # temporal distortion / age
     pN12 = st.session_state.posteriors.get(12, 0.15)   # Gladue misapplication
 
-    # ── Authoritative correction references ───────────────────────────────────
+    # ── Authoritative correction references (preserved) ───────────────────
     CORR_REFS = {
         "bail":    ("Bail-denial cascade (N7)", "A32D2D", "R v Antic [2017] SCC 27; Tolppanen Report (2018)"),
         "counsel": ("Ineffective counsel (N6)", "185FA5", "R v GDB [2000] 1 SCR 520; Strickland doctrine"),
@@ -2758,8 +3761,7 @@ with TABS[4]:
     police_factor  = float(np.clip(1.0 - 0.35*pN14,            0.50, 1.0))
     gladue_factor  = float(np.clip(1.0 - 0.30*pN12,            0.55, 1.0))
 
-    # ── Feed function defined first so button callbacks can call it ─────────────
-    # ── Offence seriousness tiers (Boutilier pattern analysis) ───────────────────
+    # ── Offence seriousness tiers (Boutilier pattern analysis, preserved) ──
     SERIOUSNESS = {
         # Tier 1 — catastrophic (weight 1.00)
         "murder":1.00,"manslaughter":1.00,"attempted murder":1.00,
@@ -2922,16 +3924,37 @@ with TABS[4]:
 
         st.session_state.doc_adj = {k: float(np.clip(v, -0.4, 0.4)) for k,v in cr_adj.items()}
 
-    # ── UI: Add conviction ─────────────────────────────────────────────────────
-    st.markdown("#### Add conviction")
-    with st.expander("➕ Enter a new conviction", expanded=len(st.session_state.criminal_record)==0):
-        ca1, ca2 = st.columns([2,1])
+    # ── UI: Add conviction (form-card with subsection structure) ──────────
+    st.markdown(
+        "<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+        "font-weight:500;color:#1A1A1A;margin:14px 0 8px 0'>Add conviction</div>",
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("➕ Enter a new conviction",
+                     expanded=len(st.session_state.criminal_record) == 0):
+
+        # ─── Subsection: Identification ───────────────────────────────────
+        st.markdown(
+            "<div style='font-size:0.66rem;text-transform:uppercase;"
+            "letter-spacing:0.14em;color:#707070;font-weight:600;"
+            "margin:4px 0 12px 0'>Identification</div>",
+            unsafe_allow_html=True,
+        )
+        ca1, ca2 = st.columns([2, 1])
         with ca1:
-            cr_offence   = st.text_input("Offence description", placeholder="e.g. Aggravated assault s.268 CC", key="cr_off")
-            cr_court     = st.text_input("Court", placeholder="e.g. Ontario Superior Court of Justice", key="cr_court")
+            cr_offence = st.text_input(
+                "Offence description",
+                placeholder="e.g. Aggravated assault s.268 CC", key="cr_off")
+            cr_court = st.text_input(
+                "Court",
+                placeholder="e.g. Ontario Superior Court of Justice", key="cr_court")
         with ca2:
-            cr_year      = st.number_input("Year of conviction", min_value=1950, max_value=2026, value=2015, step=1, key="cr_year")
-            cr_sentence_type = st.selectbox("Sentence type",
+            cr_year = st.number_input(
+                "Year of conviction",
+                min_value=1950, max_value=2026, value=2015, step=1, key="cr_year")
+            cr_sentence_type = st.selectbox(
+                "Sentence type",
                 ["Federal custody (2+ years)",
                  "Provincial custody (< 2 years)",
                  "Conditional sentence order (CSO)",
@@ -2942,67 +3965,77 @@ with TABS[4]:
                  "Other / unknown"],
                 key="cr_sent_type",
                 help="Sentence type informs evidentiary weight — CSO/probation/discharge outcomes suggest original court assessed limited dangerousness per Boutilier [2017] SCC 64")
-            cr_sentence_detail = st.text_input("Sentence detail", placeholder="e.g. 18 months, 2 years probation", key="cr_sent_detail")
-        cr_jurisdiction = st.selectbox("Province / jurisdiction",
+            cr_sentence_detail = st.text_input(
+                "Sentence detail",
+                placeholder="e.g. 18 months, 2 years probation", key="cr_sent_detail")
+        cr_jurisdiction = st.selectbox(
+            "Province / jurisdiction",
             ["ON","BC","AB","QC","SK","MB","NS","NB","NL","PE","YT","NT","NU","Federal"],
             key="cr_jur")
 
+        # ─── Subsection: Sentence outcome ─────────────────────────────────
+        st.markdown(
+            "<div style='font-size:0.66rem;text-transform:uppercase;"
+            "letter-spacing:0.14em;color:#707070;font-weight:600;"
+            "margin:18px 0 12px 0;padding-top:14px;"
+            "border-top:1px solid #EFEDE7'>Sentence outcome &amp; severity</div>",
+            unsafe_allow_html=True,
+        )
         cf1, cf2 = st.columns(2)
         with cf1:
             cr_seriousness = st.select_slider(
                 "Offence seriousness tier",
-                options=["Minor (0.15–0.25)","Moderate (0.35–0.50)","Significant (0.55–0.75)",
-                         "Serious violent (0.80–0.85)","Catastrophic (1.00)"],
+                options=["Minor (0.15–0.25)",
+                         "Moderate (0.35–0.50)",
+                         "Significant (0.55–0.75)",
+                         "Serious violent (0.80–0.85)",
+                         "Catastrophic (1.00)"],
                 value="Significant (0.55–0.75)", key="cr_seriousness",
-                help="Boutilier [2017] SCC 64 — offence seriousness determines base weight in pattern analysis"
-            )
+                help="Boutilier [2017] SCC 64 — offence seriousness determines base weight in pattern analysis")
         with cf2:
-            st.markdown("<div style='font-size:.82rem;font-weight:600;margin-bottom:4px'>Aggravating factors (s.718.2 CC)</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='font-size:0.86rem;font-weight:600;color:#3A3A3A;"
+                "margin-bottom:4px'>Aggravating factors "
+                "<span style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+                "color:#9E9E9E;font-weight:500'>s.718.2 CC</span></div>",
+                unsafe_allow_html=True,
+            )
             cr_gang = st.checkbox(
                 "Gang / organized crime context",
                 value=False, key="cr_gang",
-                help="s.718.2(a)(iv) CC; R v Lacasse [2015] SCC 64 — gang context aggravating. Consider Le [2019] SCC 34 — may also reflect over-policing"
-            )
+                help="s.718.2(a)(iv) CC; R v Lacasse [2015] SCC 64 — gang context aggravating. Consider Le [2019] SCC 34 — may also reflect over-policing")
             cr_weapon = st.checkbox(
                 "Weapon / firearm used or present",
                 value=False, key="cr_weapon",
-                help="s.718.2(a)(i) CC; s.85, s.95 CC — statutory aggravating. Firearm offences carry significant weight in Boutilier pattern analysis"
-            )
+                help="s.718.2(a)(i) CC; s.85, s.95 CC — statutory aggravating. Firearm offences carry significant weight in Boutilier pattern analysis")
             cr_child_victim = st.checkbox(
                 "Child victim (under 18)",
                 value=False, key="cr_child",
-                help="s.718.2(a)(ii.1) CC — statutory aggravating. Significant for sexual offence profile (N4 / Static-99R)"
-            )
+                help="s.718.2(a)(ii.1) CC — statutory aggravating. Significant for sexual offence profile (N4 / Static-99R)")
             cr_trust = st.checkbox(
                 "Position of trust / authority",
                 value=False, key="cr_trust",
-                help="s.718.2(a)(iii) CC — statutory aggravating. Relevant to predatory behaviour under Boutilier and PCL-R (N3)"
-            )
+                help="s.718.2(a)(iii) CC — statutory aggravating. Relevant to predatory behaviour under Boutilier and PCL-R (N3)")
             cr_domestic = st.checkbox(
                 "Domestic / intimate partner violence",
                 value=False, key="cr_domestic",
-                help="s.718.2(a)(ii) CC — abuse of spouse or common-law partner is explicit statutory aggravating factor. Also relevant to Gladue analysis where colonialism intersects with family violence"
-            )
+                help="s.718.2(a)(ii) CC — abuse of spouse or common-law partner is explicit statutory aggravating factor. Also relevant to Gladue analysis where colonialism intersects with family violence")
             cr_hate = st.checkbox(
                 "Hate crime / bias motivation",
                 value=False, key="cr_hate",
-                help="s.718.2(a)(i) CC — evidence that offence motivated by bias, prejudice or hate based on race, national/ethnic origin, language, colour, religion, sex, age, disability, sexual orientation is statutory aggravating"
-            )
+                help="s.718.2(a)(i) CC — evidence that offence motivated by bias, prejudice or hate based on race, national/ethnic origin, language, colour, religion, sex, age, disability, sexual orientation is statutory aggravating")
             cr_terrorism = st.checkbox(
                 "Terrorism-related offence",
                 value=False, key="cr_terrorism",
-                help="s.718.2(a)(i) CC; Criminal Code Part II.1 — terrorism offences carry the highest seriousness weighting and directly engage the DO regime's public protection rationale under s.753"
-            )
+                help="s.718.2(a)(i) CC; Criminal Code Part II.1 — terrorism offences carry the highest seriousness weighting and directly engage the DO regime's public protection rationale under s.753")
             cr_vulnerable = st.checkbox(
                 "Vulnerable victim (age, disability, circumstance)",
                 value=False, key="cr_vulnerable",
-                help="s.718.2(a)(i) CC — evidence that victim was vulnerable due to age, disability or other circumstances of vulnerability is statutory aggravating. Distinct from child victim — covers elderly, cognitively impaired, or situationally vulnerable adults"
-            )
+                help="s.718.2(a)(i) CC — evidence that victim was vulnerable due to age, disability or other circumstances of vulnerability is statutory aggravating. Distinct from child victim — covers elderly, cognitively impaired, or situationally vulnerable adults")
             cr_drugs = st.checkbox(
                 "Drug / substance trafficking (serious narcotics)",
                 value=False, key="cr_drugs",
-                help="s.718.2(a)(i) CC; Controlled Drugs and Substances Act — nature and quantity of substance trafficked is aggravating. Fentanyl, carfentanil, and methamphetamine carry greater weight than cannabis. R v Parranto [2021] SCC 46 — fentanyl trafficking attracts elevated tariff"
-            )
+                help="s.718.2(a)(i) CC; Controlled Drugs and Substances Act — nature and quantity of substance trafficked is aggravating. Fentanyl, carfentanil, and methamphetamine carry greater weight than cannabis. R v Parranto [2021] SCC 46 — fentanyl trafficking attracts elevated tariff")
             cr_drugs_type = ""
             if cr_drugs:
                 cr_drugs_type = st.selectbox(
@@ -3014,11 +4047,25 @@ with TABS[4]:
                      "Cannabis (pre-legalization)",
                      "Other controlled substance"],
                     key="cr_drugs_type",
-                    help="R v Parranto [2021] SCC 46 — fentanyl and carfentanil occupy the highest tier given lethal risk at microgram quantities"
-                )
+                    help="R v Parranto [2021] SCC 46 — fentanyl and carfentanil occupy the highest tier given lethal risk at microgram quantities")
 
-        st.markdown("**Doctrinal reliability adjustments for this conviction**")
-        st.caption("Each slider reflects the degree to which this specific conviction's evidentiary weight should be discounted based on the distortion nodes currently active in PARVIS.")
+        # ─── Subsection: Doctrinal reliability adjustments (tinted panel) ──
+        st.markdown(
+            "<div style='background:#E8F0FA;border:1px solid #C7D3E5;"
+            "border-left:4px solid #185FA5;border-radius:8px;"
+            "padding:18px 20px;margin-top:20px'>"
+            "<div style='font-family:Fraunces,Georgia,serif;font-size:0.95rem;"
+            "font-weight:500;color:#185FA5;margin-bottom:4px'>"
+            "Doctrinal reliability adjustments for this conviction</div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.78rem;color:#3A3A3A;line-height:1.55'>"
+            "Each slider reflects the degree to which this specific conviction's "
+            "evidentiary weight should be discounted based on the distortion "
+            "nodes currently active in the network. Defaults pre-populated from "
+            "live posteriors; override per-case as warranted."
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
 
         ca3, ca4 = st.columns(2)
         with ca3:
@@ -3076,10 +4123,14 @@ with TABS[4]:
 
         col_ret = "#3B6D11" if pct_ret >= 70 else "#BA7517" if pct_ret >= 40 else "#A32D2D"
         st.markdown(
-            f"<div style='background:#f4f6fa;border-radius:10px;padding:.7rem 1rem;margin-top:.5rem'>"
-            f"<span style='font-size:.78rem;color:#666'>Calibrated evidentiary weight: </span>"
-            f"<span style='font-size:1.4rem;font-weight:700;color:{col_ret}'>{pct_ret:.0f}%</span>"
-            f"<span style='font-size:.75rem;color:#888;margin-left:.5rem'>of nominal weight retained</span></div>",
+            f"<div style='background:#FBFAF7;border:1px solid #E0DDD6;"
+            f"border-radius:6px;padding:.7rem 1rem;margin-top:.8rem'>"
+            f"<span style='font-size:.78rem;color:#707070'>Calibrated evidentiary weight: </span>"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:1.4rem;"
+            f"font-weight:600;color:{col_ret}'>{pct_ret:.0f}%</span>"
+            f"<span style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.78rem;color:#707070;margin-left:.5rem'>"
+            f"of nominal weight retained</span></div>",
             unsafe_allow_html=True)
 
         if st.button("Add to record", key="cr_add"):
@@ -3132,12 +4183,22 @@ with TABS[4]:
             else:
                 st.warning("Please enter an offence description.")
 
-    # ── Feed function: compute aggregate N2 and distortion signals ────────────
     # ── Record table ──────────────────────────────────────────────────────────
     rec = st.session_state.criminal_record
     if rec:
-        st.markdown("---")
-        st.markdown(f"#### Calibrated criminal record — {len(rec)} conviction(s)")
+        st.markdown(
+            "<div style='border-top:1px solid #EFEDE7;margin:24px 0 18px 0'></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+            f"font-weight:500;color:#1A1A1A;margin-bottom:14px'>"
+            f"Calibrated criminal record "
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.78rem;"
+            f"color:#707070;font-weight:500;margin-left:6px'>"
+            f"{len(rec)} conviction{'s' if len(rec)!=1 else ''}</span></div>",
+            unsafe_allow_html=True,
+        )
 
         # Summary stats
         all_cal = [e["cal_weight"] for e in rec]
@@ -3156,16 +4217,22 @@ with TABS[4]:
         sc3.metric("Record reliability tier",
             "High" if mean_cal>=0.7 else "Moderate" if mean_cal>=0.4 else "Low")
         sc4.markdown(
-            f"<div style='font-size:.75rem;color:#888;margin-bottom:2px'>Pattern (Boutilier)</div>"
-            f"<div style='font-size:1.1rem;font-weight:700;color:{esc_col}'>{esc_pat.title()}</div>",
+            f"<div style='font-size:.72rem;color:#707070;margin-bottom:2px;"
+            f"text-transform:uppercase;letter-spacing:0.06em;font-weight:600'>"
+            f"Pattern (Boutilier)</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:1.1rem;"
+            f"font-weight:600;color:{esc_col}'>{esc_pat.title()}</div>",
             unsafe_allow_html=True)
 
         if esc_data.get("note"):
             esc_icon = "⚠️" if esc_pat=="escalating" else "✅" if esc_pat in ("de-escalating","desistance") else "ℹ️"
             st.markdown(
-                f"<div style='background:#f8f8f8;border-left:3px solid {esc_col};"
-                f"border-radius:6px;padding:.5rem .9rem;font-size:.82rem;color:#444;margin-bottom:.6rem'>"
-                f"{esc_icon} <b>Pattern analysis:</b> {esc_data['note']}</div>",
+                f"<div style='background:#FBFAF7;border:1px solid #E0DDD6;"
+                f"border-left:3px solid {esc_col};border-radius:6px;"
+                f"padding:.6rem 1rem;font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.84rem;color:#3A3A3A;margin:.6rem 0;line-height:1.55'>"
+                f"{esc_icon} <strong style='font-style:normal;color:#1A1A1A'>"
+                f"Pattern analysis:</strong> {esc_data['note']}</div>",
                 unsafe_allow_html=True)
 
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
@@ -3209,13 +4276,13 @@ with TABS[4]:
                 doc_badge = "<span style='background:#E8F5E9;color:#2E7D32;border-radius:4px;padding:2px 8px;font-size:.70rem;margin-left:6px'>📎 Document linked</span>"
 
             flag_html = "  ".join([
-                f"<span style='background:#f0f0f0;border-radius:4px;padding:2px 8px;font-size:.72rem;color:#555'>{f}</span>"
+                f"<span style='background:#F7F5F2;border-radius:4px;padding:2px 8px;font-size:.72rem;color:#3A3A3A'>{f}</span>"
                 for f in flags
-            ]) if flags else "<span style='color:#aaa;font-size:.72rem'>No distortion flags</span>"
+            ]) if flags else "<span style='color:#9E9E9E;font-size:.72rem;font-family:Fraunces,serif;font-style:italic'>No distortion flags</span>"
 
             # Pre-build badge strings to avoid nested quote conflicts in f-string
             ser_label   = e.get("seriousness_label", "—")
-            ser_badge   = f"<span style='background:#f0f0f0;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#555'>⚖️ {ser_label}</span>"
+            ser_badge   = f"<span style='background:#F7F5F2;border-radius:4px;padding:1px 7px;font-size:.68rem;color:#3A3A3A;font-family:JetBrains Mono,monospace'>⚖️ {ser_label}</span>"
             gang_badge  = (
                 "<span style='background:#FDECEA;border-radius:4px;padding:1px 7px;"
                 "font-size:.68rem;color:#A32D2D;margin-left:4px'>🔴 Gang context</span>"
@@ -3228,18 +4295,25 @@ with TABS[4]:
             yr_str      = str(e["year"])
 
             st.markdown(
-                f"<div style='border:1px solid #ddd;border-left:4px solid {col_c};"
-                f"border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.4rem;background:#fafafa'>"
+                f"<div style='border:1px solid #E0DDD6;border-left:4px solid {col_c};"
+                f"border-radius:8px;padding:.85rem 1.1rem;margin-bottom:.4rem;"
+                f"background:#FFFFFF'>"
                 f"<div style='display:flex;justify-content:space-between;align-items:flex-start'>"
                 f"<div>"
-                f"<div style='font-weight:600;font-size:.95rem'>{offence_str}{doc_badge}</div>"
-                f"<div style='font-size:.78rem;color:#777;margin-top:2px'>{yr_str} · {court_str} · {jur_str} · {sent_str}</div>"
-                f"<div style='margin-top:4px'>{ser_badge}{gang_badge}</div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"font-size:1.0rem;color:#1A1A1A'>{offence_str}{doc_badge}</div>"
+                f"<div style='font-size:.78rem;color:#707070;margin-top:3px'>"
+                f"<span style='font-family:JetBrains Mono,monospace;font-weight:600'>{yr_str}</span>"
+                f" · {court_str} · {jur_str} · {sent_str}</div>"
+                f"<div style='margin-top:6px'>{ser_badge}{gang_badge}</div>"
                 f"</div>"
                 f"<div style='text-align:right;min-width:90px'>"
-                f"<div style='font-size:1.35rem;font-weight:700;color:{col_c}'>{cal_pct:.0f}%</div>"
-                f"<div style='font-size:.7rem;color:#aaa'>calibrated weight</div>"
-                f"<div style='font-size:.7rem;color:#ccc;text-decoration:line-through'>{raw_pct:.0f}% raw</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.35rem;"
+                f"font-weight:600;color:{col_c}'>{cal_pct:.0f}%</div>"
+                f"<div style='font-size:.7rem;color:#9E9E9E;font-family:Fraunces,serif;"
+                f"font-style:italic'>calibrated weight</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:.7rem;"
+                f"color:#C7C2B8;text-decoration:line-through'>{raw_pct:.0f}% raw</div>"
                 f"</div></div>"
                 f"<div style='margin-top:.55rem'>{flag_html}</div>"
                 f"</div>",
@@ -3344,29 +4418,41 @@ with TABS[4]:
                             overall = doc_recs.get("overall","REVIEW")
                             ov_col = {"KEEP":"#3B6D11","REDUCE":"#BA7517","SIGNIFICANT REDUCTION":"#A32D2D"}.get(overall,"#555")
                             st.markdown(
-                                f"<div style='background:#f8f8f8;border-radius:8px;padding:.6rem .9rem;margin-top:.4rem'>"
-                                f"<span style='font-size:.75rem;color:#666'>Document: <b>{doc_name}</b> · Recommendation: </span>"
-                                f"<span style='font-weight:700;color:{ov_col}'>{overall}</span></div>",
+                                f"<div style='background:#FBFAF7;border:1px solid #E0DDD6;"
+                                f"border-radius:6px;padding:.6rem .9rem;margin-top:.4rem'>"
+                                f"<span style='font-size:.78rem;color:#707070'>"
+                                f"Document: <strong style='color:#1A1A1A'>{doc_name}</strong> · "
+                                f"Recommendation: </span>"
+                                f"<span style='font-family:JetBrains Mono,monospace;"
+                                f"font-weight:600;color:{ov_col}'>{overall}</span></div>",
                                 unsafe_allow_html=True)
 
                             # Show suggested adjustments as read-only comparison
-                            st.markdown("<div style='font-size:.75rem;color:#888;margin-top:.5rem;margin-bottom:.2rem'>Suggested adjustments from document analysis:</div>", unsafe_allow_html=True)
+                            st.markdown(
+                                "<div style='font-size:.66rem;text-transform:uppercase;"
+                                "letter-spacing:0.14em;color:#707070;font-weight:600;"
+                                "margin-top:.5rem;margin-bottom:.4rem'>"
+                                "Suggested adjustments from document analysis</div>",
+                                unsafe_allow_html=True)
                             adj_cols = st.columns(6)
                             adj_labels = ["bail","counsel","gladue","police","mm","time"]
                             adj_names  = ["Bail","Counsel","Gladue","Police","MM","Time"]
                             for ci,(field,lbl) in enumerate(zip(adj_labels, adj_names)):
                                 key_name = f"{field}_adj"
+                                cur_val = e["adj"].get("ewert" if field=="counsel" else field, 0.0)
                                 if key_name in doc_recs:
-                                    cur_val = e["adj"].get(field, 0.0)
                                     sug_val = doc_recs[key_name]
                                     diff = sug_val - cur_val
                                     diff_str = f"+{diff:.2f}" if diff>0 else f"{diff:.2f}"
                                     diff_col = "#A32D2D" if diff>0.05 else "#3B6D11" if diff<-0.05 else "#888"
                                     adj_cols[ci].markdown(
                                         f"<div style='text-align:center'>"
-                                        f"<div style='font-size:.68rem;color:#888'>{lbl}</div>"
-                                        f"<div style='font-size:.95rem;font-weight:600'>{sug_val:.2f}</div>"
-                                        f"<div style='font-size:.65rem;color:{diff_col}'>{diff_str}</div>"
+                                        f"<div style='font-size:.68rem;color:#707070;"
+                                        f"text-transform:uppercase;letter-spacing:0.06em'>{lbl}</div>"
+                                        f"<div style='font-family:JetBrains Mono,monospace;"
+                                        f"font-size:.95rem;font-weight:600'>{sug_val:.2f}</div>"
+                                        f"<div style='font-family:JetBrains Mono,monospace;"
+                                        f"font-size:.65rem;color:{diff_col}'>{diff_str}</div>"
                                         f"</div>", unsafe_allow_html=True)
 
                             # One-click apply
@@ -3374,8 +4460,12 @@ with TABS[4]:
                                 for field in adj_labels:
                                     key_name = f"{field}_adj"
                                     if key_name in doc_recs:
-                                        # Map counsel → counsel key in adj dict
-                                        adj_key = "bail" if field=="bail" else                                                   "ewert" if field=="counsel" else                                                   "gladue" if field=="gladue" else                                                   "police" if field=="police" else                                                   "mm" if field=="mm" else "time"
+                                        # Map counsel → ewert key in adj dict
+                                        adj_key = "bail" if field=="bail" else \
+                                                  "ewert" if field=="counsel" else \
+                                                  "gladue" if field=="gladue" else \
+                                                  "police" if field=="police" else \
+                                                  "mm" if field=="mm" else "time"
                                         st.session_state.criminal_record[i]["adj"][adj_key] = doc_recs[key_name]
                                 # Recompute calibrated weight for this entry
                                 adj_u = st.session_state.criminal_record[i]["adj"]
@@ -3397,9 +4487,24 @@ with TABS[4]:
                     st.rerun()
 
         # ── Document analysis integration ──────────────────────────────────────
-        st.markdown("---")
-        st.markdown("#### 📂 Document-assisted calibration")
-        st.caption("Upload prior transcripts, SCE reports, or sentencing decisions. The document analyser will recommend weight adjustments for the record above.")
+        st.markdown(
+            "<div style='border-top:1px solid #EFEDE7;margin:24px 0 18px 0'></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+            "font-weight:500;color:#1A1A1A;margin-bottom:6px'>"
+            "📂 Document-assisted calibration</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.84rem;color:#707070;margin-bottom:14px;line-height:1.55'>"
+            "Upload prior transcripts, SCE reports, or sentencing decisions. "
+            "The document analyser will recommend weight adjustments for the record above."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
         cr_up = st.file_uploader("Upload document for record analysis",
             type=["txt","pdf","docx"], key="cr_doc_up")
@@ -3443,17 +4548,27 @@ with TABS[4]:
                         st.error(f"Analysis error: {ex}")
 
         if "cr_analysis" in st.session_state and st.session_state.cr_analysis:
-            st.markdown("**Document analysis — calibration recommendations:**")
+            st.markdown(
+                "<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                "color:#1A1A1A;margin-top:14px;margin-bottom:6px'>"
+                "Document analysis — calibration recommendations</div>",
+                unsafe_allow_html=True,
+            )
             st.markdown(f"<div class='at'>{st.session_state.cr_analysis}</div>",
                 unsafe_allow_html=True)
             st.caption("Review recommendations above and adjust individual conviction sliders accordingly. Changes update Node 20 in real time.")
 
-        # ── Doctrinal footnotes ────────────────────────────────────────────────
+        # ── Doctrinal footnotes (restyled to match design language) ───────
         with st.expander("📚 Doctrinal basis for record calibration"):
             for key,(name,col,cite) in CORR_REFS.items():
-                st.markdown(f"<div style='border-left:3px solid #{col};padding:.4rem .8rem;"
-                    f"margin-bottom:.5rem'><b style='color:#{col}'>{name}</b><br>"
-                    f"<span style='font-size:.8rem;color:#555'>{cite}</span></div>",
+                st.markdown(
+                    f"<div style='border-left:3px solid #{col};padding:.5rem .9rem;"
+                    f"margin-bottom:.6rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                    f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                    f"color:#{col};font-size:0.92rem'>{name}</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.82rem;color:#3A3A3A;margin-top:2px'>{cite}</div>"
+                    f"</div>",
                     unsafe_allow_html=True)
 
         if st.button("Clear entire record", key="cr_clear"):
@@ -3463,10 +4578,43 @@ with TABS[4]:
             st.rerun()
 
     else:
-        st.info("No convictions entered yet. Use the form above to add prior criminal record entries.")
+        st.markdown(
+            "<div style='background:#FBFAF7;border:1px dashed #E0DDD6;"
+            "border-radius:8px;padding:24px;text-align:center;"
+            "font-family:Fraunces,serif;font-style:italic;font-size:0.92rem;"
+            "color:#707070;line-height:1.5'>"
+            "No convictions entered yet. Use the form above to add prior "
+            "criminal record entries."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
-    run_inf(); P=st.session_state.posteriors
-    st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
+    # ── Run inference + slim live-result strip ────────────────────────────────
+    run_inf()
+    P = st.session_state.posteriors
+    bl_cr, _bc_cr, _bg_cr = rb(P[20])
+    _n_conv = len(st.session_state.criminal_record)
+    _band_text_cr = {
+        "Low":      f"belief largely resolved · {_n_conv} conviction(s) on record",
+        "Moderate": f"belief partially resolved · {_n_conv} conviction(s)",
+        "Elevated": f"belief shifted · {_n_conv} conviction(s)",
+        "High":     f"strong indication · {_n_conv} conviction(s)",
+    }.get(bl_cr, bl_cr)
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:1fr auto;"
+        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+        f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
+        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+        f"Node 20 · DO designation risk"
+        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+        f"</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.86rem;color:#2F5C2A'>{bl_cr} — {_band_text_cr}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ── T10: Scenarios — side-by-side comparison ─────────────────────────────────

@@ -1,0 +1,15 @@
+# PARVIS Mark 8 — Streamlit theme configuration
+#
+# Primary accent colour shifted from Streamlit default red to ink-black to
+# match the workbench-but-quieter design language used across the input tabs.
+# This affects: slider tracks/thumbs, active-tab underline, primary buttons,
+# progress bars, and link colours throughout the app.
+#
+# To revert: delete this file or change primaryColor back to "#FF4B4B".
+
+[theme]
+primaryColor = "#1A1A1A"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FBFAF7"
+textColor = "#1A1A1A"
+font = "sans serif"
