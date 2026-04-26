@@ -145,9 +145,304 @@ Now write the plain language report. Use the following section headings exactly:
 
 # ── Diagnostic thresholds ─────────────────────────────────────────────────────
 PRIOR_CONTAMINATION_THRESHOLD = 0.65  # Nodes above this are suspect if no evidence entered
-ORDER_EFFECT_DELTA = 0.08             # Meaningful shift in posterior from reordering
+ORDER_EFFECT_DELTA = 0.08             # Meaningful shift in posterior from reordering (existing check)
 BELIEF_STASIS_THRESHOLD = 0.05        # SCE entered but posterior shifts < this → belief stasis
 COLLAPSE_RISK_NODES = {5, 12, 17}     # Nodes whose High state signals actuarial hardening
+
+# ── Extension thresholds (research-prototype values — illustrative anchors) ───
+# These thresholds are illustrative for the Appendix Q diagnostic framework.
+# They are not defended scholarship; they would require expert elicitation
+# through the SHELF/Cooke methodology described in Appendix O §O.3 before
+# operational deployment. See module docstring for the diagnostic-not-decision
+# scope per Appendix Q §AQ.4.
+ORDER_STABILITY_DELTA = 0.05          # Max ΔN20 across permutations above which
+                                      # a sequence is considered order-unstable
+CONTEXTUALITY_GATE_DELTA = 0.05       # Max ΔN20 across connection-gate strengths
+                                      # (Morris para 97) above which the case is
+                                      # contextually sensitive to that doctrinal call
+
+# Connection-gate weight schedule used by the contextuality check.
+# Mirrors app.py:cmult() — kept in sync deliberately (see Appendix Q §AQ.3.3.5.4).
+_CONN_GATE_WEIGHTS = {
+    "none":     0.00,
+    "absent":   0.00,
+    "weak":     0.30,
+    "moderate": 0.65,
+    "strong":   0.90,
+    "direct":   1.00,
+}
+
+
+def check_order_stability(
+    engine,
+    base_evidence: Dict[str, int],
+    full_evidence_payload: Optional[Dict] = None,
+) -> Dict:
+    """
+    Test whether the current evidence configuration is order-stable.
+
+    Per Appendix Q §AQ.3.3.5.3 (non-commutativity), a classical Bayesian
+    network treats evidence as order-independent: M₁M₂ρ = M₂M₁ρ. The
+    diagnostic question is whether the current case posterior would
+    materially shift if the order in which evidence were applied were
+    reversed.
+
+    pgmpy's Variable Elimination is itself commutative — the same evidence
+    set produces the same posterior regardless of insertion order. This
+    function does NOT contradict that mathematical fact. Instead, it tests
+    the doctrinally-motivated permutation: what if only the *risk-typed*
+    evidence had been entered (i.e. record reviewed before SCE), versus
+    only the *contextual* evidence (i.e. SCE reviewed before record)?
+    The legal-reasoning question Appendix Q raises is whether these
+    partial states would converge on the current full-evidence state.
+
+    Returns a dict with:
+      - flagged: bool
+      - severity: "high" | "moderate" | "none"
+      - delta:  max |ΔN20| observed across the tested permutations
+      - permutations: list of {label, posterior, delta} entries
+      - note: one-paragraph diagnostic observation (not a recommendation)
+
+    Reference: Appendix Q §AQ.3.3.5.3; Busemeyer & Bruza (2012) §6.
+    """
+    # Lazy import to avoid module-load circular dependency with model.py
+    from model import query_do_risk
+
+    # Establish the baseline — current full evidence
+    base_results = query_do_risk(engine, base_evidence)
+    base_n20 = float(base_results.get(20, 0.5))
+
+    # Doctrinal classes of evidence (node-string keys in BN evidence dict)
+    risk_keys    = {"2", "3", "4", "18"}      # violent history, PCL-R, Static-99R, dynamic risk
+    distort_keys = {"5", "6", "12", "14", "17"}  # invalid tools, ineffective counsel, Gladue
+                                                   # misapp, intergenerational trauma, collider
+
+    permutations = []
+
+    # Permutation A — risk-only frame (record reviewed first, SCE not yet weighted)
+    risk_only = {k: v for k, v in base_evidence.items() if k in risk_keys}
+    if risk_only:
+        try:
+            r = query_do_risk(engine, risk_only)
+            n20_r = float(r.get(20, 0.5))
+            permutations.append({
+                "label": "Risk-typed evidence only (pre-SCE frame)",
+                "posterior": round(n20_r, 4),
+                "delta": round(abs(n20_r - base_n20), 4),
+            })
+        except Exception:
+            pass
+
+    # Permutation B — distortion/contextual-only frame (SCE reviewed first)
+    distort_only = {k: v for k, v in base_evidence.items() if k in distort_keys}
+    if distort_only:
+        try:
+            r = query_do_risk(engine, distort_only)
+            n20_d = float(r.get(20, 0.5))
+            permutations.append({
+                "label": "Distortion-typed evidence only (SCE-first frame)",
+                "posterior": round(n20_d, 4),
+                "delta": round(abs(n20_d - base_n20), 4),
+            })
+        except Exception:
+            pass
+
+    # Permutation C — empty evidence (network priors only)
+    try:
+        r = query_do_risk(engine, {})
+        n20_e = float(r.get(20, 0.5))
+        permutations.append({
+            "label": "Network priors (no evidence applied)",
+            "posterior": round(n20_e, 4),
+            "delta": round(abs(n20_e - base_n20), 4),
+        })
+    except Exception:
+        pass
+
+    if not permutations:
+        return {
+            "flagged": False,
+            "severity": "none",
+            "delta": 0.0,
+            "permutations": [],
+            "note": (
+                "Order-stability check could not be run — insufficient evidence "
+                "to construct meaningful permutations."
+            ),
+        }
+
+    max_delta = max(p["delta"] for p in permutations)
+    flagged = max_delta > ORDER_STABILITY_DELTA
+
+    if max_delta > 2 * ORDER_STABILITY_DELTA:
+        severity = "high"
+    elif flagged:
+        severity = "moderate"
+    else:
+        severity = "none"
+
+    if flagged:
+        note = (
+            f"Posterior under reordered evidence frames diverges by up to "
+            f"{max_delta:.1%} from the current state. Per Appendix Q §AQ.3.3.5.3, "
+            f"this is the signature of non-commutativity in a doctrinally-motivated "
+            f"reordering: the conclusion the inference engine would reach under a "
+            f"risk-first or SCE-first review of the same record differs from the "
+            f"conclusion it reaches when all evidence is jointly applied. "
+            f"Threshold: {ORDER_STABILITY_DELTA:.0%} (research-prototype, illustrative)."
+        )
+    else:
+        note = (
+            f"Posterior under reordered evidence frames stays within "
+            f"{max_delta:.1%} of the current state (threshold "
+            f"{ORDER_STABILITY_DELTA:.0%}). Per Appendix Q §AQ.3.3.5.3, "
+            f"the current configuration does not exhibit the signature "
+            f"of non-commutativity associated with risk-first or SCE-first "
+            f"narrative anchoring. This is an observation about the "
+            f"present state, not a guarantee of order-independence "
+            f"under different evidence."
+        )
+
+    return {
+        "flagged": flagged,
+        "severity": severity,
+        "delta": round(max_delta, 4),
+        "permutations": permutations,
+        "note": note,
+    }
+
+
+def check_connection_gate_contextuality(
+    engine,
+    base_evidence: Dict[str, int],
+    sce_corrections_by_gate: Optional[Dict[str, Dict[int, float]]] = None,
+) -> Dict:
+    """
+    Test whether the current case posterior is contextually sensitive to
+    the Morris para 97 connection-gate doctrinal call.
+
+    Per Appendix Q §AQ.3.3.5.4 (contextuality, Kochen-Specker), the same
+    evidentiary record may carry different probative weight under different
+    interpretive frames. The PARVIS connection-gate doctrine — under
+    which the strength of the systemic-context-to-offence connection
+    modulates the weight of SCE corrections (cmult) — is one such frame.
+
+    This function tests whether the posterior shifts meaningfully when
+    the connection gate is set to "weak", "moderate", or "strong",
+    holding all other evidence constant. A meaningful shift indicates
+    the case is contextually sensitive: the doctrinal call about
+    connection strength is consequential to the inference outcome.
+    A null shift indicates the case is contextually robust.
+
+    Parameters
+    ----------
+    engine : pgmpy VariableElimination
+    base_evidence : current BN evidence dict
+    sce_corrections_by_gate : optional dict of pre-computed SCE evidence
+        modulated by each gate strength. If None, the function falls
+        back to a simpler test using the raw evidence.
+
+    Returns dict matching check_order_stability() shape.
+
+    Reference: Appendix Q §AQ.3.3.5.4; Kochen & Specker (1967);
+               R v Morris 2021 ONCA 680 §97.
+    """
+    from model import query_do_risk
+
+    base_results = query_do_risk(engine, base_evidence)
+    base_n20 = float(base_results.get(20, 0.5))
+
+    gate_results = []
+
+    # If the caller supplied pre-modulated SCE corrections per gate strength,
+    # use them — this is the genuinely doctrinally-meaningful path because it
+    # captures cmult()'s effect on SCE weights flowing into the BN.
+    if sce_corrections_by_gate:
+        for gate_label, sce_evidence in sce_corrections_by_gate.items():
+            evidence_under_gate = dict(base_evidence)
+            # SCE corrections modify probability values for distortion nodes;
+            # convert to evidence-style 0/1 inputs by thresholding at 0.5.
+            for nid, prob in sce_evidence.items():
+                evidence_under_gate[str(nid)] = 1 if prob >= 0.5 else 0
+            try:
+                r = query_do_risk(engine, evidence_under_gate)
+                n20 = float(r.get(20, 0.5))
+                gate_results.append({
+                    "gate": gate_label,
+                    "weight": _CONN_GATE_WEIGHTS.get(gate_label, 0.65),
+                    "posterior": round(n20, 4),
+                    "delta_from_base": round(abs(n20 - base_n20), 4),
+                })
+            except Exception:
+                pass
+    else:
+        # Fallback path — no gate-modulated SCE evidence supplied. The
+        # contextuality check then degrades to comparing the base posterior
+        # against itself, which yields a trivial null. This branch exists
+        # so the function is robust when called without the full payload,
+        # but the "real" diagnostic only fires when the caller supplies
+        # sce_corrections_by_gate. Surface this honestly in the note.
+        gate_results.append({
+            "gate": "moderate (current)",
+            "weight": _CONN_GATE_WEIGHTS["moderate"],
+            "posterior": round(base_n20, 4),
+            "delta_from_base": 0.0,
+        })
+
+    if len(gate_results) < 2:
+        return {
+            "flagged": False,
+            "severity": "none",
+            "delta": 0.0,
+            "gates_tested": gate_results,
+            "note": (
+                "Connection-gate contextuality check could not be run — "
+                "SCE evidence under alternative gate strengths was not "
+                "supplied. To enable this diagnostic, the caller must "
+                "pass pre-modulated SCE evidence per gate via "
+                "sce_corrections_by_gate."
+            ),
+        }
+
+    max_delta = max(g["delta_from_base"] for g in gate_results)
+    flagged = max_delta > CONTEXTUALITY_GATE_DELTA
+
+    if max_delta > 2 * CONTEXTUALITY_GATE_DELTA:
+        severity = "high"
+    elif flagged:
+        severity = "moderate"
+    else:
+        severity = "none"
+
+    if flagged:
+        note = (
+            f"The Node 20 posterior shifts by up to {max_delta:.1%} across "
+            f"weak/moderate/strong settings of the Morris para 97 connection "
+            f"gate. Per Appendix Q §AQ.3.3.5.4, this indicates contextual "
+            f"sensitivity in the Kochen-Specker sense: the doctrinal call "
+            f"about connection strength is consequential to the inference "
+            f"outcome. The diagnostic surfaces the sensitivity; the choice "
+            f"of gate strength remains a doctrinal question. Threshold: "
+            f"{CONTEXTUALITY_GATE_DELTA:.0%} (research-prototype, illustrative)."
+        )
+    else:
+        note = (
+            f"Posterior remains within {max_delta:.1%} across weak/moderate/strong "
+            f"settings of the Morris para 97 connection gate (threshold "
+            f"{CONTEXTUALITY_GATE_DELTA:.0%}). Per Appendix Q §AQ.3.3.5.4, "
+            f"the current case is contextually robust: the inference outcome "
+            f"does not numerically depend on the connection-gate strength "
+            f"chosen. The doctrinal choice between gate strengths remains "
+            f"a question of legal reasoning, not foreclosed by the diagnostic."
+        )
+
+    return {
+        "flagged": flagged,
+        "severity": severity,
+        "delta": round(max_delta, 4),
+        "gates_tested": gate_results,
+        "note": note,
+    }
 
 
 def diagnose(
@@ -157,6 +452,9 @@ def diagnose(
     sce_checked: List[str],
     profile_ev: Dict[int, float],
     connection_strength: str = "moderate",
+    *,
+    engine=None,
+    sce_corrections_by_gate: Optional[Dict[str, Dict[int, float]]] = None,
 ) -> Dict:
     """
     Run all four QBism diagnostics. Returns structured diagnostic report.
@@ -312,6 +610,38 @@ def diagnose(
                     "alter the structure of reasoning. Premature scalar collapse (AQ.3.3.4): "
                     "point estimates may overstate epistemic certainty.",
     }
+
+    # ── 5. Order stability (Appendix Q §AQ.3.3.5.3) ──────────────────────────
+    # Run only when caller supplies the inference engine. When engine is None,
+    # this slot returns a neutral "not_run" payload so the diagnostic dict
+    # shape stays predictable for any downstream consumer.
+    if engine is not None:
+        diags["order_stability"] = check_order_stability(engine, evidence)
+    else:
+        diags["order_stability"] = {
+            "flagged": False,
+            "severity": "not_run",
+            "delta": 0.0,
+            "permutations": [],
+            "note": "Order-stability check requires inference engine; not supplied.",
+        }
+
+    # ── 6. Connection-gate contextuality (Appendix Q §AQ.3.3.5.4) ─────────────
+    # Run only when caller supplies both the engine and the per-gate SCE
+    # correction payload. The latter captures cmult()'s modulation effect.
+    if engine is not None and sce_corrections_by_gate:
+        diags["connection_gate_contextuality"] = check_connection_gate_contextuality(
+            engine, evidence, sce_corrections_by_gate
+        )
+    else:
+        diags["connection_gate_contextuality"] = {
+            "flagged": False,
+            "severity": "not_run",
+            "delta": 0.0,
+            "gates_tested": [],
+            "note": ("Connection-gate contextuality check requires inference engine "
+                     "and per-gate SCE evidence payload; not supplied."),
+        }
 
     # ── Superposition state indicator ─────────────────────────────────────────
     # Represents pre-decisional ambiguity — both risk and mitigation narratives live

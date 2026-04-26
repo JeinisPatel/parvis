@@ -484,6 +484,49 @@ def sdelta():
             if show: d[f["n"]]=d.get(f["n"],0)+f["w"]*m*slider_val
     return d
 
+def _compute_sce_corrections_by_gate():
+    """
+    Compute per-gate SCE evidence for the Quantum-tab connection-gate
+    contextuality check (Appendix Q §AQ.3.3.5.4).
+
+    For each connection-gate strength {weak, moderate, strong}, recompute
+    sdelta()-equivalent SCE corrections using that gate as the multiplier.
+    Returns a dict {gate_label: {node_id: probability}} suitable for passing
+    to quantum_diagnostics.check_connection_gate_contextuality().
+
+    The computation mirrors sdelta()'s logic but holds the active framework
+    constant and only varies the connection-gate multiplier. This isolates
+    the contextuality test to the doctrinal call about Morris para 97
+    connection strength, per the rationale set out in Appendix Q.
+    """
+    corrections_by_gate = {}
+    fw = (st.session_state.scefw or "morris").lower()
+    sce_vals = st.session_state.get("sce_values", {})
+
+    # Fixed multipliers for the three gate strengths we test.
+    gate_multipliers = {
+        "weak":     0.30,
+        "moderate": 0.65,
+        "strong":   0.90,
+    }
+
+    for gate_label, m in gate_multipliers.items():
+        d = {}
+        for f in SF:
+            slider_val = sce_vals.get(f["id"], 0.0)
+            if slider_val > 0.01:
+                show = (
+                    fw == "both"
+                    or (fw == "morris" and f["fw"] != "ellis")
+                    or (fw == "ellis"  and f["fw"] != "morris")
+                )
+                if show:
+                    d[f["n"]] = d.get(f["n"], 0) + f["w"] * m * slider_val
+        corrections_by_gate[gate_label] = d
+
+    return corrections_by_gate
+
+
 # ── Inference ─────────────────────────────────────────────────────────────────
 def run_inf():
     from model import compute_do_risk
@@ -521,8 +564,15 @@ def run_inf():
     # and age burnout multiplier (N15). All from model.compute_do_risk.
     post[20]=compute_do_risk(post)
     st.session_state.posteriors=post
+    # Pass engine + per-gate SCE corrections so the new Appendix Q
+    # diagnostics (order stability §AQ.3.3.5.3 and connection-gate
+    # contextuality §AQ.3.3.5.4) can run. Both kwargs are optional in
+    # quantum_diagnostics.diagnose() — passing them activates the checks.
+    _qd_sce_by_gate = _compute_sce_corrections_by_gate()
     st.session_state.qdiags=diagnose(post,hard_ev,list(st.session_state.gladue_checked),
-        list(st.session_state.sce_checked),st.session_state.profile_ev,st.session_state.conn)
+        list(st.session_state.sce_checked),st.session_state.profile_ev,st.session_state.conn,
+        engine=st.session_state.engine,
+        sce_corrections_by_gate=_qd_sce_by_gate)
 
 def _sync_profile_from_widgets():
     """
@@ -1132,425 +1182,807 @@ with TABS[8]:
 
 # ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
 with TABS[11]:
-    st.markdown("### ⚛️ Quantum Bayesianism (QBism) diagnostic layer")
-    st.caption("Appendix Q: *The Limits of Classical Bayesian Inference in Legally Distorted Systems* · Busemeyer & Bruza (2012) · Wojciechowski (2023)")
-    st.info("This layer does **not** alter the VE posterior. It identifies epistemic conditions — cognitive and structural — that require heightened scrutiny in the legal reasoning process.")
+    # ════════════════════════════════════════════════════════════════════════
+    # Quantum tab v3 — diagnostic-only redesign (Mark 8 build)
+    # Per Appendix Q §AQ.4: this layer does not alter the VE posterior
+    # and does not recommend designation outcomes. It surfaces epistemic
+    # conditions warranting heightened scrutiny.
+    # ════════════════════════════════════════════════════════════════════════
+    diags = st.session_state.get("qdiags", {}) or {}
+    p_high_n20 = float(P.get(20, 0.5))
 
-    # ── Live state: recompute from current posteriors every render ─────────────
-    diags = st.session_state.qdiags
-    dn7   = P[20]
-    rw    = sum(P.get(n, .5) for n in [2, 3, 4, 18]) / 4
-    mw    = sum(P.get(n, .5) for n in [5, 6, 10, 12, 14]) / 5
-    si    = diags.get("superposition_index", .5) if diags else abs(dn7 - 0.5) * 2
-    theta_deg = np.degrees(np.arccos(np.clip(1 - 2*dn7, -1, 1)))
-    phi_deg   = float(np.degrees(np.arctan2(rw, mw))) % 360
+    # Compute the headline metrics from the live posterior
+    alpha_sq = p_high_n20
+    beta_sq = 1.0 - alpha_sq
+    si = round(1.0 - abs(p_high_n20 - 0.5) * 2.0, 3)
+    coh = round((alpha_sq * beta_sq) ** 0.5, 3)
+    purity = round(alpha_sq**2 + beta_sq**2 + 2 * (alpha_sq * beta_sq), 3)
+    theta_deg = round(__import__("math").degrees(__import__("math").acos(__import__("math").fsum([1.0, -2 * alpha_sq]))), 1)
+    # Azimuthal angle — encodes risk vs mitigation narrative balance, computed
+    # the same way the JS canvas does (so all readouts on this tab agree).
+    _rw_z1 = sum(P.get(n, .5) for n in [2, 3, 4, 18]) / 4
+    _mw_z1 = sum(P.get(n, .5) for n in [5, 6, 10, 12, 14]) / 5
+    phi_deg = round(float(__import__("numpy").degrees(__import__("numpy").arctan2(_rw_z1, _mw_z1))) % 360, 1)
 
-    # ── Animated Bloch sphere (HTML/JS canvas) ────────────────────────────────
-    # Pre-compute the state vector endpoint for the current belief state
-    import json
-    bloch_state = json.dumps({
-        "theta": float(np.radians(theta_deg)),
-        "phi":   float(np.radians(phi_deg)),
-        "risk":  float(dn7),
-        "si":    float(si),
-        "rw":    float(rw),
-        "mw":    float(mw),
-    })
+    # ── Determine the headline diagnostic condition ────────────────────────────
+    os_diag  = diags.get("order_stability", {}) or {}
+    cg_diag  = diags.get("connection_gate_contextuality", {}) or {}
+    pc_diag  = diags.get("prior_contamination", {}) or {}
+    bs_diag  = diags.get("belief_stasis", {}) or {}
 
-    bloch_html = f"""
-<div style="display:flex;flex-direction:column;align-items:center">
-  <canvas id="bloch" width="570" height="570"
-    style="border-radius:14px;background:#ffffff;border:1px solid #e8e8e8;
-           box-shadow:0 2px 12px rgba(0,0,0,0.08)"></canvas>
-  <div id="bloch-label"
-    style="font-family:monospace;font-size:13px;color:#555;margin-top:6px;text-align:center"></div>
-</div>
-<script>
-(function(){{
-  const S = {bloch_state};
-  const canvas = document.getElementById("bloch");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const W=570, H=570, cx=285, cy=285, R=210;
+    flags_active = sum(1 for d in [os_diag, cg_diag, pc_diag, bs_diag]
+                       if d.get("severity") in ("moderate", "high"))
 
-  const C_RISK = "#C0392B", C_MIT = "#1A6B35", C_POLE = "#1B2A4A", C_MID = "#666";
-  const riskCol = S.risk>=0.55 ? "#C0392B" : S.risk>=0.35 ? "#B8850A" : "#1A6B35";
+    # Pick the single headline label that best describes the current state.
+    # Note: research-prototype thresholds, illustrative anchors per Appendix O §O.3.
+    if si >= 0.60 and flags_active == 0:
+        cond_label = "Pre-decisional ambiguity"
+        cond_sub   = "belief state in superposition"
+        cond_color = "#8B4A1A"  # orange
+        cond_bg    = "#F4E0CA"
+        cond_bd    = "#D8B58A"
+    elif flags_active >= 2:
+        cond_label = "Multiple strain signals"
+        cond_sub   = f"{flags_active} diagnostic checks flagged"
+        cond_color = "#8B2E2A"  # red
+        cond_bg    = "#F2D9D5"
+        cond_bd    = "#D8A39E"
+    elif flags_active == 1:
+        cond_label = "Heightened scrutiny"
+        cond_sub   = "one diagnostic check flagged"
+        cond_color = "#8A6B1F"  # amber
+        cond_bg    = "#F8EFD8"
+        cond_bd    = "#E5CC95"
+    elif si >= 0.30:
+        cond_label = "Moderate ambiguity"
+        cond_sub   = "belief partially resolved"
+        cond_color = "#8A6B1F"  # amber
+        cond_bg    = "#F8EFD8"
+        cond_bd    = "#E5CC95"
+    else:
+        cond_label = "Coherent"
+        cond_sub   = "belief state largely resolved"
+        cond_color = "#2F5C2A"  # green
+        cond_bg    = "#E2EBD8"
+        cond_bd    = "#B8CDA8"
 
-  // Full 3D rotation: Y-axis (azimuthal) + X-axis (polar tilt)
-  // This gives authentic Bloch-sphere precession in 3D
-  function proj(x, y, z, ry, rx) {{
-    // 1. Rotate around Y (azimuthal — left/right)
-    let x1 = x*Math.cos(ry) - z*Math.sin(ry);
-    let y1 = y;
-    let z1 = x*Math.sin(ry) + z*Math.cos(ry);
-    // 2. Rotate around X (polar tilt — forward/back)
-    let x2 = x1;
-    let y2 = y1*Math.cos(rx) - z1*Math.sin(rx);
-    let z2 = y1*Math.sin(rx) + z1*Math.cos(rx);
-    // 3. Perspective
-    const f = 3.2;
-    return [cx + x2*R*f/(f+z2+2), cy - y2*R*f/(f+z2+2), z2];
-  }}
+    # ── Tab title + intro ─────────────────────────────────────────────────────
+    st.markdown("### ⚛️ Quantum Bayesian diagnostic layer")
+    st.markdown(
+        '<div style="font-family:\'Fraunces\',Georgia,serif;font-style:italic;'
+        'font-size:0.92rem;color:#707070;margin-bottom:14px;line-height:1.6;'
+        'max-width:880px">'
+        'Appendix Q · An epistemic lens for identifying conditions under which '
+        'classical Bayesian inference, though formally valid, may be substantively '
+        'strained by the evidentiary environment in which it operates.'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
-  function draw(ry, rx) {{
-    ctx.clearRect(0,0,W,H);
+    # ── Permanent scope-disclaimer (every render) ─────────────────────────────
+    st.markdown(
+        '<div style="background:#EAEFF7;border:1px solid #C7D3E5;'
+        'border-left:3px solid #185FA5;border-radius:6px;padding:12px 18px;'
+        'margin-bottom:24px;font-size:0.86rem;color:#3A3A3A;line-height:1.55;'
+        'max-width:880px">'
+        '<strong style="color:#185FA5">Diagnostic, not decision-support.</strong> '
+        'This layer does not alter the Variable Elimination posterior and does '
+        'not recommend designation outcomes. It surfaces epistemic conditions — '
+        '<em>order effects, contextuality, premature scalar collapse, distorted '
+        'priors</em> — that classical probabilistic reasoning is poorly equipped '
+        'to represent. Per Appendix Q '
+        '<span style="font-family:\'Fraunces\',serif;font-style:italic;'
+        'font-size:0.84rem">§AQ.4</span>, Quantum Bayesianism is used here as '
+        'an epistemic audit mechanism, not a substitute inferential engine. '
+        'The diagnostic states and thresholds shown are research-prototype '
+        'values — illustrative anchors for the framework set out in Appendix Q, '
+        'subject to expert elicitation through the SHELF/Cooke methodology '
+        'described in Appendix O '
+        '<span style="font-family:\'Fraunces\',serif;font-style:italic;'
+        'font-size:0.84rem">§O.3</span>.'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
-    // Sphere fill gradient
-    const g = ctx.createRadialGradient(cx-65,cy-65,20,cx,cy,R+10);
-    g.addColorStop(0,"rgba(205,215,230,0.50)");
-    g.addColorStop(1,"rgba(238,241,248,0.10)");
-    ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
-    ctx.fillStyle=g; ctx.fill();
-    ctx.strokeStyle="rgba(0,0,0,0.15)"; ctx.lineWidth=1.5; ctx.stroke();
+    # ── ZONE 1: Diagnostic state + meter panel ────────────────────────────────
+    z1c1, z1c2 = st.columns([1.4, 1])
+    with z1c1:
+        # Build the verdict body text dynamically based on which signals are active
+        body_parts = []
+        body_parts.append(
+            f"The classical posterior of {p_high_n20*100:.1f}% is "
+            f"mathematically coherent."
+        )
+        if si >= 0.60:
+            body_parts.append(
+                f"The belief state sits near the equator of the Bloch sphere: "
+                f"|α|² = {alpha_sq:.3f} and |β|² = {beta_sq:.3f} are close to "
+                f"one another, so both designation and non-designation "
+                f"narratives remain live (Appendix Q §AQ.3.3.5.2)."
+            )
+        if cg_diag.get("severity") in ("moderate", "high"):
+            cg_delta = cg_diag.get("delta", 0.0)
+            body_parts.append(
+                f"The posterior is contextually sensitive to the Morris para 97 "
+                f"connection-gate doctrinal call — the inference outcome shifts "
+                f"by {cg_delta*100:.1f} percentage points across weak/moderate/"
+                f"strong settings of the gate (Appendix Q §AQ.3.3.5.4)."
+            )
+        if os_diag.get("severity") in ("moderate", "high"):
+            os_delta = os_diag.get("delta", 0.0)
+            body_parts.append(
+                f"The current evidence configuration shows order-effect strain "
+                f"of up to {os_delta*100:.1f} percentage points across "
+                f"doctrinally-motivated permutations (Appendix Q §AQ.3.3.5.3)."
+            )
+        body_parts.append(
+            "This is an observation about the structure of the belief state, "
+            "not a claim about what the court should decide. Per Appendix Q "
+            "§AQ.4, the choice of how to weight these factors remains a "
+            "question of legal reasoning."
+        )
+        body_text = "<br><br>".join(body_parts)
 
-    // Latitude rings
-    for(let lat=-60;lat<=60;lat+=30){{
-      const lr=Math.cos(lat*Math.PI/180), ly=Math.sin(lat*Math.PI/180);
-      ctx.beginPath(); let fi=true;
-      for(let a=0;a<=360;a+=3){{
-        const r=a*Math.PI/180;
-        const [sx,sy]=proj(lr*Math.cos(r),ly,lr*Math.sin(r),ry,rx);
-        fi?(ctx.moveTo(sx,sy),fi=false):ctx.lineTo(sx,sy);
+        st.markdown(
+            f'<div style="background:{cond_bg};border:1px solid {cond_bd};'
+            f'border-left:4px solid {cond_color};border-radius:12px;'
+            f'padding:22px 26px;height:100%">'
+            f'<div style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.16em;color:{cond_color};font-weight:700;'
+            f'margin-bottom:8px">EPISTEMIC CONDITION</div>'
+            f'<div style="font-family:\'Fraunces\',Georgia,serif;'
+            f'font-size:1.55rem;font-weight:500;letter-spacing:-0.005em;'
+            f'color:{cond_color};margin:0 0 10px 0;line-height:1.18">'
+            f'{cond_label} '
+            f'<span style="font-family:\'Fraunces\',serif;font-style:italic;'
+            f'font-weight:400;font-size:1.05rem;color:#707070">— {cond_sub}</span>'
+            f'</div>'
+            f'<div style="font-family:\'Fraunces\',Georgia,serif;'
+            f'font-style:italic;font-size:0.98rem;color:#3A3A3A;line-height:1.6">'
+            f'{body_text}'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    with z1c2:
+        # Strain indicators
+        def _strain_pill(label, severity):
+            if severity in ("moderate", "high"):
+                return (f'<span style="font-size:0.72rem;padding:3px 10px;'
+                        f'border-radius:11px;background:#F8EFD8;color:#8A6B1F;'
+                        f'border:1px solid #E5CC95;font-family:\'Fraunces\',serif;'
+                        f'font-style:italic;display:inline-block;margin:2px 4px 2px 0">'
+                        f'{label} · detected</span>')
+            elif severity == "not_run":
+                return (f'<span style="font-size:0.72rem;padding:3px 10px;'
+                        f'border-radius:11px;background:#EFEDE7;color:#9E9E9E;'
+                        f'border:1px solid #E0DDD6;font-family:\'Fraunces\',serif;'
+                        f'font-style:italic;display:inline-block;margin:2px 4px 2px 0">'
+                        f'{label} · not run</span>')
+            else:
+                return (f'<span style="font-size:0.72rem;padding:3px 10px;'
+                        f'border-radius:11px;background:#E2EBD8;color:#2F5C2A;'
+                        f'border:1px solid #B8CDA8;font-family:\'Fraunces\',serif;'
+                        f'font-style:italic;display:inline-block;margin:2px 4px 2px 0">'
+                        f'{label} · none</span>')
+
+        pill_oe   = _strain_pill("Order effects",       os_diag.get("severity", "none"))
+        pill_ctx  = _strain_pill("Contextuality",       cg_diag.get("severity", "none"))
+        pill_pc   = _strain_pill("Prior contamination", pc_diag.get("severity", "none"))
+        pill_bs   = _strain_pill("Premature collapse",  bs_diag.get("severity", "none"))
+
+        st.markdown(
+            f'<div style="background:#FBFAF7;border:1px solid #E0DDD6;'
+            f'border-radius:12px;padding:18px 20px;height:100%">'
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;margin-bottom:10px">'
+            f'<span style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.14em;color:#707070;font-weight:600">|α|² · |β|²</span>'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.95rem;'
+            f'color:#1A1A1A">{alpha_sq:.3f} · {beta_sq:.3f}</span></div>'
+
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;margin-bottom:6px">'
+            f'<span style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.14em;color:#707070;font-weight:600">'
+            f'Superposition index</span>'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.95rem;'
+            f'color:{cond_color}">{si:.3f}</span></div>'
+            f'<div style="height:6px;border-radius:3px;background:#EFEDE7;'
+            f'margin-bottom:14px;overflow:hidden">'
+            f'<div style="height:100%;width:{si*100:.1f}%;background:{cond_color};'
+            f'border-radius:3px"></div></div>'
+
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;margin-bottom:10px">'
+            f'<span style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.14em;color:#707070;font-weight:600">Coherence</span>'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.95rem;'
+            f'color:#1A1A1A">{coh:.3f}</span></div>'
+
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;margin-bottom:10px">'
+            f'<span style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.14em;color:#707070;font-weight:600">Purity Tr(ρ²)</span>'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.95rem;'
+            f'color:#1A1A1A">{purity:.3f}</span></div>'
+
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:baseline;margin-bottom:14px">'
+            f'<span style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.14em;color:#707070;font-weight:600">θ · φ (Bloch)</span>'
+            f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.95rem;'
+            f'color:#1A1A1A">{theta_deg}° · {phi_deg}°</span></div>'
+
+            f'<div style="border-top:1px solid #EFEDE7;padding-top:10px;margin-top:6px">'
+            f'<div style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.14em;color:#707070;font-weight:600;'
+            f'margin-bottom:8px">Strain indicators (§AQ.3.3)</div>'
+            f'<div>{pill_oe}{pill_ctx}{pill_pc}{pill_bs}</div></div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown("<div style='margin:24px 0'></div>", unsafe_allow_html=True)
+
+    # ── ZONE 2: Diagnostic signals ────────────────────────────────────────────
+    st.markdown("#### Diagnostic signals")
+    st.markdown(
+        '<div style="font-size:0.84rem;color:#707070;margin-bottom:18px;'
+        'font-family:\'Fraunces\',serif;font-style:italic;max-width:800px;'
+        'line-height:1.55">'
+        'What the QBism layer is registering about the current belief state. '
+        'These are observations about epistemic conditions, drawn from '
+        'Appendix Q\'s diagnostic vocabulary — not recommendations about what '
+        'the sentencing court should conclude.'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    def _signal_html(tag, tag_color, body_html):
+        return (
+            f'<div style="display:grid;grid-template-columns:64px 1fr;gap:16px;'
+            f'align-items:flex-start;padding:14px 0;'
+            f'border-bottom:1px solid #EFEDE7">'
+            f'<div style="font-family:\'JetBrains Mono\',monospace;'
+            f'font-size:0.74rem;font-weight:600;text-align:center;padding:5px 0;'
+            f'border-radius:5px;color:white;background:{tag_color};'
+            f'white-space:nowrap">{tag}</div>'
+            f'<div style="font-size:0.94rem;color:#3A3A3A;line-height:1.6">'
+            f'{body_html}</div>'
+            f'</div>'
+        )
+
+    # Signal 1 — Superposition index (always reportable)
+    if si >= 0.60:
+        si_body = (
+            f'<strong>Superposition index <span style="font-family:monospace;'
+            f'background:{cond_bg};color:{cond_color};padding:1px 6px;'
+            f'border-radius:3px">{si:.3f}</span> '
+            f'indicates a belief state near the equator of the Bloch sphere.</strong> '
+            f'Per Appendix Q §AQ.3.3.5.2, this is the formal representation of '
+            f'pre-decisional ambiguity: a state in which |α|² (risk-centred '
+            f'narrative) and |β|² (contextual mitigation narrative) remain '
+            f'simultaneously live, neither having decisively resolved. Classical '
+            f'Bayesian inference is mathematically valid in this state; the '
+            f'diagnostic flags only that scalar collapse has not yet occurred.'
+        )
+    else:
+        si_body = (
+            f'<strong>Superposition index <span style="font-family:monospace;'
+            f'background:#E2EBD8;color:#2F5C2A;padding:1px 6px;'
+            f'border-radius:3px">{si:.3f}</span> '
+            f'indicates a belief state away from the equator.</strong> '
+            f'Per Appendix Q §AQ.3.3.5.2, the system has substantively resolved '
+            f'toward one of |α|² (risk-centred) or |β|² (contextual mitigation) '
+            f'narratives. The classical Bayesian posterior is operating outside '
+            f'the maximum-superposition regime.'
+        )
+    st.markdown(_signal_html("SI", cond_color, si_body), unsafe_allow_html=True)
+
+    # Signal 2 — Order stability
+    os_severity = os_diag.get("severity", "not_run")
+    os_note = os_diag.get("note", "")
+    if os_severity == "not_run":
+        os_body = (
+            f'<strong>Order-stability check status: not run.</strong> '
+            f'Per Appendix Q §AQ.3.3.5.3, this check would test whether the '
+            f'current evidence configuration is stable under doctrinally-'
+            f'motivated reorderings (risk-first vs SCE-first vs priors-only). '
+            f'Activate by ensuring inference engine and current evidence are '
+            f'available at the diagnose() call site.'
+        )
+    elif os_severity in ("moderate", "high"):
+        os_body = (
+            f'<strong>Order-effect strain detected — '
+            f'posterior diverges by up to {os_diag.get("delta",0)*100:.1f}% '
+            f'across doctrinally-motivated permutations.</strong> {os_note}'
+        )
+    else:
+        os_body = (
+            f'<strong>No order effect detected in the current evidence sequence.</strong> '
+            f'{os_note}'
+        )
+    st.markdown(_signal_html("OE", "#185FA5", os_body), unsafe_allow_html=True)
+
+    # Signal 3 — Connection-gate contextuality (the new flagship check)
+    cg_severity = cg_diag.get("severity", "not_run")
+    cg_note = cg_diag.get("note", "")
+    if cg_severity == "not_run":
+        cg_body = (
+            f'<strong>Connection-gate contextuality check status: not run.</strong> '
+            f'Per Appendix Q §AQ.3.3.5.4, this check tests whether the case '
+            f'posterior shifts meaningfully across weak/moderate/strong settings '
+            f'of the Morris para 97 connection gate. Activate by ensuring per-gate '
+            f'SCE evidence is computed and passed in at the diagnose() call site.'
+        )
+    elif cg_severity in ("moderate", "high"):
+        cg_body = (
+            f'<strong>Connection-gate contextuality detected — posterior shifts '
+            f'<span style="font-family:monospace;background:{cond_bg};color:{cond_color};'
+            f'padding:1px 6px;border-radius:3px">{cg_diag.get("delta",0)*100:.1f}%</span> '
+            f'across gate strengths.</strong> {cg_note}'
+        )
+    else:
+        cg_body = (
+            f'<strong>No connection-gate contextuality detected.</strong> '
+            f'{cg_note}'
+        )
+    st.markdown(_signal_html("CTX", "#0F6E56", cg_body), unsafe_allow_html=True)
+
+    # Signal 4 — Prior contamination (existing diagnostic)
+    pc_severity = pc_diag.get("severity", "none")
+    if pc_severity in ("moderate", "high"):
+        pc_items = pc_diag.get("items", [])
+        pc_body = (
+            f'<strong>Prior contamination flagged — '
+            f'{len(pc_items)} distortion-typed node(s) elevated without case-specific evidence.</strong> '
+            f'Per Appendix Q §AQ.3.3.2, criminal records may encode upstream '
+            f'distortions (over-policing, bail denial cascades, culturally invalid '
+            f'actuarial tools) that classical Bayesian updating cannot self-correct. '
+            f'The flagged nodes carry posteriors above the prior-contamination '
+            f'threshold (0.65) but lack direct case-specific evidence.'
+        )
+    else:
+        pc_body = (
+            f'<strong>Distorted-priors warning surface — currently inactive.</strong> '
+            f'Per Appendix Q §AQ.3.3.2, criminal records may encode upstream '
+            f'distortions that classical Bayesian updating cannot self-correct. '
+            f'None detected at the current input state — but the structural risk '
+            f'identified in §AQ.3.3.2 is a feature of the input data itself, not '
+            f'of the inference engine, and remains relevant whenever criminal-history '
+            f'nodes carry weight.'
+        )
+    st.markdown(_signal_html("P", "#A32D2D", pc_body), unsafe_allow_html=True)
+
+    st.markdown("<div style='margin:32px 0'></div>", unsafe_allow_html=True)
+
+    # ── ZONE 3: Observations ──────────────────────────────────────────────────
+    st.markdown("#### What this diagnostic surfaces")
+    st.markdown(
+        '<div style="font-size:0.84rem;color:#707070;margin-bottom:18px;'
+        'font-family:\'Fraunces\',serif;font-style:italic;max-width:800px;'
+        'line-height:1.55">'
+        'Observations that follow from the diagnostic state above. These are '
+        'points of epistemic visibility — features of the current belief state '
+        'that the QBism vocabulary makes legible to the user. They are not '
+        'action recommendations or counterfactual predictions about the posterior.'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    def _obs(obs_tag, obs_title, obs_body):
+        return (
+            f'<div style="background:#FBFAF7;border:1px solid #E0DDD6;'
+            f'border-radius:10px;padding:16px 22px;margin-bottom:10px">'
+            f'<div style="font-size:0.66rem;text-transform:uppercase;'
+            f'letter-spacing:0.16em;color:#707070;font-weight:700;'
+            f'margin-bottom:5px">{obs_tag}</div>'
+            f'<div style="font-family:\'Fraunces\',serif;font-weight:500;'
+            f'font-size:1.05rem;color:#1A1A1A;margin-bottom:6px">{obs_title}</div>'
+            f'<div style="font-size:0.92rem;color:#3A3A3A;line-height:1.6">'
+            f'{obs_body}</div></div>'
+        )
+
+    # Observation 1 — Superposition state
+    if si >= 0.60:
+        st.markdown(_obs(
+            "Observation 1 · §AQ.3.3.5.2",
+            "The belief state has not resolved into a determinate posture",
+            f'The {p_high_n20*100:.1f}% scalar value, taken alone, would suggest '
+            f'a {"moderate" if 0.4 < p_high_n20 < 0.6 else "definitive"}-risk '
+            f'determination. The QBism layer registers that the state generating '
+            f'this value is in superposition: SI <span style="font-family:monospace;'
+            f'background:{cond_bg};color:{cond_color};padding:1px 6px;'
+            f'border-radius:3px">{si:.3f}</span>. In Appendix Q\'s vocabulary, '
+            f'this means the system is operating in the regime where, per '
+            f'<em>Ipeelee</em> §38 and the principle articulated at §AQ.3.3.5.2, '
+            f'withholding definitive judgment is not a failure of reasoning but '
+            f'a feature of lawful decision-making under genuine uncertainty. '
+            f'Whether to act on this observation is a matter for judicial '
+            f'discretion, not for the diagnostic.'
+        ), unsafe_allow_html=True)
+
+    # Observation 2 — Order stability
+    if os_severity in ("moderate", "high"):
+        perms = os_diag.get("permutations", [])
+        rows_html = ""
+        for p in perms:
+            rows_html += (
+                f'<tr><td style="padding:4px 14px 4px 0">{p["label"]}</td>'
+                f'<td style="text-align:right;padding:4px 14px 4px 0;'
+                f'font-family:monospace">{p["posterior"]*100:.1f}%</td>'
+                f'<td style="text-align:right;padding:4px 0;font-family:monospace">'
+                f'Δ {p["delta"]*100:.1f}%</td></tr>'
+            )
+        st.markdown(_obs(
+            "Observation 2 · §AQ.3.3.5.3",
+            "Evidence sequence shows order-effect strain",
+            f'{os_note}<br><br>'
+            f'<table style="margin:10px 0 0 0;border-collapse:collapse;'
+            f'font-size:0.86rem"><thead><tr style="border-bottom:1px solid #E0DDD6">'
+            f'<th style="text-align:left;padding:4px 14px 4px 0;font-weight:600;'
+            f'color:#1A1A1A">Permutation</th>'
+            f'<th style="text-align:right;padding:4px 14px 4px 0;font-weight:600;'
+            f'color:#1A1A1A">Posterior N20</th>'
+            f'<th style="text-align:right;padding:4px 0;font-weight:600;'
+            f'color:#1A1A1A">Δ from base</th></tr></thead>'
+            f'<tbody>{rows_html}</tbody></table>'
+        ), unsafe_allow_html=True)
+    else:
+        st.markdown(_obs(
+            "Observation 2 · §AQ.3.3.5.3",
+            "Evidentiary sequence is currently order-stable",
+            f'{os_note}'
+        ), unsafe_allow_html=True)
+
+    # Observation 3 — Connection-gate contextuality
+    if cg_severity in ("moderate", "high"):
+        gates = cg_diag.get("gates_tested", [])
+        gate_rows_html = ""
+        for g in gates:
+            is_current = g["gate"] == st.session_state.conn or "current" in g["gate"]
+            label_html = (f'<em>{g["gate"]}</em> (current)' if is_current
+                          else f'<em>{g["gate"]}</em>')
+            n20_html = (f'<strong>{g["posterior"]*100:.1f}%</strong>'
+                        if is_current else f'{g["posterior"]*100:.1f}%')
+            gate_rows_html += (
+                f'<tr><td style="padding:4px 14px 4px 0">{label_html}</td>'
+                f'<td style="text-align:right;padding:4px 14px 4px 0;'
+                f'font-family:monospace">{g["weight"]:.2f}</td>'
+                f'<td style="text-align:right;padding:4px 0;font-family:monospace">'
+                f'{n20_html}</td></tr>'
+            )
+        st.markdown(_obs(
+            "Observation 3 · §AQ.3.3.5.4",
+            "The case is contextually sensitive to the connection-gate doctrinal call",
+            f'Holding all other evidence constant, the Node 20 posterior takes '
+            f'distinct values across the doctrinal settings of the Morris para 97 '
+            f'connection gate:<br>'
+            f'<table style="margin:10px 0 12px 0;border-collapse:collapse;'
+            f'font-size:0.86rem"><thead><tr style="border-bottom:1px solid #E0DDD6">'
+            f'<th style="text-align:left;padding:4px 14px 4px 0;font-weight:600;'
+            f'color:#1A1A1A">Gate setting</th>'
+            f'<th style="text-align:right;padding:4px 14px 4px 0;font-weight:600;'
+            f'color:#1A1A1A">cmult</th>'
+            f'<th style="text-align:right;padding:4px 0;font-weight:600;'
+            f'color:#1A1A1A">Posterior N20</th></tr></thead>'
+            f'<tbody>{gate_rows_html}</tbody></table>'
+            f'A {cg_diag.get("delta",0)*100:.1f}-point swing across the three '
+            f'settings exceeds the research-prototype threshold of 5.0 points. '
+            f'Per §AQ.3.3.5.4, this is contextuality in the Kochen-Specker sense: '
+            f'the same evidentiary record yields different probative readings '
+            f'under doctrinally distinct connection-strength frames. The '
+            f'diagnostic surfaces the sensitivity. The choice between '
+            f'<em>weak</em>, <em>moderate</em>, and <em>strong</em> remains a '
+            f'question of legal reasoning about R v Morris 2021 ONCA 680 §97 — '
+            f'not foreclosed by the diagnostic.'
+        ), unsafe_allow_html=True)
+    else:
+        st.markdown(_obs(
+            "Observation 3 · §AQ.3.3.5.4",
+            "Connection-gate setting is not contextually consequential at the current state",
+            f'{cg_note}'
+        ), unsafe_allow_html=True)
+
+    # Audit-not-policy footer
+    st.markdown(
+        '<div style="font-size:0.82rem;color:#707070;font-family:\'Fraunces\',serif;'
+        'font-style:italic;padding:14px 0 0 0;line-height:1.55;max-width:800px;'
+        'border-top:1px solid #EFEDE7;margin-top:18px">'
+        'These observations are diagnostic, not directive. Per Appendix Q §AQ.4, '
+        'the QBism layer is an epistemic audit mechanism. It identifies where '
+        'classical inference may benefit from heightened scrutiny; it does not '
+        'tell the user what evidentiary moves to make, and it does not quantify '
+        'the consequences of hypothetical evidentiary changes. Counterfactual '
+        'posterior estimation under alternative inputs is a feature reserved '
+        'for the Scenarios tab, where the user themselves constructs and '
+        'labels the comparison.'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown("<div style='margin:32px 0'></div>", unsafe_allow_html=True)
+
+    # ── ZONE 4: Animated Bloch sphere (PARVIS canvas + JS precession) ────────
+    # Restored from the original Quantum tab. Animation logic lives entirely
+    # in JavaScript (requestAnimationFrame, drawn into HTML5 Canvas) and is
+    # injected via st.components.v1.html. The matplotlib draw_bloch_sphere()
+    # is preserved below in a collapsible expander as a static fallback view.
+
+    # Pre-compute risk and mitigation weights in the same way the original tab
+    # did: average posterior over risk-typed nodes vs distortion/mitigation nodes.
+    _rw = sum(P.get(n, .5) for n in [2, 3, 4, 18]) / 4
+    _mw = sum(P.get(n, .5) for n in [5, 6, 10, 12, 14]) / 5
+
+    # The canvas convention matches bloch_sphere.py: θ = arccos(1 - 2·p_high),
+    # measured from the |DO⟩ pole. Recompute theta_deg and phi_deg here using
+    # this convention so the canvas matches the figure-title and the live
+    # state-vector readout shown alongside.
+    _theta_canvas_deg = float(__import__("numpy").degrees(
+        __import__("numpy").arccos(__import__("numpy").clip(1 - 2*p_high_n20, -1, 1))
+    ))
+    _phi_canvas_deg = float(__import__("numpy").degrees(
+        __import__("numpy").arctan2(_rw, _mw)
+    )) % 360
+
+    st.markdown("#### Bloch sphere — quantum belief state |ψ⟩")
+    st.caption(
+        "The state vector rotates slowly to illustrate the superposition of "
+        "belief states. North pole = fully collapsed to DO (P=1). South pole "
+        "= fully collapsed to no DO (P=0). Equator = maximum pre-decisional "
+        "ambiguity (P=0.5)."
+    )
+
+    _bloch_qb1, _bloch_qb2 = st.columns([3, 2])
+    with _bloch_qb1:
+        # ── Animated Bloch sphere (HTML/JS canvas) ────────────────────────────────
+        # Pre-compute the state vector endpoint for the current belief state
+        import json
+        bloch_state = json.dumps({
+            "theta": float(np.radians(_theta_canvas_deg)),
+            "phi":   float(np.radians(_phi_canvas_deg)),
+            "risk":  float(p_high_n20),
+            "si":    float(si),
+            "rw":    float(_rw),
+            "mw":    float(_mw),
+        })
+
+        bloch_html = f"""
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <canvas id="bloch" width="570" height="570"
+        style="border-radius:14px;background:#ffffff;border:1px solid #e8e8e8;
+               box-shadow:0 2px 12px rgba(0,0,0,0.08)"></canvas>
+      <div id="bloch-label"
+        style="font-family:monospace;font-size:13px;color:#555;margin-top:6px;text-align:center"></div>
+    </div>
+    <script>
+    (function(){{
+      const S = {bloch_state};
+      const canvas = document.getElementById("bloch");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const W=570, H=570, cx=285, cy=285, R=210;
+
+      const C_RISK = "#C0392B", C_MIT = "#1A6B35", C_POLE = "#1B2A4A", C_MID = "#666";
+      const riskCol = S.risk>=0.55 ? "#C0392B" : S.risk>=0.35 ? "#B8850A" : "#1A6B35";
+
+      // Full 3D rotation: Y-axis (azimuthal) + X-axis (polar tilt)
+      // This gives authentic Bloch-sphere precession in 3D
+      function proj(x, y, z, ry, rx) {{
+        // 1. Rotate around Y (azimuthal — left/right)
+        let x1 = x*Math.cos(ry) - z*Math.sin(ry);
+        let y1 = y;
+        let z1 = x*Math.sin(ry) + z*Math.cos(ry);
+        // 2. Rotate around X (polar tilt — forward/back)
+        let x2 = x1;
+        let y2 = y1*Math.cos(rx) - z1*Math.sin(rx);
+        let z2 = y1*Math.sin(rx) + z1*Math.cos(rx);
+        // 3. Perspective
+        const f = 3.2;
+        return [cx + x2*R*f/(f+z2+2), cy - y2*R*f/(f+z2+2), z2];
       }}
-      ctx.closePath();
-      ctx.strokeStyle=lat===0?"rgba(0,0,0,0.22)":"rgba(0,0,0,0.07)";
-      ctx.lineWidth=lat===0?1.3:0.7; ctx.stroke();
-    }}
 
-    // Meridians
-    for(let lon=0;lon<180;lon+=45){{
-      const lr2=lon*Math.PI/180;
-      ctx.beginPath(); let fi2=true;
-      for(let a=0;a<=360;a+=3){{
-        const r=a*Math.PI/180;
-        const [sx,sy]=proj(Math.sin(r)*Math.cos(lr2),Math.cos(r),Math.sin(r)*Math.sin(lr2),ry,rx);
-        fi2?(ctx.moveTo(sx,sy),fi2=false):ctx.lineTo(sx,sy);
+      function draw(ry, rx) {{
+        ctx.clearRect(0,0,W,H);
+
+        // Sphere fill gradient
+        const g = ctx.createRadialGradient(cx-65,cy-65,20,cx,cy,R+10);
+        g.addColorStop(0,"rgba(205,215,230,0.50)");
+        g.addColorStop(1,"rgba(238,241,248,0.10)");
+        ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+        ctx.fillStyle=g; ctx.fill();
+        ctx.strokeStyle="rgba(0,0,0,0.15)"; ctx.lineWidth=1.5; ctx.stroke();
+
+        // Latitude rings
+        for(let lat=-60;lat<=60;lat+=30){{
+          const lr=Math.cos(lat*Math.PI/180), ly=Math.sin(lat*Math.PI/180);
+          ctx.beginPath(); let fi=true;
+          for(let a=0;a<=360;a+=3){{
+            const r=a*Math.PI/180;
+            const [sx,sy]=proj(lr*Math.cos(r),ly,lr*Math.sin(r),ry,rx);
+            fi?(ctx.moveTo(sx,sy),fi=false):ctx.lineTo(sx,sy);
+          }}
+          ctx.closePath();
+          ctx.strokeStyle=lat===0?"rgba(0,0,0,0.22)":"rgba(0,0,0,0.07)";
+          ctx.lineWidth=lat===0?1.3:0.7; ctx.stroke();
+        }}
+
+        // Meridians
+        for(let lon=0;lon<180;lon+=45){{
+          const lr2=lon*Math.PI/180;
+          ctx.beginPath(); let fi2=true;
+          for(let a=0;a<=360;a+=3){{
+            const r=a*Math.PI/180;
+            const [sx,sy]=proj(Math.sin(r)*Math.cos(lr2),Math.cos(r),Math.sin(r)*Math.sin(lr2),ry,rx);
+            fi2?(ctx.moveTo(sx,sy),fi2=false):ctx.lineTo(sx,sy);
+          }}
+          ctx.strokeStyle="rgba(0,0,0,0.05)"; ctx.lineWidth=0.7; ctx.stroke();
+        }}
+
+        // Horizontal axes (rotate with sphere)
+        const [ocx,ocy]=proj(0,0,0,ry,rx);
+        const [rx1,ry1]=proj(0.85,0,0,ry,rx);
+        const [mx1,my1]=proj(-0.85,0,0,ry,rx);
+        ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(rx1,ry1);
+        ctx.strokeStyle=C_RISK+"88"; ctx.lineWidth=1.1;
+        ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle=C_RISK; ctx.font="bold 12px -apple-system,sans-serif";
+        ctx.fillText("Risk",rx1+5,ry1+4);
+        ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(mx1,my1);
+        ctx.strokeStyle=C_MIT+"88"; ctx.lineWidth=1.1;
+        ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle=C_MIT; ctx.font="bold 12px -apple-system,sans-serif";
+        const mw=ctx.measureText("Mitigation").width;
+        ctx.fillText("Mitigation",mx1-mw-5,my1+4);
+
+        // Vertical axis (also rotates in 3D)
+        const [ap1,ap2]=proj(0,0.85,0,ry,rx);
+        const [an1,an2]=proj(0,-0.85,0,ry,rx);
+        ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(ap1,ap2);
+        ctx.strokeStyle=C_POLE+"55"; ctx.lineWidth=1.1;
+        ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(an1,an2);
+        ctx.strokeStyle=C_MID+"55"; ctx.lineWidth=1.1;
+        ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+
+        // Pole labels — attached to the rotated pole positions
+        const [np1,np2]=proj(0,1.04,0,ry,rx);
+        const [sp1,sp2]=proj(0,-1.04,0,ry,rx);
+        ctx.textAlign="center";
+        ctx.fillStyle=C_POLE; ctx.font="bold 12px -apple-system,sans-serif";
+        ctx.fillText("|DO\u27e9  P=1.0",np1,np2-10);
+        ctx.fillStyle=C_MID; ctx.font="12px -apple-system,sans-serif";
+        ctx.fillText("|\u00acDO\u27e9  P=0.0",sp1,sp2+20);
+        ctx.textAlign="left";
+
+        // State vector — in world space, same 3D rotation applied
+        const th=S.theta, ph=S.phi;
+        const svx=Math.sin(th)*Math.cos(ph);
+        const svy=Math.cos(th);
+        const svz=Math.sin(th)*Math.sin(ph);
+        const [ovx,ovy]=proj(0,0,0,ry,rx);
+        const [vpx,vpy]=proj(svx*0.92,svy*0.92,svz*0.92,ry,rx);
+
+        // Glow
+        ctx.shadowColor=riskCol+"44"; ctx.shadowBlur=16;
+        ctx.beginPath(); ctx.moveTo(ovx,ovy); ctx.lineTo(vpx,vpy);
+        ctx.strokeStyle=riskCol; ctx.lineWidth=4; ctx.stroke();
+        ctx.shadowBlur=0;
+
+        // Arrowhead
+        const ang2=Math.atan2(vpy-ovy,vpx-ovx);
+        ctx.beginPath();
+        ctx.moveTo(vpx,vpy);
+        ctx.lineTo(vpx-13*Math.cos(ang2-0.38),vpy-13*Math.sin(ang2-0.38));
+        ctx.lineTo(vpx-13*Math.cos(ang2+0.38),vpy-13*Math.sin(ang2+0.38));
+        ctx.closePath(); ctx.fillStyle=riskCol; ctx.fill();
+
+        // Vector label with pill
+        const lbl=`|\u03c8\u27e9  P(DO) = ${{(S.risk*100).toFixed(1)}}%`;
+        ctx.font="bold 13px -apple-system,sans-serif";
+        const lw=ctx.measureText(lbl).width;
+        const lx=vpx>cx ? vpx+12 : vpx-lw-12;
+        const ly=vpy<90 ? vpy+22 : vpy-10;
+        ctx.fillStyle="rgba(255,255,255,0.90)";
+        ctx.fillRect(lx-3,ly-14,lw+6,19);
+        ctx.fillStyle=riskCol; ctx.fillText(lbl,lx,ly);
+
+        // Equatorial superposition ring
+        if(S.si>0.6){{
+          ctx.beginPath(); let fi3=true;
+          for(let a=0;a<=360;a+=4){{
+            const r=a*Math.PI/180;
+            const [sx,sy]=proj(Math.cos(r),0,Math.sin(r),ry,rx);
+            fi3?(ctx.moveTo(sx,sy),fi3=false):ctx.lineTo(sx,sy);
+          }}
+          ctx.closePath();
+          ctx.strokeStyle="#B8850A55"; ctx.lineWidth=2;
+          ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
+        }}
+
+        // Centre dot
+        ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2);
+        ctx.fillStyle="#bbb"; ctx.fill();
+
+        // Sub-label
+        document.getElementById("bloch-label").textContent =
+          "\u03b8 = "+(S.theta*180/Math.PI).toFixed(1)+"\u00b0  \u00b7  "
+          +"\u03c6 = "+(S.phi*180/Math.PI).toFixed(1)+"\u00b0  \u00b7  "
+          +"SI = "+S.si.toFixed(3);
       }}
-      ctx.strokeStyle="rgba(0,0,0,0.05)"; ctx.lineWidth=0.7; ctx.stroke();
-    }}
 
-    // Horizontal axes (rotate with sphere)
-    const [ocx,ocy]=proj(0,0,0,ry,rx);
-    const [rx1,ry1]=proj(0.85,0,0,ry,rx);
-    const [mx1,my1]=proj(-0.85,0,0,ry,rx);
-    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(rx1,ry1);
-    ctx.strokeStyle=C_RISK+"88"; ctx.lineWidth=1.1;
-    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle=C_RISK; ctx.font="bold 12px -apple-system,sans-serif";
-    ctx.fillText("Risk",rx1+5,ry1+4);
-    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(mx1,my1);
-    ctx.strokeStyle=C_MIT+"88"; ctx.lineWidth=1.1;
-    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle=C_MIT; ctx.font="bold 12px -apple-system,sans-serif";
-    const mw=ctx.measureText("Mitigation").width;
-    ctx.fillText("Mitigation",mx1-mw-5,my1+4);
-
-    // Vertical axis (also rotates in 3D)
-    const [ap1,ap2]=proj(0,0.85,0,ry,rx);
-    const [an1,an2]=proj(0,-0.85,0,ry,rx);
-    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(ap1,ap2);
-    ctx.strokeStyle=C_POLE+"55"; ctx.lineWidth=1.1;
-    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.moveTo(ocx,ocy); ctx.lineTo(an1,an2);
-    ctx.strokeStyle=C_MID+"55"; ctx.lineWidth=1.1;
-    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
-
-    // Pole labels — attached to the rotated pole positions
-    const [np1,np2]=proj(0,1.04,0,ry,rx);
-    const [sp1,sp2]=proj(0,-1.04,0,ry,rx);
-    ctx.textAlign="center";
-    ctx.fillStyle=C_POLE; ctx.font="bold 12px -apple-system,sans-serif";
-    ctx.fillText("|DO\u27e9  P=1.0",np1,np2-10);
-    ctx.fillStyle=C_MID; ctx.font="12px -apple-system,sans-serif";
-    ctx.fillText("|\u00acDO\u27e9  P=0.0",sp1,sp2+20);
-    ctx.textAlign="left";
-
-    // State vector — in world space, same 3D rotation applied
-    const th=S.theta, ph=S.phi;
-    const svx=Math.sin(th)*Math.cos(ph);
-    const svy=Math.cos(th);
-    const svz=Math.sin(th)*Math.sin(ph);
-    const [ovx,ovy]=proj(0,0,0,ry,rx);
-    const [vpx,vpy]=proj(svx*0.92,svy*0.92,svz*0.92,ry,rx);
-
-    // Glow
-    ctx.shadowColor=riskCol+"44"; ctx.shadowBlur=16;
-    ctx.beginPath(); ctx.moveTo(ovx,ovy); ctx.lineTo(vpx,vpy);
-    ctx.strokeStyle=riskCol; ctx.lineWidth=4; ctx.stroke();
-    ctx.shadowBlur=0;
-
-    // Arrowhead
-    const ang2=Math.atan2(vpy-ovy,vpx-ovx);
-    ctx.beginPath();
-    ctx.moveTo(vpx,vpy);
-    ctx.lineTo(vpx-13*Math.cos(ang2-0.38),vpy-13*Math.sin(ang2-0.38));
-    ctx.lineTo(vpx-13*Math.cos(ang2+0.38),vpy-13*Math.sin(ang2+0.38));
-    ctx.closePath(); ctx.fillStyle=riskCol; ctx.fill();
-
-    // Vector label with pill
-    const lbl=`|\u03c8\u27e9  P(DO) = ${{(S.risk*100).toFixed(1)}}%`;
-    ctx.font="bold 13px -apple-system,sans-serif";
-    const lw=ctx.measureText(lbl).width;
-    const lx=vpx>cx ? vpx+12 : vpx-lw-12;
-    const ly=vpy<90 ? vpy+22 : vpy-10;
-    ctx.fillStyle="rgba(255,255,255,0.90)";
-    ctx.fillRect(lx-3,ly-14,lw+6,19);
-    ctx.fillStyle=riskCol; ctx.fillText(lbl,lx,ly);
-
-    // Equatorial superposition ring
-    if(S.si>0.6){{
-      ctx.beginPath(); let fi3=true;
-      for(let a=0;a<=360;a+=4){{
-        const r=a*Math.PI/180;
-        const [sx,sy]=proj(Math.cos(r),0,Math.sin(r),ry,rx);
-        fi3?(ctx.moveTo(sx,sy),fi3=false):ctx.lineTo(sx,sy);
+      // ── 3D precession animation ──────────────────────────────────────────────
+      // Mimics the physical precession of a spin-1/2 particle on the Bloch sphere:
+      //   - Primary: slow continuous rotation around Z (vertical) axis  — azimuthal precession
+      //   - Secondary: gentle sinusoidal tilt around X axis             — nutation / latitude wobble
+      // Together these trace an elegant looping path characteristic of genuine
+      // Bloch-sphere dynamics under a static magnetic field.
+      let t0=null;
+      function animate(ts){{
+        if(!t0) t0=ts;
+        const e=(ts-t0)/1000;                 // seconds elapsed
+        const ry = (e * 2*Math.PI/20);        // full Y rotation every 20s
+        const rx = 0.28*Math.sin(e*2*Math.PI/9);  // ±16° X tilt, period 9s
+        draw(ry, rx);
+        requestAnimationFrame(animate);
       }}
-      ctx.closePath();
-      ctx.strokeStyle="#B8850A55"; ctx.lineWidth=2;
-      ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
-    }}
+      requestAnimationFrame(animate);
+    }})();
+    </script>
+    """
 
-    // Centre dot
-    ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2);
-    ctx.fillStyle="#bbb"; ctx.fill();
-
-    // Sub-label
-    document.getElementById("bloch-label").textContent =
-      "\u03b8 = "+(S.theta*180/Math.PI).toFixed(1)+"\u00b0  \u00b7  "
-      +"\u03c6 = "+(S.phi*180/Math.PI).toFixed(1)+"\u00b0  \u00b7  "
-      +"SI = "+S.si.toFixed(3);
-  }}
-
-  // ── 3D precession animation ──────────────────────────────────────────────
-  // Mimics the physical precession of a spin-1/2 particle on the Bloch sphere:
-  //   - Primary: slow continuous rotation around Z (vertical) axis  — azimuthal precession
-  //   - Secondary: gentle sinusoidal tilt around X axis             — nutation / latitude wobble
-  // Together these trace an elegant looping path characteristic of genuine
-  // Bloch-sphere dynamics under a static magnetic field.
-  let t0=null;
-  function animate(ts){{
-    if(!t0) t0=ts;
-    const e=(ts-t0)/1000;                 // seconds elapsed
-    const ry = (e * 2*Math.PI/20);        // full Y rotation every 20s
-    const rx = 0.28*Math.sin(e*2*Math.PI/9);  // ±16° X tilt, period 9s
-    draw(ry, rx);
-    requestAnimationFrame(animate);
-  }}
-  requestAnimationFrame(animate);
-}})();
-</script>
-"""
-
-    # ── Layout: animated sphere + legend + state ──────────────────────────────
-    qb1, qb2 = st.columns([3, 2])
-
-    with qb1:
-        st.markdown("#### Bloch sphere — quantum belief state |ψ⟩")
-        st.caption("The state vector rotates slowly to illustrate the superposition of belief states. North pole = fully collapsed to DO (P=1). South pole = fully collapsed to no DO (P=0). Equator = maximum pre-decisional ambiguity (P=0.5).")
         st.components.v1.html(bloch_html, height=620, scrolling=False)
 
-    with qb2:
+    with _bloch_qb2:
+        # State-vector readout — uses canvas-convention angles for consistency
         st.markdown("#### State vector")
-        from quantum_diagnostics import density_matrix_summary as _dms
-        _dm = _dms(dn7)
-        state_col = "#A32D2D" if dn7>=0.55 else "#BA7517" if dn7>=0.35 else "#3B6D11"
+        _state_col = ("#A32D2D" if p_high_n20 >= 0.55
+                      else "#BA7517" if p_high_n20 >= 0.35
+                      else "#3B6D11")
         st.markdown(
-            f"<div style='background:#f8f8f8;border-radius:10px;padding:.8rem 1rem;margin-bottom:.6rem'>"
-            f"<div style='font-size:.72rem;color:#888;margin-bottom:3px'>Node 20 — DO designation risk</div>"
-            f"<div style='font-size:1.8rem;font-weight:800;font-family:monospace;color:{state_col}'>"
-            f"{dn7*100:.1f}%</div>"
+            f"<div style='background:#f8f8f8;border-radius:10px;"
+            f"padding:.8rem 1rem;margin-bottom:.6rem'>"
+            f"<div style='font-size:.72rem;color:#888;margin-bottom:3px'>"
+            f"Node 20 — DO designation risk</div>"
+            f"<div style='font-size:1.8rem;font-weight:800;font-family:monospace;"
+            f"color:{_state_col}'>{p_high_n20*100:.1f}%</div>"
             f"<div style='font-size:.8rem;color:#555;margin-top:4px'>"
-            f"θ = {theta_deg:.1f}° &nbsp;·&nbsp; φ = {phi_deg:.1f}° &nbsp;·&nbsp; SI = {si:.3f}</div>"
-            f"</div>",
-            unsafe_allow_html=True)
+            f"θ = {_theta_canvas_deg:.1f}° &nbsp;·&nbsp; φ = {_phi_canvas_deg:.1f}° "
+            f"&nbsp;·&nbsp; SI = {si:.3f}</div></div>",
+            unsafe_allow_html=True
+        )
 
-        # ── Density matrix — always visible ──────────────────────────────────
-        st.markdown(
-            f"<div style='background:#F7F5F2;border:1px solid #E0DDD6;border-radius:8px;"
-            f"padding:.65rem 1rem;margin-bottom:.5rem;font-size:.78rem'>"
-            f"<div style='font-weight:700;color:#1B2A4A;margin-bottom:4px'>Density matrix ρ</div>"
-            f"<div style='font-family:monospace;color:#333;margin-bottom:4px'>"
-            f"ρ = [[{_dm['rho'][0][0]:.3f}, &nbsp;{_dm['rho'][0][1]:.3f}]<br>"
-            f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[{_dm['rho'][1][0]:.3f}, &nbsp;{_dm['rho'][1][1]:.3f}]]"
-            f"</div>"
-            f"<div style='color:#666'>"
-            f"Coherence: <b>{_dm['coherence']}</b> &nbsp;·&nbsp; "
-            f"Purity Tr(ρ²): <b>{_dm['purity']}</b><br>"
-            f"<span style='color:#888;font-style:italic'>{_dm['interpretation']}</span>"
-            f"</div></div>",
-            unsafe_allow_html=True)
-
-        # ── Tasteful legend ───────────────────────────────────────────────────
-        st.markdown("#### Legend")
-        legend_items = [
-            ("θ (theta)", "Polar angle from North Pole. θ=0° means P(DO)=1.0 (fully resolved to designation). θ=180° means P(DO)=0.0. θ=90° means P=0.5, maximum superposition.", "#185FA5"),
-            ("φ (phi)", "Azimuthal angle encoding the balance between the risk narrative (Node 2/3/4/18 aggregate) and the mitigation/distortion narrative (Node 5/6/10/12/14).", "#534AB7"),
-            ("|ψ⟩ (psi)", "The belief state vector. Its position on the sphere encodes both the probability estimate and the epistemic confidence in that estimate.", "#1B2A4A"),
-            ("SI — Superposition index", "Measures how far the belief state is from a classical resolved answer. SI=1.0 means maximum superposition (equator). SI=0.0 means fully resolved (pole). High SI signals the legal system is operating in a zone of genuine epistemic ambiguity.", "#BA7517"),
-            ("|DO⟩ / |¬DO⟩", "The two basis states: North Pole = certain DO designation, South Pole = certain no designation. Classical probability lives on this axis. The QBism layer asks whether the system has left this axis.", "#A32D2D"),
-            ("Equatorial ring", "Appears when SI > 0.6 — marks the zone of maximum pre-decisional ambiguity. Per AQ.3.3.5.2 this should be preserved as a stable epistemic condition, not artificially collapsed by the model.", "#BA7517"),
-            ("ρ — Density matrix", "The 2×2 matrix encoding the full belief state. Diagonal entries are P(DO) and P(¬DO). Off-diagonal entries are the coherence terms — non-zero coherence means the belief state is genuinely superposed, not merely uncertain. A diagonal ρ (coherence = 0) is a classically resolved state. Reference: Nielsen & Chuang (2000) §2.4; Busemeyer & Bruza (2012) §2.3.", "#0F6E56"),
-            ("Coherence", "The off-diagonal term of ρ — √(P(DO) · P(¬DO)). Maximum at P=0.5 (0.500), zero at the poles. Measures how much the belief state is genuinely holding both conclusions simultaneously, as opposed to simply being uncertain between them. A court deciding on a high-coherence belief state is resolving ambiguity the evidence has not resolved.", "#0F6E56"),
-            ("Purity Tr(ρ²)", "Ranges from 0.5 (maximally mixed — maximum uncertainty) to 1.0 (pure state — fully resolved). Purity below 0.75 indicates the belief state is insufficiently resolved to support a high-confidence designation. The VE posterior may be numerically precise while the underlying epistemic state remains impure. This is the thesis's core claim about the limits of classical inference in distorted legal systems.", "#0F6E56"),
-        ]
-        for term, defn, col in legend_items:
+        # Density matrix readout (uses the same density_matrix_summary that
+        # the original tab used — keeps coherence/purity computations consistent)
+        try:
+            from quantum_diagnostics import density_matrix_summary as _dms
+            _dm = _dms(p_high_n20)
             st.markdown(
-                f"<div style='border-left:3px solid {col};padding:.35rem .7rem;"
-                f"margin-bottom:.4rem;background:#fafafa;border-radius:0 6px 6px 0'>"
-                f"<div style='font-size:.78rem;font-weight:700;color:{col}'>{term}</div>"
-                f"<div style='font-size:.73rem;color:#555;line-height:1.4'>{defn}</div>"
-                f"</div>",
-                unsafe_allow_html=True)
+                f"<div style='background:#F7F5F2;border:1px solid #E0DDD6;"
+                f"border-radius:8px;padding:.65rem 1rem;margin-bottom:.5rem;"
+                f"font-size:.78rem'>"
+                f"<div style='font-weight:700;color:#1B2A4A;margin-bottom:4px'>"
+                f"Density matrix ρ</div>"
+                f"<div style='font-family:monospace;color:#333;margin-bottom:4px'>"
+                f"ρ = [[{_dm['rho'][0][0]:.3f}, &nbsp;{_dm['rho'][0][1]:.3f}]<br>"
+                f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[{_dm['rho'][1][0]:.3f}, "
+                f"&nbsp;{_dm['rho'][1][1]:.3f}]]</div>"
+                f"<div style='color:#666'>"
+                f"Coherence: <b>{_dm['coherence']}</b> &nbsp;·&nbsp; "
+                f"Purity Tr(ρ²): <b>{_dm['purity']}</b><br>"
+                f"<span style='color:#888;font-style:italic'>"
+                f"{_dm['interpretation']}</span></div></div>",
+                unsafe_allow_html=True
+            )
+        except Exception as _dm_err:
+            st.caption(f"Density matrix unavailable: {_dm_err}")
 
-        # Comparison chart (static matplotlib)
-        if diags:
-            fc = draw_comparison_chart(dn7, dn7, si)
-            st.pyplot(fc, use_container_width=True)
-
-        # ── Why QBism over classical? ─────────────────────────────────────────
-        with st.expander("❓ Why quantum values alongside classical Bayesian?", expanded=False):
-            # Pre-compute dynamic values to avoid format() conflicts with markdown tables
-            _si_str   = f"{si:.3f}"
-            _dn7_str  = f"{dn7*100:.1f}"
-            _si_state = "well resolved" if si > 0.7 else "in moderate superposition" if si > 0.4 else "near maximum pre-decisional ambiguity"
-            st.markdown(f"""
-**Classical Bayesian inference** (Variable Elimination — what Node 20 computes) gives you a single
-probability: *P(DO designation) = {_dn7_str}%*. This is mathematically rigorous and the core of PARVIS.
-
-**But it has a structural limitation in legal settings:** it treats each node's posterior as a stable,
-independent belief state. In reality, the legal reasoning process is subject to:
-
-| Classical assumption | What actually happens in DO proceedings |
-|---|---|
-| Priors are independent | Distorted priors propagate through the network (Bail-denial → coercive plea → conviction → record) |
-| Evidence is commutative | The *order* evidence is presented alters judicial belief (Busemeyer & Bruza 2012 §4.3) |
-| Context is fixed | The same Gladue factor carries different weight depending on which other factors surround it |
-| Belief is resolved | Sentencing courts are required to decide even when epistemic conditions are genuinely ambiguous |
-
-**QBism (Quantum Bayesianism)** treats the belief state as a *superposition* — the judge holds
-both |DO⟩ and |¬DO⟩ simultaneously until the moment of decision. This is not a metaphor: it
-generates measurable predictions about non-commutativity and contextual interference that
-classical Bayes cannot.
-
-**The Bloch sphere encodes this:**
-- The **state vector |ψ⟩** sits on the sphere. Its polar angle θ encodes the classical probability
-  (P(DO) = cos²(θ/2)), while its azimuthal angle φ and distance from the poles encode *how resolved*
-  that belief actually is.
-- **Superposition index (SI) = |2·P - 1|** measures distance from the equator. SI=0 = maximum
-  ambiguity. SI=1 = fully resolved. Current SI = **{_si_str}** — the system is **{_si_state}**.
-
-**The diagnostic value is not in changing the number.** Node 20 stays at {_dn7_str}%. The value is
-in identifying whether the conditions that produced that number are epistemically stable — or whether
-the system has produced a precise answer from imprecise foundations.
-
-*Thesis reference: Appendix Q §AQ.3.3 — The four diagnostic conditions (prior contamination, order
-effects, contextual interference, belief stasis) each represent a departure from the classical
-independence assumption that Variable Elimination requires to be valid.*
-            """)
-
-    # ── Diagnostic conditions ─────────────────────────────────────────────────
-    if diags:
-        st.markdown("---")
-        ov = diags.get("overall_flag", "none")
-        cls = {"high":     "qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
-               "moderate": "qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
-               "none":     "qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(ov, "qh")
-        st.markdown(f"<div class='{cls}'><b>Overall: {ov.upper()}</b> — {diags.get('summary','')}</div>",
-                    unsafe_allow_html=True)
-        st.markdown("#### Diagnostic conditions")
-        for ttl, key, doc in [
-            ("1. Prior contamination",     "prior_contamination",    "AQ.3.3.2 — Distorted priors propagated, not corrected"),
-            ("2. Order effects",           "order_effects",          "AQ.3.3.3 — M₁M₂ρ ≠ M₂M₁ρ · sequence alters belief"),
-            ("3. Contextual interference", "contextual_interference","AQ.3.3.4 — P(H|C₁) ≠ P(H|C₂) · Kochen-Specker"),
-            ("4. Belief stasis",           "belief_stasis",          "AQ.3.3.4 — SCE acknowledged but inert"),
-        ]:
-            d = diags.get(key, {}); sev = d.get("severity", "none")
-            cs2 = {"high":     "qh;background:#FCEBEB;color:#A32D2D;border-left:3px solid #A32D2D",
-                   "moderate": "qh;background:#FAEEDA;color:#BA7517;border-left:3px solid #BA7517",
-                   "none":     "qh;background:#EAF3DE;color:#3B6D11;border-left:3px solid #3B6D11"}.get(sev, "qh")
-            with st.expander(f"{ttl} — {sev.upper()}"):
-                st.markdown(f"<div class='{cs2}'>{doc}</div>", unsafe_allow_html=True)
-                for item in d.get("items", []):
-                    if isinstance(item, str): st.markdown(f"▸ {item}")
-                    elif isinstance(item, dict):
-                        for k, v in item.items(): st.markdown(f"**{k}:** {v}")
-                if not d.get("items"): st.success("No conditions flagged.")
-                st.caption(d.get("doctrine", ""))
-
-        # ── Plain language NLP layer ──────────────────────────────────────────
-        st.markdown("---")
-        st.markdown("#### 🗣️ Plain language interpretation")
-        st.caption("Translates the QBism diagnostic into plain English for judges, counsel, and lay readers. Requires an API key.")
-
-        # API key resolution
-        _plak = st.session_state.get("chat_ak", "")
-        if not _plak:
-            try: _plak = st.secrets.get("ANTHROPIC_API_KEY", "")
-            except Exception: pass
-        if not _plak:
-            import os; _plak = os.environ.get("ANTHROPIC_API_KEY", "")
-
-        if not _plak:
-            st.warning("Enter your Anthropic API key in the Intake (Chat) tab — ⚙️ API settings — to enable plain language output.")
-        else:
-            if st.button("🗣️ Generate plain language report", key="qbism_plain_btn"):
-                with st.spinner("Translating diagnostics into plain English…"):
-                    try:
-                        import anthropic as _ant
-                        from quantum_diagnostics import build_plain_language_prompt, density_matrix_summary
-
-                        _prompt = build_plain_language_prompt(diags, P)
-                        _client = _ant.Anthropic(api_key=_plak)
-                        _resp   = _client.messages.create(
-                            model="claude-opus-4-5",
-                            max_tokens=1200,
-                            messages=[{"role": "user", "content": _prompt}]
-                        )
-                        _plain_text = _resp.content[0].text
-                        st.session_state["qbism_plain"] = _plain_text
-
-                        # Also store density matrix summary
-                        _dm = density_matrix_summary(P[20])
-                        st.session_state["qbism_dm"] = _dm
-
-                    except Exception as _ex:
-                        st.error(f"Error generating plain language report: {_ex}")
-
-            # Display cached plain language output
-            if st.session_state.get("qbism_plain"):
-                _dm = st.session_state.get("qbism_dm", {})
-                # Density matrix callout
-                if _dm:
-                    st.markdown(
-                        f"<div style='background:#F7F5F2;border:1px solid #E0DDD6;border-radius:8px;"
-                        f"padding:.6rem 1rem;margin-bottom:.8rem;font-size:.8rem;font-family:monospace'>"
-                        f"<b>Density matrix ρ</b> &nbsp;·&nbsp; "
-                        f"Coherence: {_dm['coherence']} &nbsp;·&nbsp; "
-                        f"Purity: {_dm['purity']} &nbsp;·&nbsp; "
-                        f"{_dm['interpretation']}<br>"
-                        f"ρ = [[{_dm['rho'][0][0]:.3f}, {_dm['rho'][0][1]:.3f}], "
-                        f"[{_dm['rho'][1][0]:.3f}, {_dm['rho'][1][1]:.3f}]]"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
-                # Plain language report
-                st.markdown(
-                    f"<div style='background:#FDFCFA;border:1px solid #E8E4DC;border-radius:12px;"
-                    f"padding:1.2rem 1.4rem;line-height:1.7'>"
-                    f"{st.session_state['qbism_plain'].replace(chr(10), '<br>')}"
-                    f"</div>",
-                    unsafe_allow_html=True
-                )
-                # Download button
-                st.download_button(
-                    "📄 Download plain language report (.txt)",
-                    data=st.session_state["qbism_plain"].encode(),
-                    file_name=f"PARVIS_QBism_PlainLanguage_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                    mime="text/plain",
-                    key="qbism_plain_dl"
-                )
-    else:
-        st.info("Run inference on any tab to populate the QBism diagnostics. The state vector above updates in real time as you adjust case profile settings.")
+    # ── Plain-language audit report (collapsed by default) ────────────────────
+    if st.session_state.get("qbism_plain"):
+        with st.expander("Plain-language audit report", expanded=False):
+            st.markdown(st.session_state.qbism_plain)
 
 # ── T8: Document analysis ─────────────────────────────────────────────────────
 with TABS[9]:
