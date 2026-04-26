@@ -237,11 +237,181 @@ def dobar(p, label="DO designation risk", show_cr=False):
       </div>
       {cr_badge}</div></div>"""
 
+
+# ── Summary tab helpers (Mark 8) ──────────────────────────────────────────────
+def _summary_band(p):
+    """Return (label, fg, bg) styled for the Summary headline card."""
+    if p < .20: return "Very low", "#3B6D11", "#EAF3DE"
+    if p < .40: return "Low",      "#3B6D11", "#EAF3DE"
+    if p < .55: return "Moderate", "#BA7517", "#FAEEDA"
+    if p < .70: return "Elevated", "#BA7517", "#FAEEDA"
+    if p < .85: return "High",     "#A32D2D", "#FCEBEB"
+    return "Very high", "#A32D2D", "#FCEBEB"
+
+def _top_drivers(P, k=5):
+    """
+    Return (up_drivers, down_drivers) — each a list of dicts:
+        {nid:int, short:str, type_:str, type_label:str, color:str, p:float}
+
+    Doctrinally-typed split (Option B):
+      ↑ increasing  : risk-typed nodes  +  duals with P>=0.5
+      ↓ decreasing  : mitigation-typed  +  distortion-typed (corrections)
+                      +  causal/special detectors  +  duals with P<0.5
+    Within each list, ranked by P(High) descending. Output (N20) excluded.
+    """
+    up, dn = [], []
+    for nid in range(1, 20):  # exclude N20 (output)
+        meta = NODE_META.get(nid, {})
+        t = meta.get("type", "")
+        p = float(P.get(nid, 0.0))
+        entry = {
+            "nid":  nid,
+            "short": meta.get("short", f"N{nid}"),
+            "type_": t,
+            "type_label": TL.get(t, t.title()),
+            "color": TC.get(t, "#888"),
+            "p":     p,
+        }
+        if t == "risk":
+            up.append(entry)
+        elif t in ("mitigation", "distortion", "special"):
+            dn.append(entry)
+        elif t == "dual":
+            (up if p >= 0.5 else dn).append(entry)
+        elif t == "constraint":
+            # Constraints are evidentiary anchors — high posterior pushes structure up.
+            up.append(entry)
+        else:
+            (up if p >= 0.5 else dn).append(entry)
+    up.sort(key=lambda e: e["p"], reverse=True)
+    dn.sort(key=lambda e: e["p"], reverse=True)
+    return up[:k], dn[:k]
+
+def _completeness_state():
+    """
+    Return list of dicts describing the populated-ness of each input surface:
+        {label, status('done'|'partial'|'empty'), detail, target_tab_index}
+
+    Heuristics chosen so a freshly-opened app reads as 'mostly empty' and a
+    case where every surface has been touched reads as 'all complete'.
+    """
+    ss = st.session_state
+    items = []
+
+    # Case profile — populated if profile_ev is non-empty
+    pev = ss.get("profile_ev", {}) or {}
+    if pev:
+        items.append({"label":"Case profile","status":"done",
+                      "detail":f"{len(pev)} field(s) recorded","tab":2})
+    else:
+        items.append({"label":"Case profile","status":"empty",
+                      "detail":"defaults only","tab":2})
+
+    # Criminal record
+    rec = ss.get("criminal_record", []) or []
+    if len(rec) >= 2:
+        items.append({"label":"Criminal record","status":"done",
+                      "detail":f"{len(rec)} convictions entered","tab":4})
+    elif rec:
+        items.append({"label":"Criminal record","status":"partial",
+                      "detail":f"{len(rec)} conviction entered","tab":4})
+    else:
+        items.append({"label":"Criminal record","status":"empty",
+                      "detail":"none entered","tab":4})
+
+    # Gladue factors (17 total)
+    gl = ss.get("gladue_checked", set()) or set()
+    GL_TOTAL = 17
+    if len(gl) >= 6:
+        items.append({"label":"Gladue factors","status":"done",
+                      "detail":f"{len(gl)} of {GL_TOTAL} checked","tab":5})
+    elif gl:
+        items.append({"label":"Gladue factors","status":"partial",
+                      "detail":f"{len(gl)} of {GL_TOTAL} checked","tab":5})
+    else:
+        items.append({"label":"Gladue factors","status":"empty",
+                      "detail":"none checked","tab":5})
+
+    # Morris/Ellis SCE — done if framework selected and any factor has weight
+    sce_vals = ss.get("sce_values", {}) or {}
+    sce_active = sum(1 for v in sce_vals.values() if v and float(v) > 0)
+    fw = (ss.get("scefw") or "morris").title()
+    if sce_active >= 3:
+        items.append({"label":"Morris/Ellis SCE","status":"done",
+                      "detail":f"{fw} · {sce_active} factor(s) weighted","tab":6})
+    elif sce_active:
+        items.append({"label":"Morris/Ellis SCE","status":"partial",
+                      "detail":f"{fw} · {sce_active} factor(s) weighted","tab":6})
+    else:
+        items.append({"label":"Morris/Ellis SCE","status":"empty",
+                      "detail":f"{fw} framework, no factors yet","tab":6})
+
+    # Risk & Distortions — manual_ev shows which nodes have manual overrides
+    mev = ss.get("manual_ev", {}) or {}
+    if len(mev) >= 5:
+        items.append({"label":"Risk & Distortions","status":"done",
+                      "detail":f"{len(mev)} of 15 nodes calibrated","tab":7})
+    elif mev:
+        items.append({"label":"Risk & Distortions","status":"partial",
+                      "detail":f"{len(mev)} of 15 nodes calibrated","tab":7})
+    else:
+        items.append({"label":"Risk & Distortions","status":"empty",
+                      "detail":"all at default","tab":7})
+
+    # Documents — doc_res list
+    docs = ss.get("doc_res", []) or []
+    if docs:
+        items.append({"label":"Documents","status":"done",
+                      "detail":f"{len(docs)} analysed","tab":9})
+    else:
+        items.append({"label":"Documents","status":"empty",
+                      "detail":"none uploaded","tab":9})
+
+    # Scenarios
+    scn = ss.get("saved_scenarios", {}) or {}
+    if scn:
+        items.append({"label":"Scenarios","status":"done",
+                      "detail":f"{len(scn)} saved","tab":10})
+    else:
+        items.append({"label":"Scenarios","status":"empty",
+                      "detail":"no counterfactuals","tab":10})
+
+    return items
+
+def _doctrinal_frame():
+    """Return dict of doctrinal-frame values for the Summary tab."""
+    ss = st.session_state
+    fw = (ss.get("scefw") or "morris").lower()
+    if fw == "ellis":
+        fw_label, fw_color = "Ellis", TC["distortion"]
+    elif fw == "both":
+        fw_label, fw_color = "Morris + Ellis", TC["dual"]
+    else:
+        fw_label, fw_color = "Morris", TC["distortion"]
+
+    conn_strength = ss.get("conn", "moderate")
+    enex_strength = ss.get("enex", "relevant")
+    conn_mult = {"none":0,"absent":0,"weak":.30,"moderate":.65,"strong":.90,"direct":1.0}.get(conn_strength, .65)
+
+    qd = ss.get("qdiags", {}) or {}
+    qbism_count = qd.get("count", 0) if isinstance(qd, dict) else 0
+    qbism_summary = "None — VE coherent" if qbism_count == 0 else f"{qbism_count} flag(s)"
+
+    return {
+        "fw_label": fw_label,
+        "fw_color": fw_color,
+        "conn_label": conn_strength.title(),
+        "conn_mult": conn_mult,
+        "enex_label": enex_strength.title(),
+        "qbism_summary": qbism_summary,
+    }
+
 # ── Session state ─────────────────────────────────────────────────────────────
 def _init():
     defs = {"model":None,"engine":None,"profile_ev":{},"gladue_checked":set(),"criminal_record":[],"cr_doc_adj":{},"saved_scenarios":{},
             "sce_checked":set(),"sce_values":{},"manual_ev":{},"doc_adj":{},"posteriors":{},
-            "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[],"qbism_plain":"","qbism_dm":{}}
+            "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[],"qbism_plain":"","qbism_dm":{},
+            "case_id":"","case_jur":""}
     for k,v in defs.items():
         if k not in st.session_state: st.session_state[k]=v
 _init()
@@ -366,19 +536,23 @@ def _sync_profile_from_widgets():
     idbg   = ss.get("id_bg", "Not recorded / unknown")
     pclr   = ss.get("pclr", 20)
     s99    = ss.get("s99", 3)
-    viol   = ss.get("viol", "Serious")
+    # Mark 8 fix: fallback defaults aligned with actual Streamlit widget defaults
+    # (each selectbox defaults to its first option). Prior to this, the fallbacks
+    # were biased toward high-severity values, which caused the first-paint
+    # header DO chip to show ~31.5% before snapping to ~24.9% on widget population.
+    viol   = ss.get("viol", "None")
     fasd   = ss.get("fasd", "None / not assessed")
-    sub    = ss.get("sub", "Moderate")
-    peers  = ss.get("peers", "Some — limited")
-    stab   = ss.get("stab", "Marginal")
+    sub    = ss.get("sub", "None / in remission")
+    peers  = ss.get("peers", "None identified")
+    stab   = ss.get("stab", "Stable")
     det    = ss.get("det", 60)
-    counsel= ss.get("counsel", "Marginal")
-    gr     = ss.get("gr", "No report commissioned")
-    tools  = ss.get("tools", "Standard, no cultural qualification")
-    pol    = ss.get("pol", "Strong — documented over-surveillance")
-    prov   = ss.get("prov", "Medium rate")
-    prog   = ss.get("prog", "Limited availability")
-    rehab  = ss.get("rehab", "Minimal")
+    counsel= ss.get("counsel", "Adequate")
+    gr     = ss.get("gr", "Yes — full report before court")
+    tools  = ss.get("tools", "Culturally validated only")
+    pol    = ss.get("pol", "No evidence")
+    prov   = ss.get("prov", "Low DO designation rate")
+    prog   = ss.get("prog", "Yes — full culturally grounded")
+    rehab  = ss.get("rehab", "Strong — consistent")
 
     isr = idbg in ["Indigenous — s.718.2(e) + Gladue","Black — Morris IRCA","Other racialized — Morris"]
     pev={}
@@ -500,13 +674,229 @@ except ImportError:
     def canlii_ok(): return False
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-TABS=st.tabs(["🕸️ Architecture","📋 Profile","💬 Intake (Chat)",
+TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake (Chat)",
               "📜 Criminal Record","🦅 Gladue","⚖️ SCE",
               "🔬 Risk & Distortions","📊 Inference","📂 Documents",
               "🔀 Scenarios","⚛️ Quantum","📄 Report"])
 
-# ── T1: Architecture ──────────────────────────────────────────────────────────
+# ── T0: Summary (Mark 8) ──────────────────────────────────────────────────────
 with TABS[0]:
+    _band_lbl, _band_fg, _band_bg = _summary_band(P[20])
+    _drv_up, _drv_dn = _top_drivers(P, k=5)
+    _comp = _completeness_state()
+    _doc = _doctrinal_frame()
+    _case_id   = (st.session_state.get("case_id") or "").strip() or "Untitled case"
+    _case_jur  = (st.session_state.get("case_jur") or "").strip()
+
+    # ── Zone 1: Headline ─────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:32px;align-items:center;
+                padding:24px 0 28px 0;border-bottom:1px solid rgba(0,0,0,.06);
+                margin-bottom:24px">
+      <div>
+        <div style="font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:2rem;
+                    letter-spacing:-0.01em;color:#1a1a1a;line-height:1.15">
+          {_case_id}
+        </div>
+        <div style="font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.95rem;
+                    color:#888;margin:6px 0 14px 0">
+          {(_case_jur + ' · ') if _case_jur else ''}Sentencing audit · PARVIS Bayesian network
+        </div>
+        <div style="font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.92rem;
+                    color:#3a3a3a;line-height:1.65;max-width:620px">
+          Posterior probability of Dangerous Offender designation given current evidence,
+          doctrinal corrections, and systemic distortion adjustments. Models DESIGNATION
+          RISK — not intrinsic dangerousness.
+        </div>
+      </div>
+      <div style="background:{_band_bg};border:1px solid {_band_fg}33;border-radius:14px;
+                  padding:18px 22px;text-align:center">
+        <div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;
+                    color:{_band_fg};font-weight:700;margin-bottom:6px">
+          DO Designation Risk
+        </div>
+        <div style="font-family:monospace;font-size:3rem;font-weight:600;color:{_band_fg};
+                    line-height:1">
+          {P[20]*100:.1f}<span style="font-size:1.4rem;opacity:0.7">%</span>
+        </div>
+        <div style="font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:1rem;
+                    color:{_band_fg};margin-top:4px">
+          {_band_lbl}
+        </div>
+        <div style="font-size:0.68rem;color:{_band_fg};opacity:0.78;margin-top:8px;
+                    line-height:1.4">
+          pgmpy Variable Elimination · Tetrad-bound
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Zone 2: Drivers ──────────────────────────────────────────────────────
+    st.markdown("### Drivers of the posterior")
+    st.caption("Top 5 nodes pushing DO risk up, top 5 pulling it down. "
+               "Increasing-side: risk and constraint nodes ranked by posterior. "
+               "Decreasing-side: mitigations, systemic distortion corrections, "
+               "and causal detectors.")
+
+    def _driver_html(d, direction):
+        arrow_color = "#A32D2D" if direction == "up" else "#3B6D11"
+        val_color   = arrow_color
+        return (
+            f'<div style="display:grid;grid-template-columns:42px 1fr 70px;gap:14px;'
+            f'align-items:center;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.05)">'
+            f'<div style="font-family:monospace;font-size:0.78rem;font-weight:600;'
+            f'text-align:center;padding:4px 0;border-radius:5px;color:white;'
+            f'background:{d["color"]}">N{d["nid"]}</div>'
+            f'<div><div style="font-size:0.92rem;color:#1a1a1a">{d["short"]}</div>'
+            f'<div style="font-family:\'Fraunces\',serif;font-style:italic;'
+            f'font-size:0.74rem;color:#888;margin-top:1px">{d["type_label"]}</div></div>'
+            f'<div style="font-family:monospace;font-size:1rem;font-weight:600;'
+            f'text-align:right;color:{val_color}">{d["p"]*100:.1f}%</div>'
+            f'</div>'
+        )
+
+    cdu, cdd = st.columns(2)
+    with cdu:
+        st.markdown(
+            '<div style="font-size:0.66rem;font-weight:700;text-transform:uppercase;'
+            'letter-spacing:0.16em;color:#888;margin-bottom:10px">'
+            '<span style="color:#A32D2D;font-family:monospace;margin-right:6px">↑</span>'
+            'Increasing DO risk</div>', unsafe_allow_html=True)
+        if _drv_up:
+            st.markdown("".join(_driver_html(d, "up") for d in _drv_up),
+                        unsafe_allow_html=True)
+        else:
+            st.caption("No increasing-side drivers above threshold.")
+    with cdd:
+        st.markdown(
+            '<div style="font-size:0.66rem;font-weight:700;text-transform:uppercase;'
+            'letter-spacing:0.16em;color:#888;margin-bottom:10px">'
+            '<span style="color:#3B6D11;font-family:monospace;margin-right:6px">↓</span>'
+            'Decreasing DO risk</div>', unsafe_allow_html=True)
+        if _drv_dn:
+            st.markdown("".join(_driver_html(d, "dn") for d in _drv_dn),
+                        unsafe_allow_html=True)
+        else:
+            st.caption("No decreasing-side drivers above threshold.")
+
+    st.markdown("---")
+
+    # ── Zone 3: Completeness + Doctrinal frame ───────────────────────────────
+    cc, cdoc = st.columns(2)
+    with cc:
+        st.markdown("### Input completeness")
+        st.caption("What's been entered, what's at default, what remains.")
+        _icon = {
+            "done":    ('✓', '#3B6D11', '#3B6D11'),
+            "partial": ('~', '#BA7517', '#FAEEDA'),
+            "empty":   ('○', '#9E9E9E', '#EFEDE7'),
+        }
+        rows = []
+        for it in _comp:
+            sym, fg, bg = _icon[it["status"]]
+            rows.append(
+                f'<div style="display:grid;grid-template-columns:24px 1fr auto;gap:12px;'
+                f'align-items:center;padding:9px 0;border-bottom:1px solid rgba(0,0,0,.05);'
+                f'font-size:0.92rem">'
+                f'<div style="width:20px;height:20px;border-radius:50%;display:flex;'
+                f'align-items:center;justify-content:center;font-family:monospace;'
+                f'font-size:0.74rem;font-weight:700;color:{"white" if it["status"]=="done" else fg};'
+                f'background:{bg if it["status"]!="done" else fg};'
+                f'border:1px solid {fg}">{sym}</div>'
+                f'<div>{it["label"]} '
+                f'<span style="font-family:\'Fraunces\',serif;font-style:italic;'
+                f'font-size:0.78rem;color:#888">— {it["detail"]}</span></div>'
+                f'<div style="font-family:\'Fraunces\',serif;font-style:italic;'
+                f'font-size:0.78rem;color:#888">{it["status"]}</div>'
+                f'</div>'
+            )
+        st.markdown("".join(rows), unsafe_allow_html=True)
+
+    with cdoc:
+        st.markdown("### Doctrinal frame")
+        st.caption("Active framework and connection-gate state under "
+                   "Morris para 97 (or Ellis nexus, where applicable).")
+        rows = [
+            ("Framework",
+             f'<span style="display:inline-block;font-size:0.74rem;padding:2px 9px;'
+             f'border-radius:10px;background:{_doc["fw_color"]};color:white;'
+             f'font-weight:500;margin-right:6px">{_doc["fw_label"]}</span>'
+             f'Connection gate active'),
+            ("Connection",
+             f'{_doc["conn_label"]} · weight multiplier '
+             f'<strong>{_doc["conn_mult"]:.2f}</strong>'),
+            ("Tetrad",
+             '<span style="font-family:\'Fraunces\',serif;font-style:italic;'
+             'font-size:0.86rem;color:#3a3a3a">'
+             'Gladue [1999], Morris 2021 ONCA 680, '
+             'Ellis 2022 BCCA 278, Ewert 2018 SCC 30</span>'),
+            ("QBism flags", _doc["qbism_summary"]),
+            ("Engine",      "pgmpy Variable Elimination · 20-node DAG"),
+        ]
+        rows_html = []
+        for k, v in rows:
+            rows_html.append(
+                f'<div style="display:grid;grid-template-columns:130px 1fr;gap:14px;'
+                f'padding:9px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:0.92rem">'
+                f'<div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;'
+                f'color:#888;font-weight:600;align-self:center">{k}</div>'
+                f'<div>{v}</div></div>'
+            )
+        st.markdown("".join(rows_html), unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Zone 4: Continue working — shortcut row ──────────────────────────────
+    st.markdown("### Continue working")
+    st.caption("Jump into the workflow surfaces most relevant to the current case state.")
+
+    # Determine the most useful next-action hint based on completeness
+    _next = next((it for it in _comp if it["status"] == "empty"),
+                 next((it for it in _comp if it["status"] == "partial"), None))
+    if _next:
+        _next_label  = f'Complete {_next["label"]}'
+        _next_detail = _next["detail"]
+    else:
+        _next_label  = "Review inference"
+        _next_detail = "All input surfaces populated."
+
+    sc1, sc2, sc3 = st.columns(3)
+    _shortcut_style = (
+        "border:1px solid rgba(0,0,0,.10);border-radius:10px;padding:14px 18px;"
+        "background:#FBFAF7;height:100%"
+    )
+    with sc1:
+        st.markdown(
+            f'<div style="{_shortcut_style}">'
+            f'<div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;'
+            f'color:#888;font-weight:600;margin-bottom:4px">Next action</div>'
+            f'<div style="font-family:\'Fraunces\',serif;font-size:1.05rem;color:#1a1a1a;'
+            f'font-weight:500">{_next_label}</div>'
+            f'<div style="font-size:0.78rem;color:#888;margin-top:3px">{_next_detail}</div>'
+            f'</div>', unsafe_allow_html=True)
+    with sc2:
+        st.markdown(
+            f'<div style="{_shortcut_style}">'
+            f'<div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;'
+            f'color:#888;font-weight:600;margin-bottom:4px">Drill in</div>'
+            f'<div style="font-family:\'Fraunces\',serif;font-size:1.05rem;color:#1a1a1a;'
+            f'font-weight:500">Inference posteriors</div>'
+            f'<div style="font-size:0.78rem;color:#888;margin-top:3px">'
+            f'Full 20-node breakdown with VE-computed probabilities.</div>'
+            f'</div>', unsafe_allow_html=True)
+    with sc3:
+        st.markdown(
+            f'<div style="{_shortcut_style}">'
+            f'<div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;'
+            f'color:#888;font-weight:600;margin-bottom:4px">Export</div>'
+            f'<div style="font-family:\'Fraunces\',serif;font-size:1.05rem;color:#1a1a1a;'
+            f'font-weight:500">Generate audit report</div>'
+            f'<div style="font-size:0.78rem;color:#888;margin-top:3px">'
+            f'PDF, DOCX, or TXT for legal review or viva.</div>'
+            f'</div>', unsafe_allow_html=True)
+
+# ── T1: Architecture ──────────────────────────────────────────────────────────
+with TABS[1]:
     cl,cr=st.columns([3,1])
     with cl:
         opts={None:"— none —"};opts.update({n:f"N{n}: {NODE_META[n]['name']}" for n in range(1,21)})
@@ -529,9 +919,17 @@ with TABS[0]:
             st.markdown(dobar(dp),unsafe_allow_html=True)
 
 # ── T2: Case profile ──────────────────────────────────────────────────────────
-with TABS[1]:
+with TABS[2]:
     st.markdown("### Case profile")
     st.caption("Each field maps to network nodes and drives Variable Elimination.")
+    # ── Case identifier (Mark 8) — surfaces in Summary tab headline ──
+    _ci_col1, _ci_col2 = st.columns([2, 1])
+    with _ci_col1:
+        st.text_input("Case identifier", key="case_id",
+                      placeholder="e.g. R v Smith")
+    with _ci_col2:
+        st.text_input("Jurisdiction / location", key="case_jur",
+                      placeholder="e.g. Calgary · Alberta")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
     c1,c2=st.columns(2);pev={}
     with c1:
@@ -600,7 +998,7 @@ with TABS[1]:
     st.success(f"Node 20 — DO designation risk: **{P[20]*100:.1f}%** · {bl2}")
 
 # ── T3: Gladue ────────────────────────────────────────────────────────────────
-with TABS[4]:
+with TABS[5]:
     st.markdown("### Gladue factors")
     st.caption("*R v Gladue* [1999] · *R v Ipeelee* [2012] · No causation requirement")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
@@ -620,7 +1018,7 @@ with TABS[4]:
     st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
 
 # ── T4: Morris/Ellis SCE ──────────────────────────────────────────────────────
-with TABS[5]:
+with TABS[6]:
     st.markdown("### Morris / Ellis SCE")
     st.caption("*R v Morris* 2021 ONCA 680 · *R v Ellis* 2022 BCCA 278")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
@@ -685,7 +1083,7 @@ with TABS[5]:
     st.success(f"Node 20: **{P[20]*100:.1f}%** · {rb(P[20])[0]}")
 
 # ── T5: Evidence review ───────────────────────────────────────────────────────
-with TABS[6]:
+with TABS[7]:
     st.markdown("### Evidence review")
     st.caption("Fine-tune node probabilities. Values auto-set from Case Profile and Gladue/SCE tabs.")
     st.markdown(dobar(P[20]),unsafe_allow_html=True)
@@ -711,7 +1109,7 @@ with TABS[6]:
     run_inf()
 
 # ── T6: Inference ─────────────────────────────────────────────────────────────
-with TABS[7]:
+with TABS[8]:
     P=st.session_state.posteriors;dp6=P[20];bl6,bc6,bg6=rb(dp6)
     st.markdown("### Inference — posterior distribution")
     st.caption("Variable Elimination posteriors (pgmpy). Arc on DAG reflects P(High).")
@@ -733,7 +1131,7 @@ with TABS[7]:
             </div></div>""",unsafe_allow_html=True)
 
 # ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
-with TABS[10]:
+with TABS[11]:
     st.markdown("### ⚛️ Quantum Bayesianism (QBism) diagnostic layer")
     st.caption("Appendix Q: *The Limits of Classical Bayesian Inference in Legally Distorted Systems* · Busemeyer & Bruza (2012) · Wojciechowski (2023)")
     st.info("This layer does **not** alter the VE posterior. It identifies epistemic conditions — cognitive and structural — that require heightened scrutiny in the legal reasoning process.")
@@ -1155,7 +1553,7 @@ independence assumption that Variable Elimination requires to be valid.*
         st.info("Run inference on any tab to populate the QBism diagnostics. The state vector above updates in real time as you adjust case profile settings.")
 
 # ── T8: Document analysis ─────────────────────────────────────────────────────
-with TABS[8]:
+with TABS[9]:
     st.markdown("### Document analysis")
     st.caption("Upload legal documents for Tetrad-grounded analysis. The LLM provides guidance — **you retain full discretion**.")
     st.info("**Supported:** Gladue reports · IRCA reports · PCL-R/Static-99R assessments · Prior decisions · Transcripts · Bail records · Trauma assessments · Ineffective assistance records")
@@ -1425,7 +1823,7 @@ with TABS[8]:
             unsafe_allow_html=True)
 
 # ── T3: Intake (Chat) — PARVIS assistant ────────────────────────────────────
-with TABS[2]:
+with TABS[3]:
 
     # ── Chat UI styling ───────────────────────────────────────────────────────
     st.markdown("""
@@ -1898,7 +2296,7 @@ function copyText() {
 
 
 # ── T9: Criminal record ──────────────────────────────────────────────────────
-with TABS[3]:
+with TABS[4]:
     st.markdown("### Criminal record")
     st.caption("Enter prior convictions and calibrate each entry's evidentiary weight against doctrinal distortion nodes.")
     st.markdown(dobar(P[20], show_cr=True),unsafe_allow_html=True)
@@ -2640,7 +3038,7 @@ with TABS[3]:
 
 
 # ── T10: Scenarios — side-by-side comparison ─────────────────────────────────
-with TABS[9]:
+with TABS[10]:
     st.markdown("### Scenario comparison")
     st.caption("Save the current profile as a named scenario and compare up to four profiles side by side. Shows how distortion corrections shift DO designation risk.")
 
@@ -2785,7 +3183,7 @@ with TABS[9]:
 
 
 # ── T9: Audit report ──────────────────────────────────────────────────────────
-with TABS[11]:
+with TABS[12]:
     st.markdown("### Audit report")
     st.caption("Full inference documentation — exportable for legal review and viva presentation.")
     Pa=st.session_state.posteriors;da=Pa[20];bla,bca,_=rb(da)
