@@ -981,26 +981,73 @@ with TABS[0]:
     _case_jur  = (st.session_state.get("case_jur") or "").strip()
 
     # ── Zone 1: Headline ─────────────────────────────────────────────────────
+    # Empty-state: "No case loaded" + navigation guidance.
+    # Populated: existing "Untitled case" title block + designation-risk body.
+    if _empty:
+        _headline_left = (
+            "<div>"
+            # Title
+            "<div style=\"font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:2rem;"
+            "letter-spacing:-0.01em;color:#1a1a1a;line-height:1.15\">"
+            "No case loaded"
+            "</div>"
+            # Subtitle
+            "<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.95rem;"
+            "color:#888;margin:6px 0 18px 0\">"
+            "Awaiting case data — sentencing audit · PARVIS Bayesian network"
+            "</div>"
+            # Button row — two visual buttons with honest caption
+            "<div style=\"display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap\">"
+            # Primary: Profile
+            "<div style=\"display:inline-flex;align-items:center;gap:8px;"
+            "padding:9px 16px;background:#1a1a1a;color:#FBFAF7;"
+            "border-radius:6px;font-family:'DM Sans',sans-serif;"
+            "font-size:0.86rem;font-weight:500;letter-spacing:0.005em\">"
+            "<span>Begin at Profile</span>"
+            "<span style=\"font-size:1rem;line-height:1\">→</span>"
+            "</div>"
+            # Secondary: Architecture
+            "<div style=\"display:inline-flex;align-items:center;gap:8px;"
+            "padding:9px 16px;background:#FBFAF7;color:#3a3a3a;"
+            "border:1px solid #E0DDD6;border-radius:6px;"
+            "font-family:'DM Sans',sans-serif;font-size:0.86rem;"
+            "font-weight:500;letter-spacing:0.005em\">"
+            "<span>Inspect Architecture</span>"
+            "<span style=\"font-size:1rem;line-height:1;color:#9E9E9E\">→</span>"
+            "</div>"
+            "</div>"
+            # Honest caption — click the actual tab above
+            "<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;"
+            "font-size:0.82rem;color:#9E9E9E;margin-top:4px;line-height:1.5\">"
+            "Click the corresponding tab above to navigate."
+            "</div>"
+            "</div>"
+        )
+    else:
+        _headline_left = (
+            f"<div>"
+            f"<div style=\"font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:2rem;"
+            f"letter-spacing:-0.01em;color:#1a1a1a;line-height:1.15\">"
+            f"{_case_id}"
+            f"</div>"
+            f"<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.95rem;"
+            f"color:#888;margin:6px 0 14px 0\">"
+            f"{(_case_jur + ' · ') if _case_jur else ''}Sentencing audit · PARVIS Bayesian network"
+            f"</div>"
+            f"<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.92rem;"
+            f"color:#3a3a3a;line-height:1.65;max-width:620px\">"
+            f"Posterior probability of Dangerous Offender designation given current evidence, "
+            f"doctrinal corrections, and systemic distortion adjustments. Models DESIGNATION "
+            f"RISK — not intrinsic dangerousness."
+            f"</div>"
+            f"</div>"
+        )
+
     st.markdown(f"""
     <div style="display:grid;grid-template-columns:1fr 280px;gap:32px;align-items:center;
                 padding:24px 0 28px 0;border-bottom:1px solid rgba(0,0,0,.06);
                 margin-bottom:24px">
-      <div>
-        <div style="font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:2rem;
-                    letter-spacing:-0.01em;color:#1a1a1a;line-height:1.15">
-          {_case_id}
-        </div>
-        <div style="font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.95rem;
-                    color:#888;margin:6px 0 14px 0">
-          {(_case_jur + ' · ') if _case_jur else ''}Sentencing audit · PARVIS Bayesian network
-        </div>
-        <div style="font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.92rem;
-                    color:#3a3a3a;line-height:1.65;max-width:620px">
-          Posterior probability of Dangerous Offender designation given current evidence,
-          doctrinal corrections, and systemic distortion adjustments. Models DESIGNATION
-          RISK — not intrinsic dangerousness.
-        </div>
-      </div>
+      {_headline_left}
       {("<div style=\"background:#FBFAF7;border:1px solid #E0DDD6;border-radius:14px;padding:18px 22px;text-align:center\">"
         "<div style=\"font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;color:#9E9E9E;font-weight:700;margin-bottom:6px\">"
         "DO Designation Risk</div>"
@@ -1018,6 +1065,125 @@ with TABS[0]:
         "</div>")}
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Empty-state landing: About + How to read (Apr 27 2026) ─────────────
+    # Renders only in the empty state, between the headline and the Doctrinal
+    # architecture section. Provides examiner-facing orientation per JP's
+    # spec. Once case data is entered, these blocks disappear.
+    if _empty:
+        # Side-by-side two-column layout with custom HTML <details> collapsibles.
+        # Both closed by default. Native HTML5 — no JavaScript required.
+        # Styled to match the cream-and-Fraunces aesthetic.
+        st.markdown("<div style='margin-top:36px'></div>", unsafe_allow_html=True)
+
+        # CSS for the collapsibles — defined once, used by both columns.
+        # Removes the default disclosure triangle on most browsers and
+        # replaces it with a custom +/− indicator. Fraunces serif for
+        # consistency with surrounding chrome.
+        _COLLAPSE_CSS = """
+        <style>
+        details.parvis-land {
+            background: #FBFAF7;
+            border: 1px solid #E0DDD6;
+            border-radius: 8px;
+            padding: 0;
+            margin-bottom: 14px;
+            transition: border-color 120ms ease;
+        }
+        details.parvis-land[open] {
+            border-color: #C7C2B8;
+        }
+        details.parvis-land > summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 16px 22px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-family: 'Fraunces', Georgia, serif;
+            font-weight: 500;
+            font-size: 1.15rem;
+            color: #1a1a1a;
+            letter-spacing: -0.005em;
+            user-select: none;
+        }
+        details.parvis-land > summary::-webkit-details-marker {
+            display: none;
+        }
+        details.parvis-land > summary::after {
+            content: "+";
+            font-family: 'DM Sans', sans-serif;
+            font-weight: 400;
+            font-size: 1.25rem;
+            color: #707070;
+            line-height: 1;
+            transition: transform 160ms ease;
+        }
+        details.parvis-land[open] > summary::after {
+            content: "−";
+            color: #1a1a1a;
+        }
+        details.parvis-land[open] > summary {
+            border-bottom: 1px solid #EFEDE7;
+        }
+        details.parvis-land > .parvis-land-body {
+            padding: 18px 22px 6px 22px;
+        }
+        details.parvis-land > .parvis-land-body p {
+            font-family: 'Fraunces', Georgia, serif;
+            font-size: 0.94rem;
+            color: #3a3a3a;
+            line-height: 1.75;
+            margin: 0 0 16px 0;
+        }
+        details.parvis-land > .parvis-land-body p:last-child {
+            margin-bottom: 8px;
+        }
+        details.parvis-land > .parvis-land-body em {
+            font-style: italic;
+        }
+        details.parvis-land > .parvis-land-body strong {
+            font-weight: 500;
+            color: #1a1a1a;
+        }
+        </style>
+        """
+        st.markdown(_COLLAPSE_CSS, unsafe_allow_html=True)
+
+        _land_left, _land_gap, _land_right = st.columns([1, 0.05, 1])
+
+        # ── Left column — About this implementation (collapsed by default) ──
+        with _land_left:
+            st.markdown(
+                """<details class="parvis-land">
+<summary>About this implementation</summary>
+<div class="parvis-land-body">
+<p>PARVIS is a reference implementation of the twenty-node Bayesian audit architecture set out in Chapter 5 of the underlying thesis. The architecture's purpose is to render the inferential structure of Canadian sentencing — particularly the structure required by <em>Gladue</em>, <em>Ipeelee</em>, <em>Morris</em>, and <em>Ewert</em> — auditable, reconstructable, and contestable. It does so by representing both substantive risk considerations and the systemic distortions that shape how risk is constructed in the evidentiary record.</p>
+<p>Three constitutive constraints govern what this implementation does and does not do, drawn from <em>Appendix O §O.1.1</em> of the thesis. First, PARVIS is an audit mechanism, not a decision-maker. It models whether legally required belief revision has occurred; it does not produce sentencing outcomes or recommend designations. Second, the outputs displayed here are diagnostic observations about reasoning, not adjudicative facts. They belong in the domain of audit and contestation, not the evidentiary record of any particular proceeding. Third, the architecture is open by design — its node structure, conditional dependencies, and prior values are matters of public legal reasoning, contestable by adversarial parties.</p>
+<p>The values shown throughout the implementation are research-prototype values. They serve as illustrative anchors for the framework set out in the thesis text and are subject to expert elicitation through the SHELF/Cooke methodology described in <em>Appendix O §O.3</em> before any deployment could responsibly occur. The constructive proof presented here is a demonstration that the architecture <em>can</em> be built consistent with its doctrinal commitments, not a claim that it is ready for institutional use.</p>
+</div>
+</details>""",
+                unsafe_allow_html=True,
+            )
+
+        # ── Right column — How to read this (collapsed by default) ──────────
+        with _land_right:
+            st.markdown(
+                """<details class="parvis-land">
+<summary>How to read this</summary>
+<div class="parvis-land-body">
+<p>The architecture comprises three substantive layers and one cross-cutting diagnostic layer. The <em>Substantive Risk Layer</em> (Nodes 1–4) represents empirically supported risk indicators subject to Canadian burdens of proof and proportionality constraints. The <em>Systemic Distortion and Doctrinal Fidelity Layer</em> (Nodes 5–17) captures mechanisms through which criminal records and risk assessments become unreliable, qualifying — never displacing — the confidence placed in upstream evidence. The <em>Structural Calibration and Output Layer</em> (Nodes 18–20) governs how revised beliefs propagate downstream to the Dangerous Offender designation posterior at Node 20. The cross-cutting <em>Quantum diagnostic layer</em> (Appendix Q) surfaces epistemic conditions — order effects, contextuality, premature scalar collapse, distorted priors — that classical Bayesian inference is poorly equipped to represent.</p>
+<p>The natural starting point is the <strong>Profile</strong> tab. <strong>Architecture</strong> offers a structural overview without requiring case data. <strong>Inference</strong> displays the live posterior distribution once data has been entered.</p>
+</div>
+</details>""",
+                unsafe_allow_html=True,
+            )
+
+        # Horizontal rule before the Doctrinal architecture deep-cut
+        st.markdown(
+            "<div style='border-top:1px solid #E0DDD6;margin:32px 0 24px 0'></div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Zone 2a: Doctrinal architecture (N1, N17 — structural constraints) ─────
     # Surfaced separately from the case-responsive drivers below per Chapter 5's
