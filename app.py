@@ -287,6 +287,206 @@ def _top_drivers(P, k=5):
     dn.sort(key=lambda e: e["p"], reverse=True)
     return up[:k], dn[:k]
 
+# ── Node 7 Reliability Modifier (Chapter 5 §5.1.7) ───────────────────────────
+# Per JP's specification (confirmed): each conviction is assigned an ordinal
+# grade from N7's posterior + the conviction's own bail-denial flag.
+# This implements the mechanism §5.1.7 describes verbatim:
+#   "Criminal Record Reliability Modifier — Adjustment applied to prior
+#    convictions — Unmodified / Discounted / Heavily Discounted"
+# The multipliers below are conservative; they do NOT modify cal_weight,
+# they sit alongside it as an explicit N7-specific adjustment.
+
+# Multiplier scheme (confirmed by JP, Apr 27 2026)
+N7_MULTIPLIERS = {
+    "Unmodified":         1.00,   # full weight
+    "Discounted":         0.60,   # 40% reduction
+    "Heavily Discounted": 0.30,   # 70% reduction
+}
+
+# Threshold scheme (confirmed by JP, Apr 27 2026)
+def _n7_grade_for_conviction(conviction, n7_posterior):
+    """
+    Return the N7 ordinal grade for a single conviction.
+
+    A conviction is graded by combining:
+      (a) the per-conviction bail-denial reduction (`adj.bail`, set
+          on the Criminal Record tab when the conviction was added)
+      (b) the network-level N7 posterior (which reflects the case-wide
+          cascade conditions: bail+IAC+SCE absence+marginalisation)
+
+    Combination rule: take the maximum of the two — a conviction is at
+    least as discounted as either its own bail-denial flag suggests
+    OR the case-wide N7 cascade requires. This is the most conservative
+    interpretation faithful to §5.1.7: if either the conviction itself
+    OR the network state indicates cascade conditions, the conviction's
+    reliability is qualified.
+    """
+    per_conviction_bail = float(conviction.get("adj", {}).get("bail", 0.0))
+    n7_post = float(n7_posterior)
+
+    # Combined indicator: conservative max
+    combined = max(per_conviction_bail, n7_post)
+
+    # Threshold logic (confirmed by JP)
+    if combined < 0.30:
+        return "Unmodified"
+    elif combined <= 0.65:
+        return "Discounted"
+    else:
+        return "Heavily Discounted"
+
+
+def _n7_multiplier_for_conviction(conviction, n7_posterior):
+    """Return the numerical multiplier (0.30 / 0.60 / 1.00) for a conviction."""
+    return N7_MULTIPLIERS[_n7_grade_for_conviction(conviction, n7_posterior)]
+
+
+def _n7_aggregate_record_weight(criminal_record, n7_posterior):
+    """
+    Return (nominal_mean, n7_adjusted_mean, per_conviction_grades).
+
+    Nominal:   mean of cal_weight across all convictions (status quo)
+    Adjusted:  mean of (cal_weight × N7-multiplier) across convictions
+    Grades:    list of (grade, multiplier) tuples in conviction order
+    """
+    if not criminal_record:
+        return None, None, []
+
+    nominal_weights = [float(e.get("cal_weight", 0.0)) for e in criminal_record]
+    grades = [
+        (_n7_grade_for_conviction(e, n7_posterior),
+         _n7_multiplier_for_conviction(e, n7_posterior))
+        for e in criminal_record
+    ]
+    adjusted_weights = [w * m for w, (_, m) in zip(nominal_weights, grades)]
+
+    return (
+        float(sum(nominal_weights) / len(nominal_weights)),
+        float(sum(adjusted_weights) / len(adjusted_weights)),
+        grades,
+    )
+
+
+# ── Jump Principle: Forward-Contamination Ceiling Effect (Ch 3 §3.5.3) ───────
+# JP's Chapter 3 §3.5.3: "prior sentences, once imposed, function as baseline
+# reference points for subsequent legal decisions regardless of whether their
+# original severity reflected contemporaneous doctrine, proportionality
+# principles, or systemic context. Inflated past sentences thereby become
+# anchors for future escalation, producing recursive severity over time."
+#
+# Operationalisation (confirmed JP, Apr 27 2026):
+#   ceiling_effect_per_conviction =
+#       sentence_inflation_factor × era_multiplier × gladue_compliance_multiplier
+#   cumulative_ceiling_for_conviction_Y = sum(ceiling_effects of priors X<Y)
+#       capped at 0.40 (~40 percentage-point maximum upward shift on N2)
+#   N2 receives upward shift = 0.5 × cumulative_ceiling_effect (most recent)
+#
+# All values are conservative methodological choices; they belong in the
+# methodological appendix. The architecture is the doctrinal claim; the
+# specific numbers are the claim's operationalisation.
+
+# Sentence inflation factor — keyed on the existing sentence type label.
+# A federal custody (2+ years) sentence carries the highest baseline anchoring
+# capacity; CSO/probation/discharge carry minimal anchoring.
+JUMP_SENTENCE_INFLATION = {
+    "Federal custody (2+ years)":         0.20,
+    "Provincial custody (< 2 years)":     0.10,
+    "Conditional sentence order (CSO)":   0.03,
+    "Probation only":                     0.01,
+    "Fine only":                          0.0,
+    "Absolute / conditional discharge":   0.0,
+    "Time served":                        0.05,
+    "Other / unknown":                    0.05,
+}
+
+# Era multiplier — keyed on conviction year. Reflects §3.5.3's identified
+# punitive phases: 1995-2005 baseline; 2006-2015 mandatory-minimum revival
+# / Safe Streets and Communities Act peak; 2016-2019 partial restoration;
+# 2020+ post-Bill-C-5 restoration.
+def _jump_era_multiplier(year):
+    """Return era inflation multiplier per Ch 3 §3.5.3 phase analysis."""
+    try:
+        y = int(year)
+    except (TypeError, ValueError):
+        return 1.0
+    if 1995 <= y <= 2005:
+        return 1.0
+    elif 2006 <= y <= 2015:
+        return 1.5  # Mandatory-minimum revival / SSCA peak
+    elif 2016 <= y <= 2019:
+        return 1.2  # Partial restoration after SCC mandatory-minimum strikes
+    elif y >= 2020:
+        return 1.0  # Bill C-5 restoration
+    else:
+        return 1.0  # Pre-1995: baseline
+
+# Gladue-compliance multiplier — when a conviction's adj.gladue is elevated,
+# this signals that Gladue/Ipeelee/Morris factors were not substantively
+# applied at the original sentencing, which per §3.5.4 amplifies temporal
+# distortion ("legally required contextual reasoning was absent or
+# underdeveloped").
+def _jump_gladue_multiplier(conviction):
+    """Return Gladue-non-compliance multiplier per Ch 3 §3.5.4."""
+    adj_gladue = float(conviction.get("adj", {}).get("gladue", 0.0))
+    if adj_gladue > 0.30:
+        return 1.4  # Elevated: Gladue not substantively applied
+    return 1.0
+
+def _jump_ceiling_for_conviction(conviction):
+    """
+    Compute the ceiling-effect contribution of a single conviction (its own
+    inflationary anchoring weight, before cumulation across the record).
+
+    Per §3.5.3: a non-Gladue-compliant prior with an inflated carceral term
+    carries a strong anchoring effect on subsequent severity assessment.
+    """
+    sent_type = conviction.get("sentence_type", "Other / unknown")
+    base = JUMP_SENTENCE_INFLATION.get(sent_type, 0.05)
+    era = _jump_era_multiplier(conviction.get("year", 2020))
+    gladue_amp = _jump_gladue_multiplier(conviction)
+    return float(base * era * gladue_amp)
+
+def _jump_cumulative_chain(criminal_record_chronological):
+    """
+    Return list of (own_ceiling, inherited_ceiling) tuples in chronological order.
+
+    `own_ceiling` is the conviction's own inflationary contribution.
+    `inherited_ceiling` is the sum of all prior convictions' own_ceiling,
+    capped at 0.40 per §3.5.3 cumulative-cap methodology choice.
+
+    The first (earliest) conviction has inherited = 0; each subsequent
+    conviction inherits the running sum of prior ceiling effects.
+    """
+    JUMP_CUMULATIVE_CAP = 0.40
+    chain = []
+    running = 0.0
+    for e in criminal_record_chronological:
+        own = _jump_ceiling_for_conviction(e)
+        inherited_capped = min(running, JUMP_CUMULATIVE_CAP)
+        chain.append((own, inherited_capped))
+        running += own
+    return chain
+
+def _jump_record_n2_shift(criminal_record_chronological):
+    """
+    Return the upward shift to apply to N2 from the cumulative ceiling effect.
+
+    Reads the cumulative ceiling at the most recent conviction (last in
+    chronological order) and applies a 0.5 coefficient — the shift to N2 is
+    half the cumulative ceiling, conservatively scaled to keep N2 within
+    [0, 0.95] in _cr_feed_nodes.
+    """
+    if not criminal_record_chronological:
+        return 0.0
+    chain = _jump_cumulative_chain(criminal_record_chronological)
+    # Cumulative ceiling AT the most recent conviction = inherited + own
+    # (because the most recent conviction is itself contributing forward to
+    # any future decision).
+    own_last, inherited_last = chain[-1]
+    cumulative_at_end = min(inherited_last + own_last, 0.40)
+    return 0.5 * cumulative_at_end
+
+
 def _completeness_state():
     """
     Return list of dicts describing the populated-ness of each input surface:
@@ -651,6 +851,29 @@ run_inf()
 P=st.session_state.posteriors
 dp=P[20]; bl,bc,bg=rb(dp)
 
+# ── Empty-state detection ─────────────────────────────────────────────────────
+# When no case data has been entered, the posterior reflects the network's
+# defaults rather than any case-specific evidence. Show "Awaiting case data"
+# in posterior displays so a user does not misread the default as a claim
+# about the empty (Untitled) case.
+def _case_is_empty():
+    """Return True if no case data has been entered across any input tab."""
+    ss = st.session_state
+    if (ss.get("case_id") or "").strip():
+        return False
+    if ss.get("criminal_record"):
+        return False
+    if ss.get("gladue_checked"):
+        return False
+    sce_vals = ss.get("sce_values") or {}
+    if any(v > 0.01 for v in sce_vals.values()):
+        return False
+    if ss.get("manual_ev"):
+        return False
+    return True
+
+_empty = _case_is_empty()
+
 # ── Header ────────────────────────────────────────────────────────────────────
 ct,cd=st.columns([3,1])
 with ct:
@@ -669,10 +892,17 @@ with ct:
     <span style="color:#A32D2D;font-weight:500">Jeinis Patel, PhD Candidate and Barrister</span>
     &nbsp;·&nbsp; &#169; 2026 Jeinis Patel</div></div>""",unsafe_allow_html=True)
 with cd:
-    st.markdown(f"""<div class="dc" style="background:{bg};border:1px solid {bc}44;margin-top:4px">
-    <div class="dl" style="color:{bc}">Node 20 · DO risk</div>
-    <div class="dp" style="color:{bc}">{dp*100:.1f}%</div>
-    <div class="db" style="color:{bc}">{bl}</div></div>""",unsafe_allow_html=True)
+    if _empty:
+        # Empty-state header chip: muted register, no percentage
+        st.markdown(f"""<div class="dc" style="background:#FBFAF7;border:1px solid #E0DDD6;margin-top:4px">
+        <div class="dl" style="color:#9E9E9E">Node 20 · DO risk</div>
+        <div class="dp" style="color:#9E9E9E;font-family:Fraunces,Georgia,serif;font-style:italic;font-size:1.5rem;font-weight:500">—</div>
+        <div class="db" style="color:#707070;font-family:Fraunces,serif;font-style:italic;font-size:0.84rem">Awaiting case data</div></div>""",unsafe_allow_html=True)
+    else:
+        st.markdown(f"""<div class="dc" style="background:{bg};border:1px solid {bc}44;margin-top:4px">
+        <div class="dl" style="color:{bc}">Node 20 · DO risk</div>
+        <div class="dp" style="color:{bc}">{dp*100:.1f}%</div>
+        <div class="db" style="color:{bc}">{bl}</div></div>""",unsafe_allow_html=True)
 
 st.markdown("<br>",unsafe_allow_html=True)
 
@@ -732,7 +962,19 @@ TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake 
 # ── T0: Summary (Mark 8) ──────────────────────────────────────────────────────
 with TABS[0]:
     _band_lbl, _band_fg, _band_bg = _summary_band(P[20])
-    _drv_up, _drv_dn = _top_drivers(P, k=5)
+    _drv_up_raw, _drv_dn_raw = _top_drivers(P, k=8)
+    # ── Doctrinal architecture: N1 (structural control) and N17 (properly-weighted-conditional) ──
+    # Per Chapter 5: these nodes encode meta-constraints rather than case-specific drivers.
+    # They are surfaced separately so the drivers panel below shows only case-responsive nodes.
+    _struct_nodes = {1, 17}  # node IDs treated as structural in the Summary panel
+    _drv_up = [d for d in _drv_up_raw if d["nid"] not in _struct_nodes][:5]
+    _drv_dn = [d for d in _drv_dn_raw if d["nid"] not in _struct_nodes][:5]
+    _struct_drivers = []
+    for d in _drv_up_raw + _drv_dn_raw:
+        if d["nid"] in _struct_nodes and d not in _struct_drivers:
+            _struct_drivers.append(d)
+    # Sort structural by node id for a stable display order (N1 first, then N17)
+    _struct_drivers.sort(key=lambda d: d["nid"])
     _comp = _completeness_state()
     _doc = _doctrinal_frame()
     _case_id   = (st.session_state.get("case_id") or "").strip() or "Untitled case"
@@ -759,34 +1001,136 @@ with TABS[0]:
           RISK — not intrinsic dangerousness.
         </div>
       </div>
-      <div style="background:{_band_bg};border:1px solid {_band_fg}33;border-radius:14px;
-                  padding:18px 22px;text-align:center">
-        <div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;
-                    color:{_band_fg};font-weight:700;margin-bottom:6px">
-          DO Designation Risk
-        </div>
-        <div style="font-family:monospace;font-size:3rem;font-weight:600;color:{_band_fg};
-                    line-height:1">
-          {P[20]*100:.1f}<span style="font-size:1.4rem;opacity:0.7">%</span>
-        </div>
-        <div style="font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:1rem;
-                    color:{_band_fg};margin-top:4px">
-          {_band_lbl}
-        </div>
-        <div style="font-size:0.68rem;color:{_band_fg};opacity:0.78;margin-top:8px;
-                    line-height:1.4">
-          pgmpy Variable Elimination · Tetrad-bound
-        </div>
-      </div>
+      {("<div style=\"background:#FBFAF7;border:1px solid #E0DDD6;border-radius:14px;padding:18px 22px;text-align:center\">"
+        "<div style=\"font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;color:#9E9E9E;font-weight:700;margin-bottom:6px\">"
+        "DO Designation Risk</div>"
+        "<div style=\"font-family:Fraunces,Georgia,serif;font-style:italic;font-size:2.6rem;font-weight:500;color:#9E9E9E;line-height:1;margin:8px 0 4px 0\">—</div>"
+        "<div style=\"font-family:Fraunces,Georgia,serif;font-style:italic;font-size:0.95rem;color:#707070;margin-top:6px\">Awaiting case data</div>"
+        "<div style=\"font-size:0.68rem;color:#9E9E9E;opacity:0.85;margin-top:10px;line-height:1.4\">Enter case profile, criminal record, or Gladue / SCE evidence to begin.</div>"
+        "</div>") if _empty else (
+        f"<div style=\"background:{_band_bg};border:1px solid {_band_fg}33;border-radius:14px;padding:18px 22px;text-align:center\">"
+        f"<div style=\"font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;color:{_band_fg};font-weight:700;margin-bottom:6px\">"
+        "DO Designation Risk</div>"
+        f"<div style=\"font-family:monospace;font-size:3rem;font-weight:600;color:{_band_fg};line-height:1\">"
+        f"{P[20]*100:.1f}<span style=\"font-size:1.4rem;opacity:0.7\">%</span></div>"
+        f"<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:1rem;color:{_band_fg};margin-top:4px\">{_band_lbl}</div>"
+        f"<div style=\"font-size:0.68rem;color:{_band_fg};opacity:0.78;margin-top:8px;line-height:1.4\">pgmpy Variable Elimination · Tetrad-bound</div>"
+        "</div>")}
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Zone 2a: Doctrinal architecture (N1, N17 — structural constraints) ─────
+    # Surfaced separately from the case-responsive drivers below per Chapter 5's
+    # treatment of N1 as a structural control / shared parent node.
+    st.markdown(
+        "<h3 style='margin-bottom:4px'>Doctrinal architecture</h3>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-family:Fraunces,serif;font-style:italic;"
+        "font-size:0.86rem;color:#707070;margin-bottom:14px;line-height:1.55;"
+        "max-width:720px'>"
+        "Structural constraints conditioning the entire inference. "
+        "These nodes encode the evidentiary architecture of Canadian sentencing "
+        "law and the post-admission inferential structure — they remain "
+        "stable across case-specific evidence rather than responding to it."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Render the two structural nodes side-by-side
+    if _struct_drivers:
+        _struct_cols = st.columns(len(_struct_drivers))
+        for _idx, _d in enumerate(_struct_drivers):
+            with _struct_cols[_idx]:
+                # Use a stable amber/blue accent regardless of node type colour
+                _accent = "#BA7517" if _d["nid"] == 1 else "#185FA5"
+                _accent_bg = "#FAEEDA" if _d["nid"] == 1 else "#E8F0FA"
+                _accent_border = "#E5CC95" if _d["nid"] == 1 else "#C7D3E5"
+                # Surface caption depends on node identity
+                if _d["nid"] == 1:
+                    _surface = (
+                        "Encodes the evidentiary admissibility thresholds — "
+                        "Crown beyond reasonable doubt for aggravating evidence "
+                        "(~83%), defence balance of probabilities for mitigating "
+                        "(~51%). Functions as a structural meta-constraint "
+                        "conditioning all other inference, not as a posterior "
+                        "over case facts."
+                    )
+                    _expand_label = "Formal treatment — Chapter 5 §1"
+                    _formal = (
+                        "Per Chapter 5, N1 operates as a shared parent node "
+                        "whose states deterministically condition the CPT "
+                        "entries of downstream aggravation and mitigation "
+                        "nodes — collapsing likelihood terms to near-zero when "
+                        "evidentiary burdens are unmet. This is the limiting "
+                        "case of Bayesian conditional probability where the "
+                        "conditional collapses to certainty. Deterministic "
+                        "conditioning of this kind is orthodox within Bayesian "
+                        "network methodology. The node's posterior remains "
+                        "stable across case-specific evidence because it "
+                        "represents a precondition on belief revision rather "
+                        "than a variable within it. Law does not work in "
+                        "percentages; the values shown are best-available "
+                        "industry estimates of these doctrinal thresholds."
+                    )
+                else:  # N17
+                    _surface = (
+                        "Responds to admitted evidence but assumes the "
+                        "evidentiary admissibility gate (N1) has been correctly "
+                        "applied. Reflects the post-gate inferential structure "
+                        "in which conflicting evidence is properly weighed."
+                    )
+                    _expand_label = "Doctrinal scope of N17"
+                    _formal = (
+                        "N17 is a properly-weighted-conditional node: its "
+                        "posterior responds to evidence once admitted, but the "
+                        "responsiveness assumes that the weighting prior to "
+                        "admission has been correctly rendered by the "
+                        "sentencing judge. The judge's gatekeeping role under "
+                        "N1 is logically prior to any update at N17. If "
+                        "admissibility has been mishandled — evidence admitted "
+                        "that should not have been, or excluded that should "
+                        "have been — N17 is computing on a corrupted basis."
+                    )
+                # Card
+                st.markdown(
+                    f"<div style='background:{_accent_bg};border:1px solid {_accent_border};"
+                    f"border-left:3px solid {_accent};border-radius:8px;padding:14px 18px;"
+                    f"margin-bottom:10px'>"
+                    f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:0.78rem;"
+                    f"font-weight:600;padding:3px 9px;border-radius:5px;color:white;"
+                    f"background:{_accent}'>N{_d['nid']}</div>"
+                    f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+                    f"font-weight:500;color:#1a1a1a'>{_d['short']}</div>"
+                    f"<div style='margin-left:auto;font-family:JetBrains Mono,monospace;"
+                    f"font-size:0.95rem;font-weight:600;color:{_accent}'>{_d['p']*100:.1f}%</div>"
+                    f"</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.84rem;color:#3a3a3a;line-height:1.55'>{_surface}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                with st.expander(_expand_label, expanded=False):
+                    st.markdown(
+                        f"<div style='font-family:Fraunces,serif;font-size:0.86rem;"
+                        f"color:#3a3a3a;line-height:1.65;padding:4px 0'>{_formal}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    st.markdown(
+        "<div style='border-top:1px solid #EFEDE7;margin:24px 0 18px 0'></div>",
+        unsafe_allow_html=True,
+    )
 
     # ── Zone 2: Drivers ──────────────────────────────────────────────────────
     st.markdown("### Drivers of the posterior")
     st.caption("Top 5 nodes pushing DO risk up, top 5 pulling it down. "
-               "Increasing-side: risk and constraint nodes ranked by posterior. "
-               "Decreasing-side: mitigations, systemic distortion corrections, "
-               "and causal detectors.")
+               "Case-responsive nodes only — structural constraints (N1, N17) "
+               "shown separately above. Increasing-side: risk and constraint "
+               "nodes ranked by posterior. Decreasing-side: mitigations, "
+               "systemic distortion corrections, and causal detectors.")
 
     def _driver_html(d, direction):
         arrow_color = "#A32D2D" if direction == "up" else "#3B6D11"
@@ -966,7 +1310,30 @@ with TABS[1]:
             st.markdown("<div class='sh'>Node types</div>",unsafe_allow_html=True)
             for t,c in TC.items(): st.markdown(f"<span style='color:{c}'>●</span>&nbsp;{TL[t]}",unsafe_allow_html=True)
             st.markdown("---")
-            st.markdown(dobar(dp),unsafe_allow_html=True)
+            if _empty:
+                st.markdown(
+                    f"<div style='background:#FBFAF7;border:1px solid #E0DDD6;"
+                    f"border-radius:12px;padding:.8rem 1.2rem;margin-bottom:1rem;"
+                    f"display:flex;align-items:center;gap:1.5rem'>"
+                    f"<div style='text-align:center;min-width:80px'>"
+                    f"<div style='font-size:.7rem;color:#9E9E9E;margin-bottom:2px'>Node 20</div>"
+                    f"<div style='font-size:1.6rem;font-weight:500;font-family:Fraunces,Georgia,serif;"
+                    f"font-style:italic;color:#9E9E9E'>—</div>"
+                    f"<div style='font-size:.78rem;font-family:Fraunces,serif;font-style:italic;"
+                    f"color:#707070'>Awaiting case data</div>"
+                    f"</div>"
+                    f"<div style='flex:1'>"
+                    f"<div style='font-size:.82rem;font-weight:500;margin-bottom:6px;color:#707070'>"
+                    f"DO designation risk — posterior probability</div>"
+                    f"<div style='height:5px;background:rgba(0,0,0,.06);border-radius:3px'></div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;font-size:.78rem;"
+                    f"color:#9E9E9E;margin-top:6px'>"
+                    f"Enter case profile, criminal record, or Gladue / SCE evidence to begin.</div>"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(dobar(dp),unsafe_allow_html=True)
 
 # ── T2: Case profile ──────────────────────────────────────────────────────────
 with TABS[2]:
@@ -1327,21 +1694,38 @@ with TABS[2]:
         "Elevated": "belief shifted toward designation",
         "High": "strong indication of designation",
     }.get(bl2, bl2)
-    st.markdown(
-        f"<div style='display:grid;grid-template-columns:1fr auto;"
-        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
-        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
-        f"border-radius:8px;padding:11px 18px'>"
-        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
-        f"Node 20 · DO designation risk"
-        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
-        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
-        f"</div>"
-        f"<div style='font-family:Fraunces,serif;font-style:italic;"
-        f"font-size:0.86rem;color:#2F5C2A'>{bl2} — {_band_text}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    if _empty:
+        st.markdown(
+            "<div style='display:grid;grid-template-columns:1fr auto;"
+            "align-items:center;gap:18px;background:#FBFAF7;"
+            "border:1px solid #E0DDD6;border-radius:8px;"
+            "padding:11px 18px;margin-top:24px;margin-bottom:0'>"
+            "<div style='font-size:0.82rem;color:#9E9E9E;font-weight:500'>"
+            "Node 20 · DO designation risk"
+            "<span style='font-family:Fraunces,Georgia,serif;font-style:italic;"
+            "font-size:1.05rem;font-weight:500;color:#9E9E9E;margin-left:10px'>—</span>"
+            "</div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#707070'>Awaiting case data</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='display:grid;grid-template-columns:1fr auto;"
+            f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+            f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+            f"border-radius:8px;padding:11px 18px'>"
+            f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+            f"Node 20 · DO designation risk"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+            f"</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.86rem;color:#2F5C2A'>{bl2} — {_band_text}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 # ── T3: Gladue ────────────────────────────────────────────────────────────────
 with TABS[5]:
@@ -1550,21 +1934,38 @@ with TABS[5]:
         "Elevated": f"belief shifted · {n_checked_factors} factor(s)",
         "High": f"strong indication · {n_checked_factors} factor(s)",
     }.get(bl, bl)
-    st.markdown(
-        f"<div style='display:grid;grid-template-columns:1fr auto;"
-        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
-        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
-        f"border-radius:8px;padding:11px 18px;margin-bottom:24px'>"
-        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
-        f"Node 20 · DO designation risk"
-        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
-        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
-        f"</div>"
-        f"<div style='font-family:Fraunces,serif;font-style:italic;"
-        f"font-size:0.86rem;color:#2F5C2A'>{bl} — {_band_text}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    if _empty:
+        st.markdown(
+            "<div style='display:grid;grid-template-columns:1fr auto;"
+            "align-items:center;gap:18px;background:#FBFAF7;"
+            "border:1px solid #E0DDD6;border-radius:8px;"
+            "padding:11px 18px;margin-top:24px;margin-bottom:0'>"
+            "<div style='font-size:0.82rem;color:#9E9E9E;font-weight:500'>"
+            "Node 20 · DO designation risk"
+            "<span style='font-family:Fraunces,Georgia,serif;font-style:italic;"
+            "font-size:1.05rem;font-weight:500;color:#9E9E9E;margin-left:10px'>—</span>"
+            "</div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#707070'>Awaiting case data</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='display:grid;grid-template-columns:1fr auto;"
+            f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+            f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+            f"border-radius:8px;padding:11px 18px;margin-bottom:24px'>"
+            f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+            f"Node 20 · DO designation risk"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+            f"</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.86rem;color:#2F5C2A'>{bl} — {_band_text}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Ipeelee §60 reminder at bottom ────────────────────────────────────
     st.markdown(
@@ -1861,21 +2262,38 @@ with TABS[6]:
         "Elevated": f"belief shifted · {_n_active} factor(s)",
         "High":     f"strong indication · {_n_active} factor(s)",
     }.get(bl_sce, bl_sce)
-    st.markdown(
-        f"<div style='display:grid;grid-template-columns:1fr auto;"
-        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
-        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
-        f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
-        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
-        f"Node 20 · DO designation risk"
-        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
-        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
-        f"</div>"
-        f"<div style='font-family:Fraunces,serif;font-style:italic;"
-        f"font-size:0.86rem;color:#2F5C2A'>{bl_sce} — {_band_text_sce}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    if _empty:
+        st.markdown(
+            "<div style='display:grid;grid-template-columns:1fr auto;"
+            "align-items:center;gap:18px;background:#FBFAF7;"
+            "border:1px solid #E0DDD6;border-radius:8px;"
+            "padding:11px 18px;margin-top:24px;margin-bottom:0'>"
+            "<div style='font-size:0.82rem;color:#9E9E9E;font-weight:500'>"
+            "Node 20 · DO designation risk"
+            "<span style='font-family:Fraunces,Georgia,serif;font-style:italic;"
+            "font-size:1.05rem;font-weight:500;color:#9E9E9E;margin-left:10px'>—</span>"
+            "</div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#707070'>Awaiting case data</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='display:grid;grid-template-columns:1fr auto;"
+            f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+            f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+            f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
+            f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+            f"Node 20 · DO designation risk"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+            f"</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.86rem;color:#2F5C2A'>{bl_sce} — {_band_text_sce}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 # ── T5: Evidence review ───────────────────────────────────────────────────────
 with TABS[7]:
@@ -2103,32 +2521,61 @@ with TABS[7]:
         "Elevated": f"belief shifted · {n_overrides} override(s)",
         "High":     f"strong indication · {n_overrides} override(s)",
     }.get(bl_rd, bl_rd)
-    st.markdown(
-        f"<div style='display:grid;grid-template-columns:1fr auto;"
-        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
-        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
-        f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
-        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
-        f"Node 20 · DO designation risk"
-        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
-        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
-        f"</div>"
-        f"<div style='font-family:Fraunces,serif;font-style:italic;"
-        f"font-size:0.86rem;color:#2F5C2A'>{bl_rd} — {_band_text_rd}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    if _empty:
+        st.markdown(
+            "<div style='display:grid;grid-template-columns:1fr auto;"
+            "align-items:center;gap:18px;background:#FBFAF7;"
+            "border:1px solid #E0DDD6;border-radius:8px;"
+            "padding:11px 18px;margin-top:24px;margin-bottom:0'>"
+            "<div style='font-size:0.82rem;color:#9E9E9E;font-weight:500'>"
+            "Node 20 · DO designation risk"
+            "<span style='font-family:Fraunces,Georgia,serif;font-style:italic;"
+            "font-size:1.05rem;font-weight:500;color:#9E9E9E;margin-left:10px'>—</span>"
+            "</div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#707070'>Awaiting case data</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='display:grid;grid-template-columns:1fr auto;"
+            f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+            f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+            f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
+            f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+            f"Node 20 · DO designation risk"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+            f"</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.86rem;color:#2F5C2A'>{bl_rd} — {_band_text_rd}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 # ── T6: Inference ─────────────────────────────────────────────────────────────
 with TABS[8]:
     P=st.session_state.posteriors;dp6=P[20];bl6,bc6,bg6=rb(dp6)
     st.markdown("### Inference — posterior distribution")
     st.caption("Variable Elimination posteriors (pgmpy). Arc on DAG reflects P(High).")
-    st.markdown(f"""<div style="background:{bg6};border:1px solid {bc6}44;border-radius:14px;
-    padding:1rem 1.5rem;text-align:center;margin-bottom:1.2rem">
-    <div style="font-size:.75rem;color:{bc6}">Node 20 — Dangerous Offender designation risk</div>
-    <div style="font-size:2.8rem;font-weight:700;font-family:monospace;color:{bc6}">{dp6*100:.1f}%</div>
-    <div style="font-size:.9rem;font-weight:600;color:{bc6}">{bl6}</div></div>""",unsafe_allow_html=True)
+    if _empty:
+        st.markdown(
+            f"<div style='background:#FBFAF7;border:1px solid #E0DDD6;"
+            f"border-radius:14px;padding:1rem 1.5rem;text-align:center;margin-bottom:1.2rem'>"
+            f"<div style='font-size:.75rem;color:#9E9E9E'>Node 20 — Dangerous Offender designation risk</div>"
+            f"<div style='font-size:2.4rem;font-weight:500;font-family:Fraunces,Georgia,serif;"
+            f"font-style:italic;color:#9E9E9E;margin:6px 0 4px 0'>—</div>"
+            f"<div style='font-size:.9rem;font-family:Fraunces,serif;font-style:italic;color:#707070'>"
+            f"Awaiting case data</div></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(f"""<div style="background:{bg6};border:1px solid {bc6}44;border-radius:14px;
+        padding:1rem 1.5rem;text-align:center;margin-bottom:1.2rem">
+        <div style="font-size:.75rem;color:{bc6}">Node 20 — Dangerous Offender designation risk</div>
+        <div style="font-size:2.8rem;font-weight:700;font-family:monospace;color:{bc6}">{dp6*100:.1f}%</div>
+        <div style="font-size:.9rem;font-weight:600;color:{bc6}">{bl6}</div></div>""",unsafe_allow_html=True)
     cols4=st.columns(4)
     for i,nid in enumerate(n for n in range(1,21) if n!=20):
         m=NODE_META[nid];col=TC[m["type"]];p=P.get(nid,.5)
@@ -3292,15 +3739,29 @@ with TABS[3]:
 
     # ── Header row ────────────────────────────────────────────────────────────
     bl, bc, bg = rb(P[20])
+    if _empty:
+        _pill_html = (
+            f'<div class="parvis-node20-pill" '
+            f'style="background:#FBFAF7;color:#9E9E9E;'
+            f'border:1px solid #E0DDD6;font-family:Fraunces,Georgia,serif;'
+            f'font-style:italic;font-weight:500">'
+            f'Node 20 &nbsp;—&nbsp; Awaiting case data'
+            f'</div>'
+        )
+    else:
+        _pill_html = (
+            f'<div class="parvis-node20-pill" '
+            f'style="background:{bg};color:{bc};border:1px solid {bc}44">'
+            f'Node 20 &nbsp;{P[20]*100:.1f}% &nbsp;{bl}'
+            f'</div>'
+        )
     st.markdown(f"""
 <div class="parvis-chat-header">
   <div>
     <div class="parvis-chat-title">💬 Intake (Chat)</div>
     <div class="parvis-chat-subtitle">Context-aware · {len(st.session_state.chat_history)//2} exchange(s) · Bayesian network live</div>
   </div>
-  <div class="parvis-node20-pill" style="background:{bg};color:{bc};border:1px solid {bc}44">
-    Node 20 &nbsp;{P[20]*100:.1f}% &nbsp;{bl}
-  </div>
+  {_pill_html}
 </div>""", unsafe_allow_html=True)
 
     # ── API settings (compact bar) ────────────────────────────────────────────
@@ -3409,7 +3870,24 @@ IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. Always maint
     if not st.session_state.chat_history:
         with st.chat_message("assistant", avatar="🔺"):
             bl_w, bc_w, _ = rb(P[20])
-            st.markdown(f"""
+            if _empty:
+                st.markdown("""
+**Hello. I'm PARVIS.**
+
+The network is initialised but no case data has been entered yet. As you provide information about the case, I'll update the posterior in real time.
+
+You can describe a case in plain language and I'll propose values across the network, or ask me to explain any node, doctrinal principle, or risk factor. Nothing changes until you confirm each suggestion.
+
+To get started, try something like:
+
+> *"The offender is 42, Indigenous, from Northern Manitoba. Bail denied for 9 months, PCL-R score 22, no Gladue report commissioned."*
+
+Or ask a question:
+
+> *"What does Node 7 (bail-denial cascade) encode and how does it shift the posterior?"*
+                """)
+            else:
+                st.markdown(f"""
 **Hello. I'm PARVIS.**
 
 The network is live — Node 20 is currently at **{P[20]*100:.1f}% ({bl_w})**.
@@ -3423,7 +3901,7 @@ To get started, try something like:
 Or ask a question:
 
 > *"Why is Node 7 elevated and what does that mean for the DO risk?"*
-            """)
+                """)
 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"],
@@ -3862,8 +4340,18 @@ with TABS[4]:
             n2_raw = float(np.clip(
                 0.20 + 0.45 * max_severity + 0.25 * mean_severity + count_bonus,
                 0.08, 0.90))
-            cr_adj[2] = n2_raw - st.session_state.posteriors.get(2, 0.08)
-            st.session_state.cr_doc_adj[2] = n2_raw
+            # ── Jump principle (Ch 3 §3.5.3) — forward-contamination shift ──
+            # Cumulative ceiling effect from prior convictions raises the
+            # baseline against which subsequent severity is measured. Applied
+            # here as an upward shift on N2 (Violent history) before
+            # propagation to N20. The shift is conservative: 0.5× cumulative
+            # ceiling (capped at 0.40), so the maximum N2 shift is +0.20.
+            n2_jump_shift = _jump_record_n2_shift(rec)
+            n2_raw_with_jump = float(np.clip(n2_raw + n2_jump_shift, 0.08, 0.95))
+            st.session_state.cr_doc_adj["jump_shift"] = n2_jump_shift
+            st.session_state.cr_doc_adj["n2_pre_jump"] = n2_raw
+            cr_adj[2] = n2_raw_with_jump - st.session_state.posteriors.get(2, 0.08)
+            st.session_state.cr_doc_adj[2] = n2_raw_with_jump
 
         # ── N18: Dynamic risk — escalation signal ─────────────────────────────
         esc = _detect_escalation(rec)
@@ -4060,28 +4548,30 @@ with TABS[4]:
             "<div style='font-family:Fraunces,serif;font-style:italic;"
             "font-size:0.78rem;color:#3A3A3A;line-height:1.55'>"
             "Each slider reflects the degree to which this specific conviction's "
-            "evidentiary weight should be discounted based on the distortion "
-            "nodes currently active in the network. Defaults pre-populated from "
-            "live posteriors; override per-case as warranted."
+            "evidentiary weight should be discounted based on doctrinal distortions "
+            "applicable to this conviction. Sliders default to 0; raise affirmatively "
+            "where the case file or transcript supports the relevant distortion "
+            "for this conviction. Per-conviction values are independent of the "
+            "network's case-wide posteriors."
             "</div></div>",
             unsafe_allow_html=True,
         )
 
         ca3, ca4 = st.columns(2)
         with ca3:
-            adj_bail   = st.slider("Bail-denial / coercive plea reduction",  0.0, 1.0, min(pN7, 0.70),  0.05, key="cr_adj_bail",
-                help="R v Antic [2017] SCC 27 — conviction may reflect coercive plea under detention rather than genuine admission of guilt")
-            adj_ewert  = st.slider("Ewert tool-invalidity reduction",         0.0, 1.0, min(pN5, 0.50),  0.05, key="cr_adj_ewert",
-                help="Ewert v Canada [2018] SCC 30 — actuarial evidence underlying this conviction may carry reduced cultural validity")
-            adj_gladue = st.slider("Gladue misapplication reduction",         0.0, 1.0, min(pN12, 0.50), 0.05, key="cr_adj_gladue",
-                help="R v Morris 2021 ONCA 680 — contextual factors may have been ignored or misapplied at original sentencing")
+            adj_bail   = st.slider("Bail-denial / coercive plea reduction",  0.0, 1.0, 0.0,  0.05, key="cr_adj_bail",
+                help="R v Antic [2017] SCC 27 — set affirmatively where this specific conviction was produced under bail-denial cascade conditions (extended pre-trial detention, coercive plea pressure)")
+            adj_ewert  = st.slider("Ewert tool-invalidity reduction",         0.0, 1.0, 0.0,  0.05, key="cr_adj_ewert",
+                help="Ewert v Canada [2018] SCC 30 — set affirmatively where this conviction's foundation involved actuarial evidence of contested cultural validity")
+            adj_gladue = st.slider("Gladue misapplication reduction",         0.0, 1.0, 0.0, 0.05, key="cr_adj_gladue",
+                help="R v Morris 2021 ONCA 680 — set affirmatively where Gladue/Ipeelee/Morris factors were ignored or misapplied at this conviction's sentencing")
         with ca4:
-            adj_police = st.slider("Over-policing / record inflation reduction",0.0, 1.0, min(pN14, 0.50),0.05, key="cr_adj_police",
-                help="R v Le [2019] SCC 34 — conviction may be partly a product of racialised over-policing rather than actual criminogenic conduct")
+            adj_police = st.slider("Over-policing / record inflation reduction",0.0, 1.0, 0.0,0.05, key="cr_adj_police",
+                help="R v Le [2019] SCC 34 — set affirmatively where this conviction reflects racialised over-policing rather than criminogenic conduct")
             adj_mm     = st.slider("Mandatory minimum distortion reduction",   0.0, 1.0, 0.0,             0.05, key="cr_adj_mm",
-                help="R v Nur [2015] / Lloyd [2016] — conviction may have been influenced by a now-struck mandatory minimum")
-            adj_time   = st.slider("Temporal attenuation (age / distance)",    0.0, 1.0, min(pN15*0.6, 0.80),0.05, key="cr_adj_time",
-                help="R v Boutilier [2017] SCC 64 — old convictions carry reduced weight especially where age burnout is active")
+                help="R v Nur [2015] / Lloyd [2016] — set affirmatively where this conviction was influenced by a now-struck mandatory minimum")
+            adj_time   = st.slider("Temporal attenuation (age / distance)",    0.0, 1.0, 0.0,0.05, key="cr_adj_time",
+                help="R v Boutilier [2017] SCC 64 — set affirmatively where this conviction is sufficiently remote that age-burnout attenuation applies")
 
         # Sentence type modifier — CSO/probation/discharge suggests limited dangerousness
         _sent_modifier = {
@@ -4177,6 +4667,12 @@ with TABS[4]:
                     "cal_weight":  cal_wt,
                 }
                 st.session_state.criminal_record.append(entry)
+                # Sort chronologically (earliest first) — stable, by year only
+                # (so insertions of multiple convictions in the same year retain
+                # the order in which they were added).
+                st.session_state.criminal_record.sort(
+                    key=lambda e: int(e.get("year", 0))
+                )
                 # Feed calibrated N2 and distortion corrections back into the network
                 _cr_feed_nodes()
                 st.rerun()
@@ -4224,6 +4720,223 @@ with TABS[4]:
             f"font-weight:600;color:{esc_col}'>{esc_pat.title()}</div>",
             unsafe_allow_html=True)
 
+        # ── N7 Reliability Modifier panel (Chapter 5 §5.1.7) ──────────────
+        # Aggregate effect of N7 (bail-denial cascade) re-weighting on the
+        # criminal record. Per JP's specification, this surfaces the
+        # constructive-proof claim that distortions re-weight (not remove)
+        # convictions — Chapter 5 §5.1.7 verbatim: "This node never removes
+        # convictions. It qualifies how they may be used."
+        _n7_post_now = float(st.session_state.posteriors.get(7, 0.15))
+        _n7_nom, _n7_adj, _n7_grades = _n7_aggregate_record_weight(rec, _n7_post_now)
+        if _n7_nom is not None:
+            _n7_delta_pct = (_n7_adj - _n7_nom) * 100
+            _n7_delta_sign = "−" if _n7_delta_pct < 0 else ("+" if _n7_delta_pct > 0 else "")
+            # Count convictions per grade
+            _n7_count = {"Unmodified": 0, "Discounted": 0, "Heavily Discounted": 0}
+            for g, _m in _n7_grades:
+                _n7_count[g] = _n7_count.get(g, 0) + 1
+            # Accent colour: how much is the record re-weighted overall
+            _delta_abs = abs(_n7_delta_pct)
+            if _delta_abs < 5:
+                _n7_accent = "#3B6D11"; _n7_bg = "#F4F8EE"; _n7_border = "#C5D7AC"
+            elif _delta_abs < 15:
+                _n7_accent = "#BA7517"; _n7_bg = "#FAEEDA"; _n7_border = "#E5CC95"
+            else:
+                _n7_accent = "#A32D2D"; _n7_bg = "#FCEBEB"; _n7_border = "#E5B5B5"
+
+            st.markdown(
+                f"<div style='background:{_n7_bg};border:1px solid {_n7_border};"
+                f"border-left:3px solid {_n7_accent};border-radius:8px;"
+                f"padding:14px 18px;margin:14px 0 8px 0'>"
+                # Header row
+                f"<div style='display:flex;align-items:baseline;gap:10px;margin-bottom:10px'>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"font-weight:600;padding:2px 8px;border-radius:4px;color:white;"
+                f"background:{_n7_accent}'>N7</div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.0rem;"
+                f"font-weight:500;color:#1A1A1A'>"
+                f"Reliability Modifier · Bail-denial cascade</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#707070;margin-left:auto'>"
+                f"<em>R v Antic</em> [2017] SCC 27 · Ch 5 §5.1.7</div>"
+                f"</div>"
+                # Body: nominal vs adjusted comparison
+                f"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;"
+                f"margin-top:6px'>"
+                # Nominal
+                f"<div>"
+                f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                f"color:#707070;font-weight:600;margin-bottom:3px'>Nominal record</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.45rem;"
+                f"font-weight:600;color:#3A3A3A'>{_n7_nom*100:.1f}%</div>"
+                f"<div style='font-size:0.72rem;color:#9E9E9E;font-family:Fraunces,serif;"
+                f"font-style:italic'>mean calibrated weight</div>"
+                f"</div>"
+                # Adjusted
+                f"<div>"
+                f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                f"color:{_n7_accent};font-weight:600;margin-bottom:3px'>"
+                f"N7-adjusted record</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.45rem;"
+                f"font-weight:600;color:{_n7_accent}'>{_n7_adj*100:.1f}%</div>"
+                f"<div style='font-size:0.72rem;color:{_n7_accent};font-family:Fraunces,serif;"
+                f"font-style:italic'>{_n7_delta_sign}{abs(_n7_delta_pct):.1f}pp re-weighting</div>"
+                f"</div>"
+                # Grade distribution
+                f"<div>"
+                f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                f"color:#707070;font-weight:600;margin-bottom:3px'>Grade distribution</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.82rem;"
+                f"color:#3A3A3A;line-height:1.5'>"
+                f"<div>Unmodified · {_n7_count['Unmodified']}</div>"
+                f"<div>Discounted · {_n7_count['Discounted']}</div>"
+                f"<div>Heavily Discounted · {_n7_count['Heavily Discounted']}</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+                # Doctrinal caption
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.80rem;color:#707070;margin-top:12px;line-height:1.55;"
+                f"padding-top:10px;border-top:1px solid {_n7_border}'>"
+                f"Each conviction is graded against §5.1.7's tri-state ordinal "
+                f"(Unmodified / Discounted / Heavily Discounted) by combining "
+                f"its own bail-denial flag with the network N7 posterior "
+                f"({_n7_post_now*100:.0f}%). This node never removes convictions; "
+                f"it qualifies how they may be used. Multipliers — 1.00 / 0.60 / 0.30 — "
+                f"are conservative operationalisations of the §5.1.7 ordinal grades."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Methodology disclosure expander
+            with st.expander("Methodology — N7 reliability modifier", expanded=False):
+                st.markdown("""
+**Mechanism (Chapter 5 §5.1.7).** The bail-denial cascade node (N7) tracks the procedural conditions under which prior convictions were produced. Where bail was denied and ineffective representation, absent social context evidence, or marginalisation cluster, the network's posterior at N7 rises and the resulting convictions' evidentiary reliability is qualified — not removed.
+
+**Per-conviction grading.** For each conviction, the N7 grade is determined by the maximum of (a) the conviction's own `adj.bail` value (set when the conviction was added) and (b) the network's current N7 posterior. This is the most conservative reading: a conviction is at least as discounted as either its own indicator or the case-wide cascade state requires.
+
+**Thresholds.**
+- Combined indicator < 0.30 → **Unmodified** (multiplier 1.00)
+- 0.30 ≤ combined ≤ 0.65 → **Discounted** (multiplier 0.60)
+- Combined > 0.65 → **Heavily Discounted** (multiplier 0.30)
+
+**Aggregate.** The N7-adjusted record weight is the mean across convictions of (cal_weight × N7_multiplier). The nominal record weight is the mean of cal_weight alone. The difference is the N7 re-weighting effect on the record as a whole.
+
+**Doctrinal source.** *R v Antic* [2017] SCC 27 (bail jurisprudence); Tolppanen Report (2018) on bail-denial cascade dynamics; Chapter 5 §5.1.7 (Wrongful Conviction Guilty Plea cascade modelling).
+
+**Scope of this implementation.** This is the Node 7 distortion only. The full Tetrad of distortions (N6 IAC, N14 temporal, N15 jurisdictional, N17 over-policing, N18 SCE integration audit) extends the same architectural pattern in subsequent implementation work.
+                """)
+
+            # ── Jump Principle panel (Ch 3 §3.5.3) ──────────────────────────
+            # Cumulative forward-contamination effect from prior convictions
+            # raising the baseline for subsequent severity assessment.
+            _jump_total_shift = st.session_state.cr_doc_adj.get("jump_shift", 0.0)
+            _n2_pre  = st.session_state.cr_doc_adj.get("n2_pre_jump", None)
+            _n2_post = st.session_state.cr_doc_adj.get(2, None)
+            # Only render if we have a violent N2 calibration
+            if _n2_pre is not None and _n2_post is not None:
+                _jump_pp = _jump_total_shift * 100
+                # Accent colour mirrors N7 panel scheme
+                if _jump_pp < 5:
+                    _j_accent = "#3B6D11"; _j_bg = "#F4F8EE"; _j_border = "#C5D7AC"
+                elif _jump_pp < 15:
+                    _j_accent = "#BA7517"; _j_bg = "#FAEEDA"; _j_border = "#E5CC95"
+                else:
+                    _j_accent = "#A32D2D"; _j_bg = "#FCEBEB"; _j_border = "#E5B5B5"
+
+                # Compute total cumulative ceiling at end-of-record for caption
+                _full_chain = _jump_cumulative_chain(rec)
+                _own_last, _inh_last = _full_chain[-1]
+                _cumulative_at_end = min(_inh_last + _own_last, 0.40)
+
+                st.markdown(
+                    f"<div style='background:{_j_bg};border:1px solid {_j_border};"
+                    f"border-left:3px solid {_j_accent};border-radius:8px;"
+                    f"padding:14px 18px;margin:14px 0 8px 0'>"
+                    # Header row
+                    f"<div style='display:flex;align-items:baseline;gap:10px;margin-bottom:10px'>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                    f"font-weight:600;padding:2px 8px;border-radius:4px;color:white;"
+                    f"background:{_j_accent}'>JUMP</div>"
+                    f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.0rem;"
+                    f"font-weight:500;color:#1A1A1A'>"
+                    f"Forward Contamination · Jump principle</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.78rem;color:#707070;margin-left:auto'>"
+                    f"Ch 3 §3.5.3 · recursive severity</div>"
+                    f"</div>"
+                    # Body: three columns
+                    f"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;"
+                    f"margin-top:6px'>"
+                    # N2 pre-jump
+                    f"<div>"
+                    f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                    f"color:#707070;font-weight:600;margin-bottom:3px'>N2 · pre-jump</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1.45rem;"
+                    f"font-weight:600;color:#3A3A3A'>{_n2_pre*100:.1f}%</div>"
+                    f"<div style='font-size:0.72rem;color:#9E9E9E;font-family:Fraunces,serif;"
+                    f"font-style:italic'>baseline violent history</div>"
+                    f"</div>"
+                    # N2 post-jump
+                    f"<div>"
+                    f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                    f"color:{_j_accent};font-weight:600;margin-bottom:3px'>N2 · post-jump</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1.45rem;"
+                    f"font-weight:600;color:{_j_accent}'>{_n2_post*100:.1f}%</div>"
+                    f"<div style='font-size:0.72rem;color:{_j_accent};font-family:Fraunces,serif;"
+                    f"font-style:italic'>+{_jump_pp:.1f}pp from inherited ceiling</div>"
+                    f"</div>"
+                    # Cumulative ceiling at end of record
+                    f"<div>"
+                    f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                    f"color:#707070;font-weight:600;margin-bottom:3px'>Cumulative ceiling</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1.45rem;"
+                    f"font-weight:600;color:#3A3A3A'>{_cumulative_at_end*100:.1f}pp</div>"
+                    f"<div style='font-size:0.72rem;color:#9E9E9E;font-family:Fraunces,serif;"
+                    f"font-style:italic'>at end-of-record (cap 40pp)</div>"
+                    f"</div>"
+                    f"</div>"
+                    # Doctrinal caption
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.80rem;color:#707070;margin-top:12px;line-height:1.55;"
+                    f"padding-top:10px;border-top:1px solid {_j_border}'>"
+                    f"Inflated past sentences function as anchors for future escalation, "
+                    f"producing recursive severity over time. Each conviction's own ceiling "
+                    f"contribution is computed from sentence type, era (§3.5.3 phases: "
+                    f"1995–2005 baseline, 2006–2015 mandatory-minimum revival, 2016–2019 "
+                    f"partial restoration, 2020+ Bill C-5 restoration), and Gladue-compliance "
+                    f"per §3.5.4. Cumulative shift on N2 is half the cumulative ceiling, "
+                    f"capped at 20pp."
+                    f"</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Jump methodology expander
+                with st.expander("Methodology — Jump principle (Ch 3 §3.5.3)", expanded=False):
+                    st.markdown("""
+**Mechanism (Chapter 3 §3.5.3).** *"Prior sentences, once imposed, function as baseline reference points for subsequent legal decisions regardless of whether their original severity reflected contemporaneous doctrine, proportionality principles, or systemic context. Inflated past sentences thereby become anchors for future escalation, producing recursive severity over time."*
+
+**Per-conviction ceiling.** For each conviction, an *own ceiling effect* is computed from three factors:
+
+1. **Sentence inflation factor** — keyed on sentence type. Federal custody (2+ years): 0.20. Provincial custody (< 2 years): 0.10. CSO: 0.03. Probation: 0.01. Fine/discharge: 0.0. Time served: 0.05.
+
+2. **Era multiplier** — keyed on conviction year per §3.5.3 phase analysis. 1995–2005 (post C-41 baseline): ×1.0. 2006–2015 (mandatory-minimum revival / SSCA peak): ×1.5. 2016–2019 (partial restoration after SCC strikes): ×1.2. 2020+ (Bill C-5 restoration): ×1.0.
+
+3. **Gladue-compliance multiplier** — when this conviction's `adj.gladue` exceeds 0.30 (Gladue not substantively applied at original sentencing), ×1.4 per §3.5.4. Otherwise ×1.0.
+
+`own_ceiling = sentence_inflation × era × gladue_compliance`
+
+**Cumulative inheritance.** Convictions are processed in chronological order. Each conviction's *inherited ceiling* is the sum of all prior convictions' own ceilings, capped at 0.40 (40 percentage points). The first (earliest) conviction has zero inherited ceiling.
+
+**N2 shift.** The cumulative ceiling at end-of-record (most recent inherited + own) is multiplied by 0.5 and added to N2's calibrated input. Maximum N2 upward shift is 0.20 (20 percentage points), reflecting the conservative position that anchoring contributes to but does not dominate the violent-history posterior.
+
+**Doctrinal source.** Chapter 3 §3.5.3 (jump principle); §3.5.4 (temporal-Gladue interaction); Chapter 3 §3.4.5 (cumulative inferential inertia, addressed via N7 reliability discount in concert).
+
+**Scope of this implementation.** Forward contamination via numerical anchoring (the jump principle) is operationalised here. Inferential inertia (§3.4.5) is operationalised through the existing N7 reliability discount: convictions graded Heavily Discounted contribute proportionately less to N2's input, dampening cumulative reinforcement. Audit transparency — each step's contribution visible to the reviewing court — completes the architectural answer to §3.4.5.
+                    """)
+
         if esc_data.get("note"):
             esc_icon = "⚠️" if esc_pat=="escalating" else "✅" if esc_pat in ("de-escalating","desistance") else "ℹ️"
             st.markdown(
@@ -4237,12 +4950,32 @@ with TABS[4]:
 
         st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
 
+        # Pre-compute the chronological ceiling-effect chain (Ch 3 §3.5.3)
+        # Index `i` matches sorted chronological order (earliest first).
+        _jump_chain = _jump_cumulative_chain(rec)
+
         # Per-conviction cards — each with its own document attachment
         for i, e in enumerate(rec):
             cal_pct = e["cal_weight"] * 100
             raw_pct = e["raw_weight"] * 100
             col_c = "#3B6D11" if cal_pct >= 70 else "#BA7517" if cal_pct >= 40 else "#A32D2D"
             adj = e["adj"]
+            # ── N7 reliability modifier for this conviction (Ch 5 §5.1.7) ──
+            _n7_grade_card = _n7_grade_for_conviction(e, _n7_post_now)
+            _n7_mult_card  = N7_MULTIPLIERS[_n7_grade_card]
+            _n7_eff_pct    = e["cal_weight"] * _n7_mult_card * 100
+            # Grade-specific colour
+            _grade_col = {
+                "Unmodified":         "#3B6D11",
+                "Discounted":         "#BA7517",
+                "Heavily Discounted": "#A32D2D",
+            }[_n7_grade_card]
+            # ── Jump-principle ceiling effect (Ch 3 §3.5.3) ────────────────
+            _jump_own, _jump_inherited = _jump_chain[i]
+            # Colour scale for own ceiling effect
+            if _jump_own < 0.10:   _jump_col = "#3B6D11"
+            elif _jump_own < 0.25: _jump_col = "#BA7517"
+            else:                  _jump_col = "#A32D2D"
 
             # Build distortion flags
             flags = []
@@ -4307,13 +5040,31 @@ with TABS[4]:
                 f" · {court_str} · {jur_str} · {sent_str}</div>"
                 f"<div style='margin-top:6px'>{ser_badge}{gang_badge}</div>"
                 f"</div>"
-                f"<div style='text-align:right;min-width:90px'>"
+                f"<div style='text-align:right;min-width:140px'>"
                 f"<div style='font-family:JetBrains Mono,monospace;font-size:1.35rem;"
                 f"font-weight:600;color:{col_c}'>{cal_pct:.0f}%</div>"
                 f"<div style='font-size:.7rem;color:#9E9E9E;font-family:Fraunces,serif;"
                 f"font-style:italic'>calibrated weight</div>"
                 f"<div style='font-family:JetBrains Mono,monospace;font-size:.7rem;"
-                f"color:#C7C2B8;text-decoration:line-through'>{raw_pct:.0f}% raw</div>"
+                f"color:#C7C2B8;text-decoration:line-through;margin-bottom:6px'>{raw_pct:.0f}% raw</div>"
+                # N7 reliability grade (Chapter 5 §5.1.7)
+                f"<div style='border-top:1px solid #EFEDE7;padding-top:6px;margin-top:4px'>"
+                f"<div style='font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;"
+                f"color:#9E9E9E;font-weight:600;margin-bottom:2px'>N7 · Antic</div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:0.84rem;"
+                f"font-weight:500;color:{_grade_col};line-height:1.2'>{_n7_grade_card}</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:{_grade_col};margin-top:1px'>×{_n7_mult_card:.2f} → {_n7_eff_pct:.0f}%</div>"
+                f"</div>"
+                # Jump-principle ceiling effect (Ch 3 §3.5.3)
+                f"<div style='border-top:1px solid #EFEDE7;padding-top:6px;margin-top:6px'>"
+                f"<div style='font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;"
+                f"color:#9E9E9E;font-weight:600;margin-bottom:2px'>Jump · §3.5.3</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:{_jump_col};line-height:1.3'>own +{_jump_own*100:.1f}pp</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+                f"color:#707070;line-height:1.3'>inherited +{_jump_inherited*100:.1f}pp</div>"
+                f"</div>"
                 f"</div></div>"
                 f"<div style='margin-top:.55rem'>{flag_html}</div>"
                 f"</div>",
@@ -4600,21 +5351,38 @@ with TABS[4]:
         "Elevated": f"belief shifted · {_n_conv} conviction(s)",
         "High":     f"strong indication · {_n_conv} conviction(s)",
     }.get(bl_cr, bl_cr)
-    st.markdown(
-        f"<div style='display:grid;grid-template-columns:1fr auto;"
-        f"align-items:center;gap:18px;background:linear-gradient(90deg,"
-        f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
-        f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
-        f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
-        f"Node 20 · DO designation risk"
-        f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
-        f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
-        f"</div>"
-        f"<div style='font-family:Fraunces,serif;font-style:italic;"
-        f"font-size:0.86rem;color:#2F5C2A'>{bl_cr} — {_band_text_cr}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    if _empty:
+        st.markdown(
+            "<div style='display:grid;grid-template-columns:1fr auto;"
+            "align-items:center;gap:18px;background:#FBFAF7;"
+            "border:1px solid #E0DDD6;border-radius:8px;"
+            "padding:11px 18px;margin-top:24px;margin-bottom:0'>"
+            "<div style='font-size:0.82rem;color:#9E9E9E;font-weight:500'>"
+            "Node 20 · DO designation risk"
+            "<span style='font-family:Fraunces,Georgia,serif;font-style:italic;"
+            "font-size:1.05rem;font-weight:500;color:#9E9E9E;margin-left:10px'>—</span>"
+            "</div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#707070'>Awaiting case data</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='display:grid;grid-template-columns:1fr auto;"
+            f"align-items:center;gap:18px;background:linear-gradient(90deg,"
+            f"#E2EBD8 0%, #EAF3DE 50%, #F7F5F2 100%);border:1px solid #B8CDA8;"
+            f"border-radius:8px;padding:11px 18px;margin-top:24px'>"
+            f"<div style='font-size:0.82rem;color:#3B6D11;font-weight:500'>"
+            f"Node 20 · DO designation risk"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:#2F5C2A;margin-left:8px'>{P[20]*100:.1f}%</span>"
+            f"</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.86rem;color:#2F5C2A'>{bl_cr} — {_band_text_cr}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ── T10: Scenarios — side-by-side comparison ─────────────────────────────────
