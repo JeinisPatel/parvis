@@ -946,12 +946,21 @@ def draw_dag(post,sel=None):
 
 # ── CanLII availability ───────────────────────────────────────────────────────
 try:
-    from canlii_client import (search_node_developments, get_tetrad_updates,
-                                is_configured as canlii_ok)
+    from canlii_client import (
+        # Existing surface (back-compat)
+        search_node_developments, get_tetrad_updates,
+        is_configured as canlii_ok,
+        # New surface (April 27 2026 rebuild)
+        search_with_filters, get_tracked_updates,
+        flatten_search_results, validate_api_key,
+        ALL_TRACKED_CITATIONS, TETRAD_CITATIONS, PROPORTIONALITY_CITATIONS,
+        NODE_SEARCH_QUERIES,
+    )
     CANLII_ON = True
 except ImportError:
     CANLII_ON = False
     def canlii_ok(): return False
+    def validate_api_key(): return {"valid": False, "error": "canlii_client not importable"}
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake (Chat)",
@@ -3675,6 +3684,142 @@ with TABS[9]:
     st.markdown("### Document analysis")
     st.caption("Upload legal documents for Tetrad-grounded analysis. The LLM provides guidance — **you retain full discretion**.")
     st.info("**Supported:** Gladue reports · IRCA reports · PCL-R/Static-99R assessments · Prior decisions · Transcripts · Bail records · Trauma assessments · Ineffective assistance records")
+    # ── Shared CSS for Documents tab collapsibles + tier styling ─────────
+    st.markdown('''<style>
+details.parvis-doc {
+    background: #FBFAF7;
+    border: 1px solid #E0DDD6;
+    border-radius: 8px;
+    padding: 0;
+    margin: 14px 0 18px 0;
+    transition: border-color 120ms ease;
+}
+details.parvis-doc[open] {
+    border-color: #C7C2B8;
+}
+details.parvis-doc > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 500;
+    font-size: 1.05rem;
+    color: #1a1a1a;
+    letter-spacing: -0.005em;
+    user-select: none;
+}
+details.parvis-doc > summary::-webkit-details-marker {
+    display: none;
+}
+details.parvis-doc > summary::after {
+    content: "+";
+    font-family: "DM Sans", sans-serif;
+    font-weight: 400;
+    font-size: 1.2rem;
+    color: #707070;
+    line-height: 1;
+}
+details.parvis-doc[open] > summary::after {
+    content: "−";
+    color: #1a1a1a;
+}
+details.parvis-doc[open] > summary {
+    border-bottom: 1px solid #EFEDE7;
+}
+details.parvis-doc > .parvis-doc-body {
+    padding: 16px 20px 4px 20px;
+}
+details.parvis-doc > .parvis-doc-body p {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: 0.92rem;
+    color: #3a3a3a;
+    line-height: 1.7;
+    margin: 0 0 14px 0;
+}
+details.parvis-doc > .parvis-doc-body p:last-child {
+    margin-bottom: 6px;
+}
+details.parvis-doc > .parvis-doc-body p strong {
+    font-weight: 500;
+    color: #1a1a1a;
+}
+details.parvis-doc > .parvis-doc-body em { font-style: italic; }
+.parvis-doc-purpose {
+    font-family: "Fraunces", Georgia, serif;
+    font-style: italic;
+    font-size: 0.95rem;
+    color: #3a3a3a;
+    line-height: 1.7;
+    max-width: 880px;
+    margin: 6px 0 8px 0;
+}
+.parvis-canlii-tier-binding {
+    border-left: 3px solid #3B6D11;
+    padding: 6px 12px;
+    margin: 4px 0;
+    background: rgba(59, 109, 17, 0.05);
+    border-radius: 0 4px 4px 0;
+}
+.parvis-canlii-tier-persuasive {
+    border-left: 3px solid #9E9E9E;
+    padding: 6px 12px;
+    margin: 4px 0;
+    background: rgba(158, 158, 158, 0.05);
+    border-radius: 0 4px 4px 0;
+}
+.parvis-canlii-tier-other {
+    border-left: 3px solid #E0DDD6;
+    padding: 6px 12px;
+    margin: 4px 0;
+}
+.parvis-canlii-tier-label {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.parvis-canlii-corpus-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+.corpus-distortion {
+    background: #E8F0FA;
+    color: #185FA5;
+    border: 1px solid #C7D3E5;
+}
+.corpus-proportionality {
+    background: #FAEEDA;
+    color: #BA7517;
+    border: 1px solid #E5CC95;
+}
+</style>
+''', unsafe_allow_html=True)
+    # ── Section 1: Document analysis — explanatory framing (Apr 27 2026) ──
+    st.markdown('''<div class="parvis-doc-purpose">Document analysis applies LLM-assisted reading to legal documents you upload — Gladue reports, IRCA reports, PCL-R or Static-99R assessments, transcripts, prior decisions — and proposes adjustments to specific PARVIS nodes. Adjustments are surfaced for your review; the architecture applies them only on your explicit acceptance.</div>''', unsafe_allow_html=True)
+    st.markdown('''<details class="parvis-doc">
+<summary>How document analysis works</summary>
+<div class="parvis-doc-body">
+<p><strong>What it does.</strong> The selected provider — Claude, GPT-4o, or Gemini — reads the uploaded document, identifies passages bearing on the calibration of one or more PARVIS nodes (Nodes 2 through 20, depending on document type), and returns a structured set of proposed adjustments. Each proposed adjustment specifies a node, a delta (the magnitude and direction of the proposed shift to that node's posterior), the passage from the document that motivates it, and a doctrinal rationale grounded in the Tetrad — <em>Gladue</em>, <em>Ipeelee</em>, <em>Morris</em>, <em>Ewert</em> — and downstream binding authority where relevant.</p>
+<p><strong>How adjustments feed back into the model.</strong> Adjustments are not automatic. Each proposed adjustment is presented with a checkbox; the user reviews the rationale and either accepts or declines it. Accepted adjustments are passed to the network as evidence, and the inference engine recomputes posteriors. Declined adjustments are recorded but do not modify the network. The user can clear all document-driven adjustments at any time using the <em>Clear document adjustments</em> control. This design reflects the architecture's audit purpose: PARVIS surfaces what the document supports; the user decides what the network should believe.</p>
+<p><strong>Symmetric application.</strong> The feature accepts whatever document the user uploads — Gladue reports prepared for an Indigenous offender, PCL-R assessments commissioned by the Crown, defence-side trauma assessments, prosecution sentencing memoranda. The LLM applies the same analytical schema in either direction. The architecture is designed to support fair audit, not to advocate for any party's preferred reading.</p>
+</div>
+</details>''', unsafe_allow_html=True)
+
     # Provider selector — backward-compatible, Claude is default
     col_prov, col_key = st.columns([1, 2])
     with col_prov:
@@ -3866,26 +4011,63 @@ with TABS[9]:
                 if result.get("ewert_concern"): st.error("⚠️ Ewert concern flagged")
                 st.session_state.doc_res.append(result)
                 run_inf()
-                # ── CanLII live case law ──────────────────────────────────
+                # ── CanLII live case law (opt-in per JP Apr 27 2026 rebuild) ─
                 flagged=[int(k) for k,v in sig.items() if abs(v.get("delta",0))>0.02]
                 if CANLII_ON and canlii_ok() and flagged:
                     st.markdown("---")
-                    st.markdown("#### 🔍 Live CanLII — recent decisions on flagged nodes")
-                    st.caption("Querying CanLII for recent cases on the same doctrinal issues...")
-                    for nid in flagged[:4]:
-                        nm=NODE_META.get(nid,{}); col=TC.get(nm.get("type","distortion"),"#185FA5")
-                        with st.spinner(f"Searching Node {nid}..."):
-                            cas=search_node_developments(nid,max_results=4)
-                        if cas:
-                            st.markdown(f"<b style='color:{col}'>N{nid} — {nm.get('short','')}</b>",unsafe_allow_html=True)
-                            for r in cas:
-                                dt2=r.get("date","")[:10] or "—"
-                                cit2=r.get("citation") or r.get("title","—")
-                                ur=r.get("url","")
-                                lnk=f"<a href='{ur}' target='_blank'>{cit2}</a>" if ur else cit2
-                                st.markdown(f"<div style='font-size:12px;padding:2px 0;color:#555'>[{dt2}] {lnk}</div>",unsafe_allow_html=True)
-                        else:
-                            st.caption(f"N{nid}: No recent results found.")
+                    st.caption(
+                        f"After analysis, you can search CanLII for recent decisions on the "
+                        f"{len(flagged)} flagged node(s). Results are tiered by stare decisis "
+                        f"position relative to your jurisdiction. CanLII has rate limits — "
+                        f"search runs only when explicitly requested."
+                    )
+                    if st.checkbox("🔍 Search CanLII for recent cases on flagged nodes",
+                                   key=f"doc_canlii_optin_{len(st.session_state.doc_res)}"):
+                        # Resolve user jurisdiction from doc_prov dropdown if set
+                        _doc_prov_raw = st.session_state.get("doc_prov", "Auto-detect")
+                        _user_jur = "*" if _doc_prov_raw == "Auto-detect" else _doc_prov_raw.split(" — ")[0]
+                        st.markdown(f"#### 🔍 Live CanLII — recent decisions on flagged nodes")
+                        st.caption(f"Jurisdiction: {_user_jur if _user_jur != '*' else 'Not specified — all results uniformly tagged'} · Date floor: 3 years")
+                        for nid in flagged[:4]:
+                            nm = NODE_META.get(nid, {})
+                            col = TC.get(nm.get("type", "distortion"), "#185FA5")
+                            with st.spinner(f"Searching Node {nid}..."):
+                                tiered = search_node_developments(
+                                    nid, max_results=4,
+                                    user_jurisdiction=_user_jur,
+                                    date_floor_label="3 years",
+                                )
+                            if tiered.get("error"):
+                                st.caption(f"N{nid}: {tiered['error']}")
+                                continue
+                            total = tiered.get("total", 0)
+                            if total == 0:
+                                st.caption(f"N{nid}: No recent results found.")
+                                continue
+                            st.markdown(f"<b style='color:{col}'>N{nid} — {nm.get('short','')}</b> "
+                                        f"<span style='color:#888;font-size:12px'>({total} results)</span>",
+                                        unsafe_allow_html=True)
+                            # Render binding tier first, then persuasive
+                            for tier_key, tier_label, tier_class in [
+                                ("binding", "Binding", "parvis-canlii-tier-binding"),
+                                ("persuasive", "Persuasive", "parvis-canlii-tier-persuasive"),
+                            ]:
+                                for r in tiered.get(tier_key, []):
+                                    dt2 = r.get("date", "")[:10] or "—"
+                                    cit2 = r.get("citation") or r.get("title", "—")
+                                    ur = r.get("url", "")
+                                    lnk = f"<a href='{ur}' target='_blank'>{cit2}</a>" if ur else cit2
+                                    db = r.get("database", "")
+                                    st.markdown(
+                                        f"<div class='{tier_class}' style='font-size:12px'>"
+                                        f"<span class='parvis-canlii-tier-label' "
+                                        f"style='background:{'#3B6D1133' if tier_key=='binding' else '#9E9E9E33'};"
+                                        f"color:{'#3B6D11' if tier_key=='binding' else '#3a3a3a'}'>"
+                                        f"{tier_label} · {db.upper()}</span> "
+                                        f"<span style='color:#888'>[{dt2}]</span> {lnk}"
+                                        f"</div>",
+                                        unsafe_allow_html=True,
+                                    )
                 elif CANLII_ON and not canlii_ok():
                     st.info("Add **CANLII_API_KEY** to Streamlit secrets to enable live CanLII search.")
             except ImportError: st.error("Requires `anthropic` package in requirements.txt")
@@ -3897,48 +4079,291 @@ with TABS[9]:
             st.markdown(f"<span style='color:{TC.get(m.get('type','risk'),'#888')}'>●</span> N{nid} {m.get('name','')}: {'↑' if d>0 else '↓'} {abs(d):.2f}",unsafe_allow_html=True)
         if st.button("Clear document adjustments"): st.session_state.doc_adj={}; run_inf(); st.rerun()
 
-    # ── Tetrad subsequent history tracker ─────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # Section 2 — Live case law (rebuilt April 27 2026)
+    # ══════════════════════════════════════════════════════════════════════
     st.markdown("---")
-    st.markdown("### 📡 Tetrad subsequent history — live from CanLII")
-    st.caption("Tracks recent citing cases for Gladue, Morris, Ellis, Ewert, Natomagan, Boutilier, Ipeelee.")
-    if CANLII_ON and canlii_ok():
-        col_btn,col_yr=st.columns([2,1])
-        with col_yr:
-            since=st.selectbox("Since year",[2024,2023,2022,2021],index=1,key="tet_yr")
-        with col_btn:
-            run_tet=st.button("🔄 Check Tetrad for recent developments",key="tet_btn")
-        if run_tet:
-            with st.spinner("Querying CanLII..."):
-                upd=get_tetrad_updates(since_year=since)
-            if upd:
-                for case_lbl,citing in upd.items():
-                    with st.expander(f"📌 {case_lbl} — {len(citing)} recent citing case(s)"):
-                        for c in citing[:6]:
-                            cd=c.get("decisionDate","")[:10] or "—"
-                            ct=c.get("title","—")
-                            cu=c.get("url","")
-                            lnk=f"<a href='{cu}' target='_blank'>{ct}</a>" if cu else ct
-                            st.markdown(f"<div style='font-size:12px;padding:3px 0'><span style='color:#aaa'>[{cd}]</span> {lnk}</div>",unsafe_allow_html=True)
-            else:
-                st.success(f"No new citing cases found since {since}.")
-        st.markdown("#### ⚡ Doctrine update alerts")
-        st.caption("Nodes with actively evolving law — flagged in doctrine.py:")
-        try:
-            from doctrine import get_update_notes
-            notes=get_update_notes()
-            for nid,note in notes.items():
-                nm=NODE_META.get(nid,{}); col=TC.get(nm.get("type","distortion"),"#185FA5")
-                st.markdown(f"<div style='border-left:3px solid {col};padding:6px 12px;margin:4px 0;background:{col}11;border-radius:0 6px 6px 0'><b style='color:{col}'>N{nid} — {nm.get('short','')}</b><br><span style='font-size:12px'>{note}</span></div>",unsafe_allow_html=True)
-        except Exception:
-            st.caption("doctrine.py update notes unavailable.")
-    else:
+    st.markdown("### 📡 Live case law")
+
+    # Always-visible purpose statement
+    st.markdown(
+        '''<div class="parvis-doc-purpose">The CanLII surface queries the Canadian Legal Information Institute API for recent decisions relevant to PARVIS's doctrinal substrate. Its purpose is to surface authority that may have moved or refined the law since the architecture's static doctrinal grounding (<em>doctrine.py</em>) was last updated, so the audit is conducted against current, not stale, doctrine.</div>''',
+        unsafe_allow_html=True,
+    )
+
+    # Expandable "How it works" detail
+    st.markdown('''<details class="parvis-doc">
+<summary>How live case law works</summary>
+<div class="parvis-doc-body">
+<p><strong>Why this surface exists.</strong> PARVIS's doctrinal grounding is a snapshot. The Tetrad — <em>Gladue</em>, <em>Ipeelee</em>, <em>Morris</em>, <em>Ewert</em> — and the downstream binding decisions that interpret them are living law, subject to refinement by the Supreme Court of Canada, provincial appellate courts, and binding statutory amendment. An audit conducted against an unchanged doctrinal baseline could miss material movements: <em>Sharma</em> (2022 SCC 39) reshaping conditional sentence availability; <em>Friesen</em> (2020 SCC 9) on parity in sexual offences; ongoing appellate refinement of <em>Ipeelee</em>'s contextual reasoning requirement. The CanLII surface flags such movements so the user knows when the substrate beneath the audit has shifted.</p>
+<p><strong>What it does.</strong> Three query modes. <em>Subsequent history</em> tracks recent citing cases for the load-bearing decisions in PARVIS's doctrinal substrate, drawn from both the Tetrad (distortion-mitigation lineage) and the proportionality corpus (<em>Lacasse</em>, <em>Friesen</em>, <em>Bissonnette</em>, <em>Sharma</em> — severity-tightening lineage). <em>Per-node search</em> identifies recent decisions relevant to a specific PARVIS node — for example, recent appellate engagement with the <em>Ewert</em> concern at Node 5, or with the <em>Antic</em> bail-denial cascade at Node 7. <em>Directed search</em> accepts a free-text query and returns jurisdictionally tiered results.</p>
+<p><strong>How it feeds back into the model.</strong> It does not. The CanLII surface is informational. It does not modify the network's CPTs, posteriors, or any other inferential element. Belief revision in light of new authority remains the user's function — the architecture surfaces what has changed; the user decides whether the audit's framing should change with it.</p>
+<p><strong>Symmetric surface.</strong> The CanLII feature returns whatever the law currently is. It surfaces authority that strengthens distortion-based mitigation arguments and authority that tightens proportionality for serious offenders alike. The architecture's purpose is to render the current doctrinal substrate visible — not to advocate for any party's preferred reading of it.</p>
+</div>
+</details>''', unsafe_allow_html=True)
+
+    # ── CanLII activation status (April 27 2026 gating fix) ──────────────
+    # The architecture below renders regardless of CanLII activation. Only
+    # the action buttons (and result rendering) are gated on `_canlii_active`.
+    # Status banner shows so the user understands which buttons will work.
+    _canlii_active = bool(CANLII_ON and canlii_ok())
+    if not _canlii_active:
         st.markdown(
-            "<div style='background:#FAEEDA;border:1px solid #BA751733;border-radius:8px;padding:12px 16px'>"
-            "<b>CanLII not yet active.</b> To enable live Tetrad tracking:<br>"
+            "<div style='background:#FAEEDA;border:1px solid #BA751733;border-radius:8px;padding:12px 16px;margin:8px 0 16px 0'>"
+            "<b>CanLII not yet active.</b> The architecture below is fully built; live queries activate when an API key is configured.<br>"
             "1. Register free at <a href='https://api.canlii.org' target='_blank'>api.canlii.org</a><br>"
             "2. Add <code>CANLII_API_KEY = your-key</code> to Streamlit secrets<br>"
-            "3. Redeploy — tracker activates automatically.</div>",
+            "3. Redeploy — surface activates automatically.</div>",
             unsafe_allow_html=True)
+    else:
+        # Optional API key validity probe (cached 1 hour)
+        try:
+            _validity = validate_api_key()
+            if not _validity.get("valid"):
+                st.warning(f"⚠️ CanLII API key configured but probe failed: {_validity.get('error','unknown error')}. "
+                           f"Key may be invalid, expired, or rate-limited.")
+                _canlii_active = False  # Treat as not-active for button gating
+        except Exception:
+            pass  # Fail silently; live queries will surface real errors
+
+    # ── Global filters (jurisdiction + date floor) ────────────────────────
+    # Jurisdiction defaults to whatever the user already entered for
+    # the document (doc_prov), or "*" (all results uniformly tagged)
+    # if no document jurisdiction has been set.
+    _doc_prov_raw = st.session_state.get("doc_prov", "Auto-detect")
+    _default_jur_code = "*" if _doc_prov_raw == "Auto-detect" else _doc_prov_raw.split(" — ")[0]
+    _jur_options = ["* — All results uniformly tagged",
+                    "ON — Ontario", "BC — British Columbia", "AB — Alberta",
+                    "QC — Quebec", "SK — Saskatchewan", "MB — Manitoba",
+                    "NS — Nova Scotia", "NB — New Brunswick",
+                    "NL — Newfoundland and Labrador", "PE — Prince Edward Island",
+                    "YT — Yukon", "NT — Northwest Territories", "NU — Nunavut"]
+    _default_idx = 0
+    for _i, _opt in enumerate(_jur_options):
+        if _opt.startswith(_default_jur_code + " "):
+            _default_idx = _i
+            break
+
+    col_jur, col_floor = st.columns([2, 1])
+    with col_jur:
+        _jur_choice = st.selectbox(
+            "Jurisdiction (governs binding/persuasive classification)",
+            _jur_options,
+            index=_default_idx,
+            key="canlii_jur",
+            help="Cases from the Supreme Court of Canada and from this jurisdiction's "
+                 "Court of Appeal are binding. Other provincial Courts of Appeal are "
+                 "persuasive only. Lower-court decisions are tagged Other.",
+        )
+    with col_floor:
+        _date_floor = st.selectbox(
+            "Date floor",
+            ["1 year", "3 years", "5 years", "All"],
+            index=1,
+            key="canlii_date_floor",
+            help="Recency cutoff for surfaced cases.",
+        )
+    _user_jur = _jur_choice.split(" ")[0]  # First token is the code or "*"
+
+    # ── 2a — Subsequent history tracker (Tetrad + Proportionality) ───
+    st.markdown("#### Subsequent history — Tetrad + Proportionality corpus")
+    st.caption("Tracks recent citing cases for both lines of binding authority that PARVIS depends on. "
+               "<span class='parvis-canlii-corpus-tag corpus-distortion'>Distortion</span> tags the Tetrad lineage "
+               "(Gladue/Ipeelee/Morris/Ewert + downstream). "
+               "<span class='parvis-canlii-corpus-tag corpus-proportionality'>Proportionality</span> tags the "
+               "severity-tightening lineage (Lacasse/Friesen/Bissonnette/Sharma).",
+               unsafe_allow_html=True)
+    col_corp, col_tet_btn = st.columns([1, 2])
+    with col_corp:
+        _corpus_choice = st.selectbox(
+            "Corpus",
+            ["all — Both lineages", "Distortion — Tetrad only", "Proportionality — only"],
+            index=0,
+            key="canlii_corpus",
+        )
+    _corpus_arg = _corpus_choice.split(" ")[0]
+    with col_tet_btn:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        _run_tet = st.button("🔄 Check tracked cases for recent developments", key="tet_btn_v2", disabled=not _canlii_active)
+        if not _canlii_active:
+            st.caption("_Configure CanLII API access to enable._")
+    if _run_tet:
+        with st.spinner("Querying CanLII for citing cases..."):
+            _updates = get_tracked_updates(
+                date_floor_label=_date_floor,
+                user_jurisdiction=_user_jur,
+                corpus=_corpus_arg,
+            )
+        if _updates:
+            for _case_lbl, _data in _updates.items():
+                _corpus = _data.get("corpus", "Distortion")
+                _corpus_class = f"corpus-{_corpus.lower()}"
+                _total = _data.get("total", 0)
+                with st.expander(f"📌 {_case_lbl} — {_total} recent citing case(s)"):
+                    st.markdown(
+                        f"<span class='parvis-canlii-corpus-tag {_corpus_class}'>{_corpus}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    for _tier_key, _tier_label, _tier_class, _tier_color in [
+                        ("binding",    "Binding",    "parvis-canlii-tier-binding",    "#3B6D11"),
+                        ("persuasive", "Persuasive", "parvis-canlii-tier-persuasive", "#3a3a3a"),
+                        ("other",      "Other",      "parvis-canlii-tier-other",      "#9E9E9E"),
+                    ]:
+                        _tier_cases = _data.get(_tier_key, [])
+                        if not _tier_cases:
+                            continue
+                        for _c in _tier_cases[:6]:
+                            _cd = _c.get("date", "")[:10] or "—"
+                            _ct = _c.get("title", "—")
+                            _cu = _c.get("url", "")
+                            _db = _c.get("database", "")
+                            _lnk = f"<a href='{_cu}' target='_blank'>{_ct}</a>" if _cu else _ct
+                            st.markdown(
+                                f"<div class='{_tier_class}' style='font-size:12px'>"
+                                f"<span class='parvis-canlii-tier-label' "
+                                f"style='background:{_tier_color}22;color:{_tier_color}'>"
+                                f"{_tier_label} · {_db.upper()}</span> "
+                                f"<span style='color:#888'>[{_cd}]</span> {_lnk}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+        else:
+            st.success(f"No new citing cases found within the {_date_floor.lower()} window.")
+
+    # ── 2b — Per-node binding-authority browser ──────────────────────
+    st.markdown("---")
+    st.markdown("#### Per-node search — recent decisions for a specific node")
+    st.caption("Returns recent cases relevant to a chosen PARVIS node, "
+               "tiered by stare decisis position relative to your jurisdiction.")
+    col_node, col_pn_btn = st.columns([2, 1])
+    with col_node:
+        _node_options = [f"N{nid} — {NODE_META.get(nid, {}).get('short', f'Node {nid}')}"
+                         for nid in sorted(NODE_SEARCH_QUERIES.keys()) if nid in NODE_META]
+        _node_choice = st.selectbox(
+            "Select node",
+            _node_options,
+            key="canlii_node_pick",
+        )
+    _selected_nid = int(_node_choice.split(" ")[0][1:])
+    with col_pn_btn:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        _run_node = st.button("🔍 Search recent cases for this node", key="node_search_btn", disabled=not _canlii_active)
+        if not _canlii_active:
+            st.caption("_Configure CanLII API access to enable._")
+    if _run_node:
+        with st.spinner(f"Searching CanLII for Node {_selected_nid}..."):
+            _node_results = search_node_developments(
+                _selected_nid, max_results=6,
+                user_jurisdiction=_user_jur,
+                date_floor_label=_date_floor,
+            )
+        if _node_results.get("error"):
+            st.error(_node_results["error"])
+        elif _node_results.get("total", 0) == 0:
+            st.info(f"No recent results found for Node {_selected_nid} within the {_date_floor.lower()} window.")
+        else:
+            for _tier_key, _tier_label, _tier_class, _tier_color in [
+                ("binding",    "Binding",    "parvis-canlii-tier-binding",    "#3B6D11"),
+                ("persuasive", "Persuasive", "parvis-canlii-tier-persuasive", "#3a3a3a"),
+                ("other",      "Other",      "parvis-canlii-tier-other",      "#9E9E9E"),
+            ]:
+                _tier_cases = _node_results.get(_tier_key, [])
+                if not _tier_cases:
+                    continue
+                st.markdown(f"<b style='color:{_tier_color}'>{_tier_label} ({len(_tier_cases)})</b>",
+                            unsafe_allow_html=True)
+                for _c in _tier_cases:
+                    _cd = _c.get("date", "")[:10] or "—"
+                    _cit = _c.get("citation") or _c.get("title", "—")
+                    _cu = _c.get("url", "")
+                    _db = _c.get("database", "")
+                    _lnk = f"<a href='{_cu}' target='_blank'>{_cit}</a>" if _cu else _cit
+                    st.markdown(
+                        f"<div class='{_tier_class}' style='font-size:12px'>"
+                        f"<span class='parvis-canlii-tier-label' "
+                        f"style='background:{_tier_color}22;color:{_tier_color}'>"
+                        f"{_tier_label} · {_db.upper()}</span> "
+                        f"<span style='color:#888'>[{_cd}]</span> {_lnk}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    # ── 2c — Directed search ──────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### Directed search — free-text query")
+    st.caption("Run a free-text query against CanLII. Results are filtered by your "
+               "jurisdiction and date floor, then tiered by stare decisis position.")
+    col_q, col_q_btn = st.columns([3, 1])
+    with col_q:
+        _query = st.text_input(
+            "Search query",
+            placeholder="e.g. dangerous offender Indigenous Gladue 2024",
+            key="canlii_directed_q",
+        )
+    with col_q_btn:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        _run_q = st.button("🔍 Search CanLII", key="directed_search_btn", disabled=not _canlii_active)
+        if not _canlii_active:
+            st.caption("_Configure CanLII API access to enable._")
+    if _run_q and _query.strip():
+        with st.spinner(f"Searching CanLII for '{_query[:40]}'..."):
+            _q_results = search_with_filters(
+                query=_query.strip(),
+                user_jurisdiction=_user_jur,
+                date_floor_label=_date_floor,
+                max_results=8,
+            )
+        if _q_results.get("error"):
+            st.error(_q_results["error"])
+        elif _q_results.get("total", 0) == 0:
+            st.info(f"No results found for '{_query}' within the {_date_floor.lower()} window.")
+        else:
+            st.caption(f"Total results: {_q_results.get('total', 0)}")
+            for _tier_key, _tier_label, _tier_class, _tier_color in [
+                ("binding",    "Binding",    "parvis-canlii-tier-binding",    "#3B6D11"),
+                ("persuasive", "Persuasive", "parvis-canlii-tier-persuasive", "#3a3a3a"),
+                ("other",      "Other",      "parvis-canlii-tier-other",      "#9E9E9E"),
+            ]:
+                _tier_cases = _q_results.get(_tier_key, [])
+                if not _tier_cases:
+                    continue
+                st.markdown(f"<b style='color:{_tier_color}'>{_tier_label} ({len(_tier_cases)})</b>",
+                            unsafe_allow_html=True)
+                for _c in _tier_cases:
+                    _cd = _c.get("date", "")[:10] or "—"
+                    _cit = _c.get("citation") or _c.get("title", "—")
+                    _cu = _c.get("url", "")
+                    _db = _c.get("database", "")
+                    _lnk = f"<a href='{_cu}' target='_blank'>{_cit}</a>" if _cu else _cit
+                    st.markdown(
+                        f"<div class='{_tier_class}' style='font-size:12px'>"
+                        f"<span class='parvis-canlii-tier-label' "
+                        f"style='background:{_tier_color}22;color:{_tier_color}'>"
+                        f"{_tier_label} · {_db.upper()}</span> "
+                        f"<span style='color:#888'>[{_cd}]</span> {_lnk}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    # ── Section 3: Doctrine update alerts (preserved) ────────────────
+    st.markdown("---")
+    st.markdown("#### ⚡ Doctrine update alerts")
+    st.caption("Nodes with actively evolving law — flagged in doctrine.py:")
+    try:
+        from doctrine import get_update_notes
+        notes = get_update_notes()
+        for nid, note in notes.items():
+            nm = NODE_META.get(nid, {})
+            col = TC.get(nm.get("type", "distortion"), "#185FA5")
+            st.markdown(
+                f"<div style='border-left:3px solid {col};padding:6px 12px;margin:4px 0;"
+                f"background:{col}11;border-radius:0 6px 6px 0'>"
+                f"<b style='color:{col}'>N{nid} — {nm.get('short','')}</b><br>"
+                f"<span style='font-size:12px'>{note}</span></div>",
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        st.caption("doctrine.py update notes unavailable.")
 
 # ── T3: Intake (Chat) — PARVIS assistant ────────────────────────────────────
 with TABS[3]:
