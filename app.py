@@ -148,7 +148,7 @@ div[data-testid="stSlider"][aria-label="N2 — Violent history"] > div > div > d
 div[data-testid="stSlider"][aria-label="N3 — Psychopathy (PCL-R)"] > div > div > div > div { background:#A32D2D !important; }
 div[data-testid="stSlider"][aria-label="N4 — Sexual offence"] > div > div > div > div { background:#A32D2D !important; }
 div[data-testid="stSlider"][aria-label="N4 — Dynamic risk"] > div > div > div > div { background:#A32D2D !important; }
-div[data-testid="stSlider"][aria-label="N5 — Invalid risk tools"] > div > div > div > div { background:#185FA5 !important; }
+div[data-testid="stSlider"][aria-label="N5 — Risk tools"] > div > div > div > div { background:#185FA5 !important; }
 div[data-testid="stSlider"][aria-label="N6 — Ineffective counsel"] > div > div > div > div { background:#185FA5 !important; }
 div[data-testid="stSlider"][aria-label="N7 — Bail-denial cascade"] > div > div > div > div { background:#185FA5 !important; }
 div[data-testid="stSlider"][aria-label="N9 — FASD"] > div > div > div > div { background:#534AB7 !important; }
@@ -4814,7 +4814,7 @@ RISK FACTOR POSTERIORS:
 
 DISTORTION CORRECTIONS (reduce effective risk weight):
 - N1 Burden of proof: {Pa.get(1,0.83)*100:.1f}%
-- N5 Invalid risk tools (Ewert): {Pa.get(5,0.10)*100:.1f}%
+- N5 Risk tools: {Pa.get(5,0.10)*100:.1f}%
 - N6 Ineffective counsel: {Pa.get(6,0.15)*100:.1f}%
 - N7 Bail-denial cascade: {Pa.get(7,0.40)*100:.1f}%
 - N9 FASD: {Pa.get(9,0.15)*100:.1f}%

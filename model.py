@@ -99,28 +99,28 @@ EDGES_VE = [(f, t) for f, t in [
 # ═════════════════════════════════════════════════════════════════════════════
 NODE_META = {
     # ── Substantive Risk Layer (CH5 i) ────────────────────────────────────────
-    1:  {"name": "Criminal Law Burden of Proof",                  "short": "Burden of proof",       "type": "constraint", "ev": False},
-    2:  {"name": "Validated Risk Elevators",                      "short": "Risk elevators",        "type": "risk",       "ev": True},
-    3:  {"name": "Sexual Offence Risk Profile",                   "short": "Sexual offence",        "type": "risk",       "ev": True},
-    4:  {"name": "Dynamic Risk Factor Cluster",                   "short": "Dynamic risk",          "type": "risk",       "ev": True},
+    1:  {"name": "Criminal law burden of proof",                  "short": "Burden of proof",       "type": "constraint", "ev": False},
+    2:  {"name": "Validated risk elevators",                      "short": "Risk elevators",        "type": "risk",       "ev": True},
+    3:  {"name": "Sexual offence risk profile",                   "short": "Sexual offence",        "type": "risk",       "ev": True},
+    4:  {"name": "Dynamic risk factor cluster",                   "short": "Dynamic risk",          "type": "risk",       "ev": True},
     # ── Systemic Distortion and Doctrinal Fidelity Layer (CH5 ii) ────────────
-    5:  {"name": "Current Risk Assessment Tools",                 "short": "Risk tools (Ewert)",    "type": "distortion", "ev": True},
-    6:  {"name": "Ineffective Assistance of Counsel",             "short": "IAC",                   "type": "distortion", "ev": True},
-    7:  {"name": "Bail Denial → Wrongful Conviction Guilty Plea", "short": "Bail-WCGP cascade",     "type": "distortion", "ev": True},
-    8:  {"name": "FASD as Dual-Factor in Risk Modeling",          "short": "FASD",                  "type": "dual",       "ev": True},
-    9:  {"name": "Intergenerational Trauma & Cultural Treatment", "short": "IGT / treatment",       "type": "mitigation", "ev": True},
-    10: {"name": "Judicial Misapplication of SCE",                "short": "SCE misapplication",    "type": "distortion", "ev": True},
-    11: {"name": "Gaming Risk Detector",                          "short": "Gaming risk",           "type": "special",    "ev": True},
-    12: {"name": "Judicial Reasoning Reliability",                "short": "Judging the Judge",     "type": "distortion", "ev": False},
-    13: {"name": "Structural Systemic Bias (TraceRoute)",         "short": "TraceRoute",            "type": "distortion", "ev": False},
-    14: {"name": "Temporal Distortion in Prior Records",          "short": "Temporal distortion",   "type": "distortion", "ev": True},
-    15: {"name": "Interjurisdictional Tariff Distortion",         "short": "Tariff distortion",     "type": "distortion", "ev": False},
-    16: {"name": "Doctrinal Tension (s.718.04 / s.718.2(e))",     "short": "Doctrinal tension",     "type": "distortion", "ev": False},
-    17: {"name": "Over-Policing & Epistemic Contamination",       "short": "Over-policing",         "type": "distortion", "ev": True},
-    18: {"name": "Gladue / Ewert / Morris / Ellis Profile",       "short": "SCE Profile audit",     "type": "distortion", "ev": False},
-    19: {"name": "Collider Bias",                                 "short": "Collider bias",         "type": "distortion", "ev": False},
+    5:  {"name": "Current risk assessment tools",                 "short": "Risk tools",            "type": "distortion", "ev": True},
+    6:  {"name": "Ineffective assistance of counsel",             "short": "IAC",                   "type": "distortion", "ev": True},
+    7:  {"name": "Bail denial → wrongful conviction guilty plea", "short": "Bail-WCGP cascade",     "type": "distortion", "ev": True},
+    8:  {"name": "FASD as dual-factor in risk modeling",          "short": "FASD",                  "type": "dual",       "ev": True},
+    9:  {"name": "Intergenerational trauma & cultural treatment", "short": "IGT / treatment",       "type": "mitigation", "ev": True},
+    10: {"name": "Judicial misapplication of SCE",                "short": "SCE misapplication",    "type": "distortion", "ev": True},
+    11: {"name": "Gaming risk detector",                          "short": "Gaming risk",           "type": "special",    "ev": True},
+    12: {"name": "Judicial reasoning reliability",                "short": "Judging the judge",     "type": "distortion", "ev": False},
+    13: {"name": "Structural systemic bias (TraceRoute)",         "short": "TraceRoute",            "type": "distortion", "ev": False},
+    14: {"name": "Temporal distortion in prior records",          "short": "Temporal distortion",   "type": "distortion", "ev": True},
+    15: {"name": "Interjurisdictional tariff distortion",         "short": "Tariff distortion",     "type": "distortion", "ev": False},
+    16: {"name": "Doctrinal tension (s.718.04 / s.718.2(e))",     "short": "Doctrinal tension",     "type": "distortion", "ev": False},
+    17: {"name": "Over-policing & epistemic contamination",       "short": "Over-policing",         "type": "distortion", "ev": True},
+    18: {"name": "Gladue / Ewert / Morris / Ellis profile",       "short": "SCE profile audit",     "type": "distortion", "ev": False},
+    19: {"name": "Collider bias",                                 "short": "Collider bias",         "type": "distortion", "ev": False},
     # ── Structural Output (CH5 iii) ──────────────────────────────────────────
-    20: {"name": "Dangerous Offender Designation",                "short": "DO designation",        "type": "output",     "ev": False},
+    20: {"name": "Dangerous offender designation",                "short": "DO designation",        "type": "output",     "ev": False},
 }
 
 
