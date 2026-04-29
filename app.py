@@ -3,6 +3,52 @@ PARVIS — Streamlit Application v Xavier 7
 Jeinis Patel, PhD Candidate and Barrister | University of London | Ethical AI Initiative
 """
 
+# ═════════════════════════════════════════════════════════════════════════════
+# CANONICAL NODE TAXONOMY — Chapter 5 (April 11, 2026)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# This is the AUTHORITATIVE node taxonomy. Code in this file MUST match these
+# titles when referencing nodes by number. The thesis (Chapter 5) is canonical;
+# the architecture defers to the thesis, never the reverse.
+#
+# i. Substantive Risk Layer
+#    N1   — Criminal Law Burden of Proof (Contextualizer)
+#    N2   — Validated Risk Elevators
+#    N2i  — Temporal Modifier (Criminal Burnout)
+#    N3   — Sexual Offence Risk Profile
+#    N4   — Dynamic Risk Factor Cluster
+#
+# ii. Systemic Distortion and Doctrinal Fidelity Layer
+#    N5   — Current Risk Assessment Tools
+#    N6   — Ineffective Assistance of Counsel
+#    N7   — Denial of Bail → Wrongful Conviction Guilty Plea Cascade
+#    N7i  — Anticipated Credibility Impeachment / Strategic Pleas
+#    N8   — FASD as Dual-Factor in Risk Modeling
+#    N9   — Intergenerational Trauma & Absence of Culturally Grounded Treatment
+#    N10  — Judicial Misapplication of Social Context Evidence (sub-nodes 10a-10d)
+#    N11  — Gaming Risk ("BS") Detector
+#    N12  — Judging the Judge — Judicial Reasoning Reliability
+#    N13  — Structural Systemic Bias (TraceRoute)
+#    N14  — Temporal Distortion and Systemic Misrepresentation in Prior Records
+#    N15  — Interjurisdictional Tariff Distortion
+#    N16  — Doctrinal Tension (s.718.04 vs s.718.2(e))
+#    N17  — Over-Policing and Epistemic Contamination of Criminal Records
+#    N18  — Gladue / Ewert / Morris / Ellis Profile (SCE Integration Audit)
+#    N19  — Collider Bias Node
+#
+# iii. Structural Output
+#    N20  — Dangerous Offender Designation
+#
+# Layer boundaries:
+#    Substantive Risk:           N1-N4 (with N2i)
+#    Systemic Distortion:        N5-N19 (with N7i, N10a-N10d)
+#    Structural Output:          N20
+#
+# When adding new code: VERIFY any node-number reference against this table
+# before adding it. The session memory may carry stale taxonomy from earlier
+# builds; this comment block is the ground truth.
+# ═════════════════════════════════════════════════════════════════════════════
+
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
@@ -101,18 +147,18 @@ div[data-testid="stSlider"] > div > div > div > div > div:hover {
 div[data-testid="stSlider"][aria-label="N2 — Violent history"] > div > div > div > div { background:#A32D2D !important; }
 div[data-testid="stSlider"][aria-label="N3 — Psychopathy (PCL-R)"] > div > div > div > div { background:#A32D2D !important; }
 div[data-testid="stSlider"][aria-label="N4 — Sexual offence"] > div > div > div > div { background:#A32D2D !important; }
-div[data-testid="stSlider"][aria-label="N18 — Dynamic risk"] > div > div > div > div { background:#A32D2D !important; }
+div[data-testid="stSlider"][aria-label="N4 — Dynamic risk"] > div > div > div > div { background:#A32D2D !important; }
 div[data-testid="stSlider"][aria-label="N5 — Invalid risk tools"] > div > div > div > div { background:#185FA5 !important; }
 div[data-testid="stSlider"][aria-label="N6 — Ineffective counsel"] > div > div > div > div { background:#185FA5 !important; }
 div[data-testid="stSlider"][aria-label="N7 — Bail-denial cascade"] > div > div > div > div { background:#185FA5 !important; }
 div[data-testid="stSlider"][aria-label="N9 — FASD"] > div > div > div > div { background:#534AB7 !important; }
-div[data-testid="stSlider"][aria-label="N10 — Intergenerational trauma"] > div > div > div > div { background:#3B6D11 !important; }
-div[data-testid="stSlider"][aria-label="N11 — No cultural treatment"] > div > div > div > div { background:#185FA5 !important; }
-div[data-testid="stSlider"][aria-label="N12 — Gladue misapplication"] > div > div > div > div { background:#185FA5 !important; }
-div[data-testid="stSlider"][aria-label="N13 — Gaming risk"] > div > div > div > div { background:#0F6E56 !important; }
-div[data-testid="stSlider"][aria-label="N14 — Over-policing"] > div > div > div > div { background:#185FA5 !important; }
-div[data-testid="stSlider"][aria-label="N15 — Temporal distortion"] > div > div > div > div { background:#185FA5 !important; }
-div[data-testid="stSlider"][aria-label="N19 — No rehabilitation"] > div > div > div > div { background:#185FA5 !important; }
+div[data-testid="stSlider"][aria-label="N9 — Intergenerational trauma"] > div > div > div > div { background:#3B6D11 !important; }
+div[data-testid="stSlider"][aria-label="N9 — No cultural treatment"] > div > div > div > div { background:#185FA5 !important; }
+div[data-testid="stSlider"][aria-label="N10 — Gladue misapplication"] > div > div > div > div { background:#185FA5 !important; }
+div[data-testid="stSlider"][aria-label="N11 — Gaming risk"] > div > div > div > div { background:#0F6E56 !important; }
+div[data-testid="stSlider"][aria-label="N17 — Over-policing"] > div > div > div > div { background:#185FA5 !important; }
+div[data-testid="stSlider"][aria-label="N14 — Temporal distortion"] > div > div > div > div { background:#185FA5 !important; }
+div[data-testid="stSlider"][aria-label="N9 — No rehabilitation"] > div > div > div > div { background:#185FA5 !important; }
 .dc{border-radius:14px;padding:.9rem 1.1rem;text-align:center}
 .dp{font-size:2.4rem;font-weight:700;font-family:monospace;line-height:1}
 .dl{font-size:.72rem;margin-bottom:3px}
@@ -304,6 +350,53 @@ N7_MULTIPLIERS = {
     "Heavily Discounted": 0.30,   # 70% reduction
 }
 
+# ── N6 (Ineffective Assistance of Counsel) — §RM.6 ──────────────────────
+# N6 is upstream of N7. Per §5.1.6, four binary indicators aggregate to a
+# tri-state ordinal grade; per §RM.6, that grade additively boosts N7's
+# per-conviction bail-denial signal before threshold logic.
+
+# The four indicator keys; UI checkboxes set these on each conviction.
+# Adverse direction noted in inline comment.
+N6_INDICATORS = (
+    "n6_no_sce",           # adverse: SCE not submitted
+    "n6_inadequate_counsel",   # adverse: counsel culturally inadequate
+    "n6_judicial_criticism",   # adverse: judicial criticism of representation present
+    "n6_disproportionate",     # adverse: procedural outcome disproportionate
+)
+
+# Threshold scheme per §RM.6.3 (JP 2026-04-28: option (c)).
+# 0 adverse  -> High;  1, 2, or 3 adverse -> Moderate;  4 adverse -> Low.
+N6_GRADE_BY_COUNT = {0: "High", 1: "Moderate", 2: "Moderate", 3: "Moderate", 4: "Low"}
+
+# Additive boost to N7's per-conviction bail-denial signal per §RM.6.4.
+# Conservative values per §RM.2 conservatism principle.
+N6_BOOST_BY_GRADE = {
+    "High":     0.00,
+    "Moderate": 0.10,
+    "Low":      0.20,
+}
+
+
+def _n6_count_adverse(conviction):
+    """Return the count of adverse N6 indicators for this conviction (0-4)."""
+    adj = conviction.get("adj", {}) or {}
+    return sum(1 for k in N6_INDICATORS if bool(adj.get(k, False)))
+
+
+def _n6_grade_for_conviction(conviction):
+    """
+    Return the N6 confidence grade for a conviction per §RM.6.3.
+    Grade depends only on this conviction's own indicators (no propagation
+    per §RM.6.6: different counsel, different files).
+    """
+    return N6_GRADE_BY_COUNT[_n6_count_adverse(conviction)]
+
+
+def _n6_boost_for_conviction(conviction):
+    """Return the N6 additive boost (0.00 / 0.10 / 0.20) for this conviction."""
+    return N6_BOOST_BY_GRADE[_n6_grade_for_conviction(conviction)]
+
+
 # Propagation factor scheme (§RM.5.4): when a downstream conviction has its
 # own affirmative bail-denial signal AND a prior conviction on the same
 # record has been graded as Discounted or Heavily Discounted, the per-conviction
@@ -345,8 +438,10 @@ def _n7_threshold_grade(combined_indicator):
 
 def _n7_grades_chronological(criminal_record_chronological):
     """
-    Compute per-conviction grades in chronological order, applying the
-    cascade-propagation factor where applicable.
+    Compute per-conviction grades in chronological order, applying:
+      (1) N6 additive boost (per §RM.6.4)
+      (2) Cascade propagation factor (per §RM.5.4)
+    in that order, per §RM.6.5.
 
     Per §RM.5.4: a conviction's per-conviction bail-denial signal is
     multiplied by the strongest propagation factor from earlier graded
@@ -356,8 +451,14 @@ def _n7_grades_chronological(criminal_record_chronological):
       (b) at least one earlier conviction is graded Discounted or
           Heavily Discounted
 
-    Returns: list of (grade, multiplier, propagation_factor_applied) tuples
-    in the same order as the input record.
+    Per §RM.6.4: the per-conviction bail-denial signal is first boosted
+    additively by the N6 confidence grade (+0.00 / +0.10 / +0.20) before
+    any propagation factor is applied. N6 conditioning is per-conviction
+    only; representation quality on Conviction A does not propagate
+    forward to Conviction B (different counsel, different files).
+
+    Returns: list of (n7_grade, n7_multiplier, propagation_factor, n6_grade)
+    tuples in the same order as the input record.
     """
     if not criminal_record_chronological:
         return []
@@ -368,8 +469,20 @@ def _n7_grades_chronological(criminal_record_chronological):
     for e in criminal_record_chronological:
         per_conv_bail = float(e.get("adj", {}).get("bail", 0.0))
 
-        # Determine propagation factor: strongest of any earlier tainted
-        # conviction. If no earlier tainted convictions, factor = 1.00.
+        # ── (1) N6 conditioning per §RM.6.4 ───────────────────────────────
+        # N6 boost only applies where the conviction has its own bail-denial
+        # signal. Per §RM.6.4 final paragraph: "The architecture does not
+        # apply N6's conditioning where N6 has nothing to condition."
+        n6_grade = _n6_grade_for_conviction(e)
+        if per_conv_bail > 0.0:
+            n6_addition = N6_BOOST_BY_GRADE[n6_grade]
+        else:
+            n6_addition = 0.0
+        n6_conditioned = per_conv_bail + n6_addition
+
+        # ── (2) Cascade propagation per §RM.5.4 ───────────────────────────
+        # Propagation factor: strongest of any earlier tainted conviction.
+        # If no earlier tainted convictions, factor = 1.00.
         if per_conv_bail > 0.0 and earlier_grades:
             applicable_factors = [
                 N7_PROPAGATION_FACTOR[g] for g in earlier_grades
@@ -377,20 +490,18 @@ def _n7_grades_chronological(criminal_record_chronological):
             ]
             propagation = max(applicable_factors) if applicable_factors else 1.00
         else:
-            # If conviction has no own bail-denial signal, propagation
-            # cannot apply (per §RM.5.3: the cascade chain requires actual
-            # pre-trial detention on the downstream conviction).
+            # No own bail signal: propagation cannot apply (§RM.5.3).
             propagation = 1.00
 
-        # Apply propagation factor to per-conviction signal
-        boosted_signal = per_conv_bail * propagation
+        # ── Combined boosted signal: (bail + N6) × propagation ──────────
+        boosted_signal = n6_conditioned * propagation
 
-        # Apply threshold logic
-        grade = _n7_threshold_grade(boosted_signal)
-        multiplier = N7_MULTIPLIERS[grade]
+        # Threshold logic
+        n7_grade = _n7_threshold_grade(boosted_signal)
+        n7_multiplier = N7_MULTIPLIERS[n7_grade]
 
-        results.append((grade, multiplier, propagation))
-        earlier_grades.append(grade)
+        results.append((n7_grade, n7_multiplier, propagation, n6_grade))
+        earlier_grades.append(n7_grade)
 
     return results
 
@@ -441,7 +552,7 @@ def _n7_aggregate_record_weight(criminal_record, n7_posterior=None):
     # Compute grades in chronological order (assumed already sorted by
     # caller; criminal_record.sort by year ascending happens upstream).
     chronological_results = _n7_grades_chronological(criminal_record)
-    grades = [(grade, mult) for grade, mult, _prop in chronological_results]
+    grades = [(grade, mult) for grade, mult, _prop, _n6 in chronological_results]
     adjusted_weights = [w * m for w, (_, m) in zip(nominal_weights, grades)]
 
     return (
@@ -555,7 +666,7 @@ def _jump_cumulative_chain(criminal_record_chronological):
     # Run the chronological grading pass first to get each conviction's
     # reliability grade for jump-principle weighting.
     grading = _n7_grades_chronological(criminal_record_chronological)
-    for e, (grade, _mult, _prop) in zip(criminal_record_chronological, grading):
+    for e, (grade, _mult, _prop, _n6) in zip(criminal_record_chronological, grading):
         nominal_own = _jump_ceiling_for_conviction(e)
         weight = JUMP_WEIGHT_BY_GRADE.get(grade, 1.00)
         weighted_own = nominal_own * weight
@@ -860,7 +971,7 @@ def run_inf():
 
     # Step 4: Compute Node 20 using full model formula
     # Includes: record reliability (N7/N6), Ewert tool validity (N5→N3/N4),
-    # and age burnout multiplier (N15). All from model.compute_do_risk.
+    # and age burnout multiplier (N14 — Temporal Distortion per CH5 §5.1.14). All from model.compute_do_risk.
     post[20]=compute_do_risk(post)
     st.session_state.posteriors=post
     # Pass engine + per-gate SCE corrections so the new Appendix Q
@@ -1056,10 +1167,22 @@ try:
         NODE_SEARCH_QUERIES,
     )
     CANLII_ON = True
-except ImportError:
+except Exception as _canlii_err:
+    # Catches ImportError plus any module-level failure (missing deps,
+    # secrets, runtime errors). Provide stub fallbacks so the rest of the
+    # app continues to render even if CanLII is unavailable.
     CANLII_ON = False
+    NODE_SEARCH_QUERIES = {}
+    ALL_TRACKED_CITATIONS = []
+    TETRAD_CITATIONS = []
+    PROPORTIONALITY_CITATIONS = []
     def canlii_ok(): return False
-    def validate_api_key(): return {"valid": False, "error": "canlii_client not importable"}
+    def validate_api_key(): return {"valid": False, "error": f"canlii_client unavailable: {type(_canlii_err).__name__}"}
+    def search_node_developments(*a, **kw): return {}
+    def get_tetrad_updates(*a, **kw): return {}
+    def search_with_filters(*a, **kw): return {}
+    def get_tracked_updates(*a, **kw): return {}
+    def flatten_search_results(*a, **kw): return []
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake (Chat)",
@@ -1071,18 +1194,32 @@ TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake 
 with TABS[0]:
     _band_lbl, _band_fg, _band_bg = _summary_band(P[20])
     _drv_up_raw, _drv_dn_raw = _top_drivers(P, k=8)
-    # ── Doctrinal architecture: N1 (structural control) and N17 (properly-weighted-conditional) ──
-    # Per Chapter 5: these nodes encode meta-constraints rather than case-specific drivers.
-    # They are surfaced separately so the drivers panel below shows only case-responsive nodes.
-    _struct_nodes = {1, 17}  # node IDs treated as structural in the Summary panel
+    # ── Doctrinal architecture: N1 (burden of proof), N5 (risk-tool validity
+    # gate per Ewert), and N19 (collider bias) — three structural conditioning ──
+    # Per Chapter 5: N1 encodes evidentiary admissibility burden; N5 encodes
+    # the Ewert risk-tool validity gate that conditions how risk-tool outputs
+    # (N3, N4) carry weight; N19 encodes collider bias from system-entry
+    # variables. These three nodes condition the architecture's inferential
+    # structure rather than responding directly to case-specific evidence.
+    _struct_nodes = {1, 5, 19}  # node IDs treated as structural in the Summary panel
     _drv_up = [d for d in _drv_up_raw if d["nid"] not in _struct_nodes][:5]
     _drv_dn = [d for d in _drv_dn_raw if d["nid"] not in _struct_nodes][:5]
+    # Build _struct_drivers directly from _struct_nodes + P — these cards 
+    # render unconditionally because they represent structural conditioning
+    # of the inference, independent of whether the underlying node happens
+    # to surface in the top-k drivers ranking.
     _struct_drivers = []
-    for d in _drv_up_raw + _drv_dn_raw:
-        if d["nid"] in _struct_nodes and d not in _struct_drivers:
-            _struct_drivers.append(d)
-    # Sort structural by node id for a stable display order (N1 first, then N17)
-    _struct_drivers.sort(key=lambda d: d["nid"])
+    for nid in sorted(_struct_nodes):
+        _meta = NODE_META.get(nid, {})
+        _t = _meta.get("type", "")
+        _struct_drivers.append({
+            "nid":        nid,
+            "short":      _meta.get("short", f"N{nid}"),
+            "type_":      _t,
+            "type_label": TL.get(_t, _t.title()),
+            "color":      TC.get(_t, "#888"),
+            "p":          float(P.get(nid, 0.0)),
+        })
     _comp = _completeness_state()
     _doc = _doctrinal_frame()
     _case_id   = (st.session_state.get("case_id") or "").strip() or "Untitled case"
@@ -1280,7 +1417,7 @@ with TABS[0]:
                 """<details class="parvis-land">
 <summary>How to read this</summary>
 <div class="parvis-land-body">
-<p>The architecture comprises three substantive layers and one cross-cutting diagnostic layer. The <em>Substantive Risk Layer</em> (Nodes 1–4) represents empirically supported risk indicators subject to Canadian burdens of proof and proportionality constraints. The <em>Systemic Distortion and Doctrinal Fidelity Layer</em> (Nodes 5–17) captures mechanisms through which criminal records and risk assessments become unreliable, qualifying — never displacing — the confidence placed in upstream evidence. The <em>Structural Calibration and Output Layer</em> (Nodes 18–20) governs how revised beliefs propagate downstream to the Dangerous Offender designation posterior at Node 20. The cross-cutting <em>Quantum diagnostic layer</em> (Appendix Q) surfaces epistemic conditions — order effects, contextuality, premature scalar collapse, distorted priors — that classical Bayesian inference is poorly equipped to represent.</p>
+<p>The architecture comprises three substantive layers per Chapter 5 plus one cross-cutting diagnostic layer. The <em>Substantive Risk Layer</em> (Nodes 1–4, with the temporal modifier N2i) represents empirically supported risk indicators subject to Canadian burdens of proof and proportionality constraints. The <em>Systemic Distortion and Doctrinal Fidelity Layer</em> (Nodes 5–19, including the strategic-pleas modifier N7i and sub-nodes 10a–10d) captures mechanisms through which criminal records and risk assessments become unreliable, qualifying — never displacing — the confidence placed in upstream evidence. The <em>Structural Output Layer</em> (Node 20) is the terminal convergence point representing Dangerous Offender designation likelihood given the upstream architecture. The cross-cutting <em>Quantum diagnostic layer</em> (Appendix Q) surfaces epistemic conditions — order effects, contextuality, premature scalar collapse, distorted priors — that classical Bayesian inference is poorly equipped to represent.</p>
 <p>The natural starting point is the <strong>Profile</strong> tab. <strong>Architecture</strong> offers a structural overview without requiring case data. <strong>Inference</strong> displays the live posterior distribution once data has been entered.</p>
 </div>
 </details>""",
@@ -1293,7 +1430,7 @@ with TABS[0]:
             unsafe_allow_html=True,
         )
 
-    # ── Zone 2a: Doctrinal architecture (N1, N17 — structural constraints) ─────
+    # ── Zone 2a: Doctrinal architecture (N1, N5, N19 — structural constraints) ──
     # Surfaced separately from the case-responsive drivers below per Chapter 5's
     # treatment of N1 as a structural control / shared parent node.
     st.markdown(
@@ -1317,10 +1454,13 @@ with TABS[0]:
         _struct_cols = st.columns(len(_struct_drivers))
         for _idx, _d in enumerate(_struct_drivers):
             with _struct_cols[_idx]:
-                # Use a stable amber/blue accent regardless of node type colour
-                _accent = "#BA7517" if _d["nid"] == 1 else "#185FA5"
-                _accent_bg = "#FAEEDA" if _d["nid"] == 1 else "#E8F0FA"
-                _accent_border = "#E5CC95" if _d["nid"] == 1 else "#C7D3E5"
+                # Stable accent palette per structural node identity
+                if _d["nid"] == 1:
+                    _accent = "#BA7517"; _accent_bg = "#FAEEDA"; _accent_border = "#E5CC95"
+                elif _d["nid"] == 5:
+                    _accent = "#185FA5"; _accent_bg = "#E8F0FA"; _accent_border = "#C7D3E5"
+                else:  # N19
+                    _accent = "#5C4F8A"; _accent_bg = "#EFEBF5"; _accent_border = "#C8BFDA"
                 # Surface caption depends on node identity
                 if _d["nid"] == 1:
                     _surface = (
@@ -1331,10 +1471,10 @@ with TABS[0]:
                         "conditioning all other inference, not as a posterior "
                         "over case facts."
                     )
-                    _expand_label = "Formal treatment — Chapter 5 §1"
+                    _expand_label = "Formal treatment — Chapter 5 §5.1.1"
                     _formal = (
-                        "Per Chapter 5, N1 operates as a shared parent node "
-                        "whose states deterministically condition the CPT "
+                        "Per Chapter 5 §5.1.1, N1 operates as a shared parent "
+                        "node whose states deterministically condition the CPT "
                         "entries of downstream aggravation and mitigation "
                         "nodes — collapsing likelihood terms to near-zero when "
                         "evidentiary burdens are unmet. This is the limiting "
@@ -1348,24 +1488,64 @@ with TABS[0]:
                         "percentages; the values shown are best-available "
                         "industry estimates of these doctrinal thresholds."
                     )
-                else:  # N17
+                elif _d["nid"] == 5:
                     _surface = (
-                        "Responds to admitted evidence but assumes the "
-                        "evidentiary admissibility gate (N1) has been correctly "
-                        "applied. Reflects the post-gate inferential structure "
-                        "in which conflicting evidence is properly weighed."
+                        "Encodes the Ewert validity gate on risk-assessment "
+                        "tools — PCL-R, Static-99R, and similar instruments. "
+                        "Conditions how downstream risk-tool outputs carry "
+                        "weight when applied to populations on which the tools "
+                        "were not validated. Functions as a structural "
+                        "discount on tool-derived evidence, not as a posterior "
+                        "over case facts."
                     )
-                    _expand_label = "Doctrinal scope of N17"
+                    _expand_label = "Doctrinal scope of N5 — Chapter 5 §5.1.5 / Ewert v Canada"
                     _formal = (
-                        "N17 is a properly-weighted-conditional node: its "
-                        "posterior responds to evidence once admitted, but the "
-                        "responsiveness assumes that the weighting prior to "
-                        "admission has been correctly rendered by the "
-                        "sentencing judge. The judge's gatekeeping role under "
-                        "N1 is logically prior to any update at N17. If "
-                        "admissibility has been mishandled — evidence admitted "
-                        "that should not have been, or excluded that should "
-                        "have been — N17 is computing on a corrupted basis."
+                        "Per Chapter 5 §5.1.5 and Ewert v Canada [2018] 2 SCR "
+                        "165, N5 encodes the validity gate on risk-assessment "
+                        "tools used in DO proceedings. The Supreme Court held "
+                        "that CSC's continued reliance on actuarial tools "
+                        "without confirming their validity for Indigenous "
+                        "populations breached the statutory duty of "
+                        "accuracy. PARVIS operationalises this by computing "
+                        "a tool_validity multiplier from N5's posterior, "
+                        "which discounts the contribution of N3 (sexual "
+                        "offence risk profile) and N4 (dynamic risk) to "
+                        "Node 20. Where tools are unvalidated for the "
+                        "individual before the court, the architecture "
+                        "reduces tool-derived weight up to ~42%. This is "
+                        "the Ewert principle made operational at the level "
+                        "of inferential structure rather than rhetorical "
+                        "compliance."
+                    )
+                else:  # N19
+                    _surface = (
+                        "Detects and corrects collider bias arising when "
+                        "sentencing inference conditions on system-entry "
+                        "variables (arrest, charge, detention, conviction). "
+                        "These variables are downstream effects of multiple "
+                        "upstream causes, including policing intensity and "
+                        "case complexity. Conditioning on them induces "
+                        "spurious correlations between upstream causes."
+                    )
+                    _expand_label = "Doctrinal scope of N19 — Chapter 5 §5.1.19"
+                    _formal = (
+                        "Per Chapter 5 §5.1.19, N19 surfaces collider bias / "
+                        "Berkson's paradox in criminal justice inference. "
+                        "When risk models condition on system-entry variables "
+                        "without accounting for selection effects, apparent "
+                        "relationships emerge between upstream causes that "
+                        "do not exist independently of conditioning. The "
+                        "architecture flags this distortion: where over-"
+                        "policing contributes to record production (N17), "
+                        "treating the record as additional evidence of "
+                        "propensity activates collider bias. Risk inference "
+                        "must not treat exposure to policing as exposure of "
+                        "risk. The node does not eliminate the distortion — "
+                        "it ensures that defence counsel and reviewing courts "
+                        "are on notice that the record is doing double duty "
+                        "as both evidence of conduct and evidence of "
+                        "surveillance, and that conflating the two is a "
+                        "structural error."
                     )
                 # Card
                 st.markdown(
@@ -1401,7 +1581,7 @@ with TABS[0]:
     # ── Zone 2: Drivers ──────────────────────────────────────────────────────
     st.markdown("### Drivers of the posterior")
     st.caption("Top 5 nodes pushing DO risk up, top 5 pulling it down. "
-               "Case-responsive nodes only — structural constraints (N1, N17) "
+               "Case-responsive nodes only — structural constraints (N1, N5, N19) "
                "shown separately above. Increasing-side: risk and constraint "
                "nodes ranked by posterior. Decreasing-side: mitigations, "
                "systemic distortion corrections, and causal detectors.")
@@ -1695,7 +1875,7 @@ with TABS[2]:
                 "#A32D2D",
                 "Offender characteristics",
                 "Demographic and clinical features mapped to risk and burnout nodes.",
-                "N3 · N4 · N9 · N15"
+                "N2 · N3 · N4"
             ),
             unsafe_allow_html=True,
         )
@@ -1708,7 +1888,7 @@ with TABS[2]:
             sev_word, sev_col, sev_body = "Moderate", "#BA7517", f"partial burnout attenuation ({age} years)."
         else:
             sev_word, sev_col, sev_body = "Minimal", "#707070", f"burnout attenuation — temporal distortion node weighted at default ({age} years)."
-        st.markdown(_sev_caption(sev_word, sev_col, sev_body, "N15"),
+        st.markdown(_sev_caption(sev_word, sev_col, sev_body, "N2"),
                     unsafe_allow_html=True)
 
         identity = st.selectbox(
@@ -1857,7 +2037,7 @@ with TABS[2]:
             key="gr")
         st.markdown(
             "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
-            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N12</div>",
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N10</div>",
             unsafe_allow_html=True,
         )
 
@@ -1879,7 +2059,7 @@ with TABS[2]:
             key="pol")
         st.markdown(
             "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
-            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N14</div>",
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N17</div>",
             unsafe_allow_html=True,
         )
 
@@ -1900,7 +2080,7 @@ with TABS[2]:
                 "#3B6D11",
                 "Rehabilitative context",
                 "Cultural programming availability and engagement — Natomagan §48 frames absence as systemic, not individual.",
-                "N11 · N19"
+                "N11"
             ),
             unsafe_allow_html=True,
         )
@@ -1930,7 +2110,7 @@ with TABS[2]:
             key="rehab")
         st.markdown(
             "<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
-            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N19</div>",
+            "color:#9E9E9E;margin-top:-8px;margin-bottom:14px;text-align:right'>N9</div>",
             unsafe_allow_html=True,
         )
 
@@ -2079,12 +2259,12 @@ with TABS[5]:
     }
     # Aggregate node-tag for each section
     _section_nodes = {
-        "Intergenerational trauma":   "→ N10",
-        "Cultural disconnection":     "→ N11 · N12",
-        "Childhood & family":         "→ N10",
-        "Socioeconomic":              "→ N10 · N18",
-        "Substance & mental health":  "→ N10 · N18",
-        "Systemic justice":           "→ N12 · N14",
+        "Intergenerational trauma":   "→ N9",
+        "Cultural disconnection":     "→ N9",
+        "Childhood & family":         "→ N9",
+        "Socioeconomic":              "→ N9 · N18",
+        "Substance & mental health":  "→ N8 · N9 · N18",
+        "Systemic justice":           "→ N13 · N17",
     }
 
     def _gladue_section_open(stripe_color, title, subtitle, node_tags, count_str, has_checked):
@@ -3068,8 +3248,8 @@ with TABS[11]:
             "margin:0 auto'>"
             "The Bloch sphere visualisation will render once case data is entered. "
             "The polar angle θ derives from Node 20's posterior; the azimuthal angle "
-            "φ encodes the balance between risk-cluster nodes (N2 / N3 / N4 / N18) "
-            "and mitigation-cluster nodes (N5 / N6 / N10 / N12 / N14). Both require "
+            "φ encodes the balance between substantive-risk nodes (N2 / N3 / N4) "
+            "and systemic-distortion nodes (N5 / N6 / N10 / N12 / N14 / N17). Both require "
             "a populated network state to compute meaningfully."
             "</div>"
             "</div>",
@@ -4338,18 +4518,22 @@ details.parvis-doc > .parvis-doc-body em { font-style: italic; }
     with col_node:
         _node_options = [f"N{nid} — {NODE_META.get(nid, {}).get('short', f'Node {nid}')}"
                          for nid in sorted(NODE_SEARCH_QUERIES.keys()) if nid in NODE_META]
-        _node_choice = st.selectbox(
-            "Select node",
-            _node_options,
-            key="canlii_node_pick",
-        )
-    _selected_nid = int(_node_choice.split(" ")[0][1:])
+        if _node_options:
+            _node_choice = st.selectbox(
+                "Select node",
+                _node_options,
+                key="canlii_node_pick",
+            )
+        else:
+            _node_choice = None
+            st.caption("_Per-node search unavailable — CanLII module not loaded._")
+    _selected_nid = int(_node_choice.split(" ")[0][1:]) if _node_choice else None
     with col_pn_btn:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         _run_node = st.button("🔍 Search recent cases for this node", key="node_search_btn", disabled=not _canlii_active)
         if not _canlii_active:
             st.caption("_Configure CanLII API access to enable._")
-    if _run_node:
+    if _run_node and _selected_nid is not None:
         with st.spinner(f"Searching CanLII for Node {_selected_nid}..."):
             _node_results = search_node_developments(
                 _selected_nid, max_results=6,
@@ -4626,7 +4810,7 @@ RISK FACTOR POSTERIORS:
 - N2 Violent history: {Pa.get(2,0.08)*100:.1f}%
 - N3 PCL-R (psychopathy): {Pa.get(3,0.55)*100:.1f}%
 - N4 Static-99R (sexual offence): {Pa.get(4,0.32)*100:.1f}%
-- N18 Dynamic risk: {Pa.get(18,0.167)*100:.1f}%
+- N4 Dynamic risk: {Pa.get(4,0.167)*100:.1f}%
 
 DISTORTION CORRECTIONS (reduce effective risk weight):
 - N1 Burden of proof: {Pa.get(1,0.83)*100:.1f}%
@@ -4634,12 +4818,12 @@ DISTORTION CORRECTIONS (reduce effective risk weight):
 - N6 Ineffective counsel: {Pa.get(6,0.15)*100:.1f}%
 - N7 Bail-denial cascade: {Pa.get(7,0.40)*100:.1f}%
 - N9 FASD: {Pa.get(9,0.15)*100:.1f}%
-- N10 Intergenerational trauma: {Pa.get(10,0.45)*100:.1f}%
-- N11 No cultural treatment: {Pa.get(11,0.10)*100:.1f}%
-- N12 Gladue misapplication: {Pa.get(12,0.15)*100:.1f}%
-- N14 Over-policing: {Pa.get(14,0.15)*100:.1f}%
-- N15 Temporal distortion: {Pa.get(15,0.40)*100:.1f}%
-- N19 No rehabilitation: {Pa.get(19,0.10)*100:.1f}%
+- N9 Intergenerational trauma: {Pa.get(9,0.45)*100:.1f}%
+- N9 No cultural treatment: {Pa.get(9,0.10)*100:.1f}%
+- N10 Gladue misapplication: {Pa.get(10,0.15)*100:.1f}%
+- N17 Over-policing: {Pa.get(17,0.15)*100:.1f}%
+- N14 Temporal distortion: {Pa.get(14,0.40)*100:.1f}%
+- N9 No rehabilitation: {Pa.get(9,0.10)*100:.1f}%
 
 GLADUE FACTORS ACTIVE ({len(cG)}): {', '.join([f['l'] for f in cG]) if cG else 'None selected'}
 MORRIS/ELLIS SCE ({len(cS)}): {', '.join([f['l'] for f in cS]) if cS else 'None selected'}
@@ -5021,25 +5205,25 @@ with TABS[4]:
     pN7  = st.session_state.posteriors.get(7,  0.15)   # bail-denial cascade
     pN6  = st.session_state.posteriors.get(6,  0.15)   # ineffective counsel
     pN5  = st.session_state.posteriors.get(5,  0.10)   # invalid risk tools / Ewert
-    pN14 = st.session_state.posteriors.get(14, 0.15)   # over-policing
-    pN15 = st.session_state.posteriors.get(15, 0.40)   # temporal distortion / age
-    pN12 = st.session_state.posteriors.get(12, 0.15)   # Gladue misapplication
+    pN17 = st.session_state.posteriors.get(17, 0.15)   # over-policing (CH5 §5.1.17)
+    pN14 = st.session_state.posteriors.get(14, 0.40)   # temporal distortion / age (CH5 §5.1.14)
+    pN10 = st.session_state.posteriors.get(10, 0.15)   # Gladue misapplication (CH5 §5.1.10)
 
     # ── Authoritative correction references (preserved) ───────────────────
     CORR_REFS = {
         "bail":    ("Bail-denial cascade (N7)", "A32D2D", "R v Antic [2017] SCC 27; Tolppanen Report (2018)"),
         "counsel": ("Ineffective counsel (N6)", "185FA5", "R v GDB [2000] 1 SCR 520; Strickland doctrine"),
         "ewert":   ("Ewert tool invalidity (N5)", "185FA5", "Ewert v Canada [2018] SCC 30"),
-        "police":  ("Over-policing / record inflation (N14)", "185FA5", "R v Le [2019] SCC 34"),
-        "time":    ("Temporal attenuation (N15)", "185FA5", "R v Nur [2015] / Lloyd [2016] — age burnout"),
-        "gladue":  ("Gladue misapplication (N12)", "3B6D11", "R v Morris 2021 ONCA 680 para 97; Boutilier [2017] SCC 64"),
+        "police":  ("Over-policing / record inflation (N17)", "185FA5", "R v Le [2019] SCC 34"),
+        "time":    ("Temporal attenuation (N14)", "185FA5", "R v Nur [2015] / Lloyd [2016] — mandatory-minimum-era / age burnout"),
+        "gladue":  ("Gladue misapplication (N10)", "3B6D11", "R v Morris 2021 ONCA 680 para 97; Boutilier [2017] SCC 64"),
     }
 
     # ── Compute global reliability floor from current distortion posteriors ───
     bail_factor    = float(np.clip(1.0 - 0.50*pN7 - 0.20*pN6, 0.30, 1.0))
     ewert_factor   = float(np.clip(1.0 - 0.40*pN5,             0.40, 1.0))
-    police_factor  = float(np.clip(1.0 - 0.35*pN14,            0.50, 1.0))
-    gladue_factor  = float(np.clip(1.0 - 0.30*pN12,            0.55, 1.0))
+    police_factor  = float(np.clip(1.0 - 0.35*pN17,            0.50, 1.0))
+    gladue_factor  = float(np.clip(1.0 - 0.30*pN10,            0.55, 1.0))
 
     # ── Offence seriousness tiers (Boutilier pattern analysis, preserved) ──
     SERIOUSNESS = {
@@ -5102,7 +5286,7 @@ with TABS[4]:
             pat = "desistance"
             signal = -0.12
             note = (f"Last two convictions separated by {year_gap} years — extended gap suggests desistance. "
-                    f"Temporal attenuation applicable per age burnout (N15).")
+                    f"Temporal attenuation applicable per age burnout (N14).")
         else:
             pat = "stable"
             signal = 0.0
@@ -5112,7 +5296,7 @@ with TABS[4]:
     def _cr_feed_nodes():
         """Derive N2, N18 and distortion node signals from the calibrated criminal record.
         Fixes: N2 signal now written to doc_adj (not cr_doc_adj) so run_inf() picks it up.
-        Enhanced: seriousness-weighted N2, escalation signal into N18, gang context into N14.
+        Enhanced: seriousness-weighted N2, escalation signal into N4 (dynamic risk), gang context into N17 (over-policing).
         """
         rec = st.session_state.criminal_record
         if not rec:
@@ -5155,7 +5339,7 @@ with TABS[4]:
             cr_adj[2] = n2_raw_with_jump - st.session_state.posteriors.get(2, 0.08)
             st.session_state.cr_doc_adj[2] = n2_raw_with_jump
 
-        # ── N18: Dynamic risk — escalation signal ─────────────────────────────
+        # ── N4: Dynamic risk — escalation signal (CH5 §5.1.4) ────────────────
         esc = _detect_escalation(rec)
         st.session_state.cr_doc_adj["escalation"] = esc
         if abs(esc["signal"]) > 0.01:
@@ -5181,18 +5365,18 @@ with TABS[4]:
         vuln_e     = [e for e in rec if e.get("vulnerable_victim", False)]
         drug_e     = [e for e in rec if e.get("drug_trafficking", False)]
         if domestic_e:
-            # Domestic violence → boosts violent history (N2) and dynamic risk (N18)
+            # Domestic violence → boosts violent history (N2) and dynamic risk (N4)
             cr_adj[2]  = cr_adj.get(2, 0)  + float(np.clip(0.05 * len(domestic_e), 0.0, 0.15))
             cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.04 * len(domestic_e), 0.0, 0.12))
         if hate_e:
-            # Hate crime → boosts dynamic risk (N18)
+            # Hate crime → boosts dynamic risk (N4)
             cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.06 * len(hate_e), 0.0, 0.18))
         if terror_e:
-            # Terrorism → significant boost to N18 and N2
+            # Terrorism → significant boost to N4 (dynamic risk) and N2 (validated risk elevators)
             cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.12 * len(terror_e), 0.0, 0.30))
             cr_adj[2]  = cr_adj.get(2, 0)  + float(np.clip(0.10 * len(terror_e), 0.0, 0.25))
         if vuln_e:
-            # Vulnerable victim → boosts dynamic risk (N18)
+            # Vulnerable victim → boosts dynamic risk (N4)
             cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(0.05 * len(vuln_e), 0.0, 0.15))
         if drug_e:
             # Drug trafficking — Parranto [2021] — fentanyl at top of tariff
@@ -5201,7 +5385,7 @@ with TABS[4]:
             cr_adj[18] = cr_adj.get(18, 0) + float(np.clip(
                 0.06 * len(drug_e) + 0.06 * len(fentanyl_e), 0.0, 0.22))
 
-        # ── Distortion aggregates → N7, N14, N12 ─────────────────────────────
+        # ── Distortion aggregates → N7 (bail-WCGP), N17 (over-policing), N10 (Gladue misapp) ─
         bail_agg   = float(np.mean([e["adj"]["bail"]   for e in rec]))
         police_agg = float(np.mean([e["adj"]["police"] for e in rec]))
         gladue_agg = float(np.mean([e["adj"]["gladue"] for e in rec]))
@@ -5375,6 +5559,52 @@ with TABS[4]:
             adj_time   = st.slider("Temporal attenuation (age / distance)",    0.0, 1.0, 0.0,0.05, key="cr_adj_time",
                 help="R v Boutilier [2017] SCC 64 — set affirmatively where this conviction is sufficiently remote that age-burnout attenuation applies")
 
+        # ── N6 (Ineffective Assistance of Counsel) indicators per §5.1.6 §3 ──
+        # Four binary indicators aggregate per §RM.6.3 to a confidence grade
+        # (High / Moderate / Low) which conditions the N7 cascade signal.
+        st.markdown(
+            "<div style='margin-top:14px;margin-bottom:6px'>"
+            "<span style='font-family:Fraunces,Georgia,serif;font-size:0.95rem;"
+            "font-weight:500;color:#1A1A1A'>Representation quality indicators (N6)</span>"
+            "<span style='font-family:Fraunces,serif;font-style:italic;font-size:0.78rem;"
+            "color:#707070;margin-left:8px'>Ch 5 §5.1.6 · Appendix RM §RM.6</span>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;font-size:0.78rem;"
+            "color:#707070;margin-top:3px;line-height:1.5'>"
+            "Check each indicator that is adverse for this conviction. Any adverse "
+            "indicator drops confidence to <em>Moderate</em>; all four adverse drops "
+            "to <em>Low</em>. Confidence grade conditions the N7 bail-denial cascade "
+            "signal additively (+0.00 / +0.10 / +0.20)."
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+        cn1, cn2 = st.columns(2)
+        with cn1:
+            adj_n6_no_sce = st.checkbox(
+                "SCE not submitted",
+                value=False,
+                key="cr_adj_n6_no_sce",
+                help="§5.1.6 §3.i — adverse where Gladue, IRCA, or equivalent systemic "
+                     "context evidence was not meaningfully advanced at the original proceeding")
+            adj_n6_inadequate_counsel = st.checkbox(
+                "Counsel culturally inadequate",
+                value=False,
+                key="cr_adj_n6_inadequate_counsel",
+                help="§5.1.6 §3.ii — adverse where counsel did not demonstrate familiarity "
+                     "with applicable social context doctrine and its evidentiary use")
+        with cn2:
+            adj_n6_judicial_criticism = st.checkbox(
+                "Judicial criticism of representation",
+                value=False,
+                key="cr_adj_n6_judicial_criticism",
+                help="§5.1.6 §3.iii — adverse where the original court expressed concern, "
+                     "criticism, or reservation regarding the quality of advocacy")
+            adj_n6_disproportionate = st.checkbox(
+                "Procedural outcome disproportionate",
+                value=False,
+                key="cr_adj_n6_disproportionate",
+                help="§5.1.6 §3.iv — adverse where the procedural outcome was markedly "
+                     "disproportionate relative to offence gravity and comparator cases")
+
         # Sentence type modifier — CSO/probation/discharge suggests limited dangerousness
         _sent_modifier = {
             "Federal custody (2+ years)":         1.00,
@@ -5464,6 +5694,11 @@ with TABS[4]:
                         "police": adj_police,
                         "mm":     adj_mm,
                         "time":   adj_time,
+                        # N6 (IAC) indicators per §5.1.6 / §RM.6
+                        "n6_no_sce":              adj_n6_no_sce,
+                        "n6_inadequate_counsel":  adj_n6_inadequate_counsel,
+                        "n6_judicial_criticism":  adj_n6_judicial_criticism,
+                        "n6_disproportionate":    adj_n6_disproportionate,
                     },
                     "raw_weight":  1.0,
                     "cal_weight":  cal_wt,
@@ -5602,11 +5837,12 @@ with TABS[4]:
                 f"padding-top:10px;border-top:1px solid {_n7_border}'>"
                 f"Each conviction is graded against §5.1.7's tri-state ordinal "
                 f"(Unmodified / Discounted / Heavily Discounted) on its own facts "
-                f"— the conviction's own bail-denial signal, with cascade propagation "
-                f"from earlier tainted convictions where applicable per §RM.5. "
-                f"This node never removes convictions; it qualifies how they may be "
-                f"used. Multipliers — 1.00 / 0.60 / 0.30 — are conservative "
-                f"operationalisations of the §5.1.7 ordinal grades."
+                f"— the conviction's own bail-denial signal, additively conditioned "
+                f"by N6 representation quality (§RM.6.4) and multiplied by §RM.5 "
+                f"cascade propagation from earlier tainted convictions where "
+                f"applicable. This node never removes convictions; it qualifies how "
+                f"they may be used. Multipliers — 1.00 / 0.60 / 0.30 — are "
+                f"conservative operationalisations of the §5.1.7 ordinal grades."
                 f"</div>"
                 f"</div>",
                 unsafe_allow_html=True,
@@ -5617,7 +5853,7 @@ with TABS[4]:
                 st.markdown("""
 **Mechanism (Chapter 5 §5.1.7).** The bail-denial cascade node (N7) tracks the procedural conditions under which prior convictions were produced. Where bail was denied and ineffective representation, absent social context evidence, or marginalisation cluster, the conviction's evidentiary reliability is qualified — not removed.
 
-**Per-conviction grading.** Each conviction is graded on its own facts. The architecture reads the conviction's own `adj.bail` value (set when the conviction was added) and applies the threshold logic below. Per §5.1.7, the unit of analysis is the specific guilty plea produced under coercive procedural conditions, not the offender's record as a whole — convictions produced under fair conditions are not discounted on the basis of cascade conditions affecting other convictions on the record.
+**Per-conviction grading.** Each conviction is graded on its own facts. The architecture reads the conviction's own `adj.bail` value (set when the conviction was added), applies the §RM.6.4 N6 confidence boost (additive, +0.00/+0.10/+0.20 for High/Moderate/Low representation confidence), then applies the §RM.5 propagation factor (multiplicative, from any earlier tainted convictions), and finally applies the threshold logic below. Per §5.1.7, the unit of analysis is the specific guilty plea produced under coercive procedural conditions, not the offender's record as a whole — convictions produced under fair conditions are not discounted on the basis of cascade conditions affecting other convictions on the record.
 
 **Cascade propagation (§RM.5).** Where Conviction A on the record has been graded *Discounted* or *Heavily Discounted*, and a subsequent Conviction B has its own affirmative bail-denial signal, the architecture recognises that the bail conditions affecting Conviction B may themselves have been conditioned by Conviction A's presence on the record (per *R v Antic* on prior records and bail). Conviction B's bail-denial signal is multiplied by a propagation factor before threshold logic — 1.15 for upstream *Discounted*, 1.30 for upstream *Heavily Discounted*. Where multiple upstream tainted convictions exist, only the strongest factor is applied. Propagation requires the downstream conviction to have its own affirmative signal — bail granted on Conviction B breaks the chain.
 
@@ -5632,7 +5868,122 @@ with TABS[4]:
 
 **Doctrinal source.** *R v Antic* [2017] SCC 27 (bail jurisprudence); Tolppanen Report (2018) on bail-denial cascade dynamics; Chapter 5 §5.1.7 (Wrongful Conviction Guilty Plea cascade modelling); Chapter 3 §3.4.5 (inferential inertia) and §3.5.3 (jump principle) for the doctrinal substrate of cascade propagation; Appendix RM §RM.5 for the operational specification.
 
-**Scope of this implementation.** This is the Node 7 distortion only. The full set of cascade distortions (N6 IAC, N14 over-policing, N15 mandatory-minimum-era anchoring, N17 collider bias, N18 dynamic risk integration) extends the same architectural pattern in subsequent implementation work.
+**Scope of this implementation.** Currently operational: N6 (IAC, conditioning per §RM.6) and N7 (bail-WCGP cascade with §RM.5 propagation). The full set of cascade distortions per Chapter 5 — N14 (Temporal Distortion), N15 (Interjurisdictional Tariff), N17 (Over-Policing and Epistemic Contamination), N18 (Gladue/Ewert/Morris/Ellis Profile audit), N19 (Collider Bias) — extends the same architectural pattern in subsequent implementation work.
+                """)
+
+            # ── N6 (IAC) aggregate panel — §RM.6 ─────────────────────────────
+            # Per-conviction confidence grades and aggregate distribution.
+            _n6_grades_per_conv = [g for (_g7, _m7, _p7, g) in _n7_grading]
+            _n6_count = {
+                "High":     sum(1 for g in _n6_grades_per_conv if g == "High"),
+                "Moderate": sum(1 for g in _n6_grades_per_conv if g == "Moderate"),
+                "Low":      sum(1 for g in _n6_grades_per_conv if g == "Low"),
+            }
+            _n6_avg_boost = (
+                sum(N6_BOOST_BY_GRADE[g] for g in _n6_grades_per_conv) / len(_n6_grades_per_conv)
+                if _n6_grades_per_conv else 0.0
+            )
+            # Accent colour: keyed on average boost magnitude
+            if _n6_avg_boost < 0.03:
+                _n6_accent = "#3B6D11"; _n6_bg = "#F4F8EE"; _n6_border = "#C5D7AC"
+            elif _n6_avg_boost < 0.12:
+                _n6_accent = "#BA7517"; _n6_bg = "#FAEEDA"; _n6_border = "#E5CC95"
+            else:
+                _n6_accent = "#A32D2D"; _n6_bg = "#FCEBEB"; _n6_border = "#E5B5B5"
+
+            st.markdown(
+                f"<div style='background:{_n6_bg};border:1px solid {_n6_border};"
+                f"border-left:3px solid {_n6_accent};border-radius:8px;"
+                f"padding:14px 18px;margin:14px 0 8px 0'>"
+                # Header row
+                f"<div style='display:flex;align-items:baseline;gap:10px;margin-bottom:10px'>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"font-weight:600;padding:2px 8px;border-radius:4px;color:white;"
+                f"background:{_n6_accent}'>N6</div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.0rem;"
+                f"font-weight:500;color:#1A1A1A'>"
+                f"Reliability of Representation · IAC conditioning</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#707070;margin-left:auto'>"
+                f"Ch 5 §5.1.6 · Appendix RM §RM.6</div>"
+                f"</div>"
+                # Body: average boost and grade distribution
+                f"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;"
+                f"margin-top:6px'>"
+                # Average boost
+                f"<div>"
+                f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                f"color:#707070;font-weight:600;margin-bottom:3px'>Average boost</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.45rem;"
+                f"font-weight:600;color:{_n6_accent}'>+{_n6_avg_boost:.3f}</div>"
+                f"<div style='font-size:0.72rem;color:#9E9E9E;font-family:Fraunces,serif;"
+                f"font-style:italic'>mean N6 conditioning</div>"
+                f"</div>"
+                # Mechanism note
+                f"<div>"
+                f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                f"color:{_n6_accent};font-weight:600;margin-bottom:3px'>Mechanism</div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:0.84rem;"
+                f"font-weight:500;color:{_n6_accent};line-height:1.3'>Additive · upstream of N7</div>"
+                f"<div style='font-size:0.72rem;color:#9E9E9E;font-family:Fraunces,serif;"
+                f"font-style:italic'>conditions cascade signal</div>"
+                f"</div>"
+                # Grade distribution
+                f"<div>"
+                f"<div style='font-size:0.66rem;text-transform:uppercase;letter-spacing:0.10em;"
+                f"color:#707070;font-weight:600;margin-bottom:3px'>Confidence distribution</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.82rem;"
+                f"color:#3A3A3A;line-height:1.5'>"
+                f"<div>High · {_n6_count['High']}</div>"
+                f"<div>Moderate · {_n6_count['Moderate']}</div>"
+                f"<div>Low · {_n6_count['Low']}</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+                # Doctrinal caption
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.80rem;color:#707070;margin-top:12px;line-height:1.55;"
+                f"padding-top:10px;border-top:1px solid {_n6_border}'>"
+                f"Each conviction is graded against §5.1.6's tri-state ordinal "
+                f"(High / Moderate / Low confidence) on its own facts — the count of "
+                f"adverse indicators among SCE submission, counsel competence, judicial "
+                f"commentary, and procedural outcome. The grade additively boosts the "
+                f"N7 bail-denial signal (+0.00 / +0.10 / +0.20 per §RM.6.4) before "
+                f"§RM.5 propagation. N6 does not directly modify cal_weight per §RM.6.6."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Methodology disclosure expander for N6
+            with st.expander("Methodology — N6 reliability of representation", expanded=False):
+                st.markdown("""
+**Mechanism (Chapter 5 §5.1.6).** Node 6 models the reliability of representation that produced each conviction. Per §5.1.6 §1, the node does *not* adjudicate constitutional ineffective-assistance breach; it conditions the architecture's confidence in the products of representation that may have been deficient.
+
+**Indicators (§5.1.6 §3).** Four binary indicators per conviction:
+
+1. **SCE not submitted** — adverse where *Gladue*, *IRCA*, or equivalent systemic context evidence was not meaningfully advanced.
+2. **Counsel culturally inadequate** — adverse where counsel did not demonstrate familiarity with applicable social context doctrine and its evidentiary use.
+3. **Judicial criticism of representation** — adverse where the original court expressed concern, criticism, or reservation regarding the quality of advocacy.
+4. **Procedural outcome disproportionate** — adverse where the procedural outcome was markedly disproportionate relative to offence gravity and comparator cases.
+
+**Threshold scheme (§RM.6.3).** Confidence grade keyed to count of adverse indicators:
+- 0 adverse → **High** confidence
+- 1, 2, or 3 adverse → **Moderate** confidence
+- 4 adverse → **Low** confidence (compound case)
+
+**Conditioning of N7 (§RM.6.4).** N6 grade additively boosts the per-conviction bail-denial signal *before* §RM.5 propagation:
+- High → +0.00 (no boost)
+- Moderate → +0.10
+- Low → +0.20
+
+The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel materially increases the probability that a plea reflects constraint rather than culpability." Where the conviction has no own bail-denial signal (`adj.bail = 0`), N6 conditioning does not apply — N6 conditions how strongly we read bail-denial evidence, but does not substitute for its absence.
+
+**Order of operations (§RM.6.5).** `boosted_signal = (adj.bail + N6_addition) × propagation_factor`. N6 conditioning is per-conviction; §RM.5 propagation is between-conviction. Per-conviction conditioning logically precedes between-conviction propagation.
+
+**Scope (§RM.6.6).** N6 does *not* directly discount `cal_weight` — its sole architectural role is to condition N7's cascade computation, avoiding double-counting. N6 does not propagate forward like §RM.5 — different counsel, different files, different proceedings. N6 does not adjudicate constitutional breach — *Low* confidence is an architectural assessment, not a finding.
+
+**Doctrinal source.** *Chapter 5 §5.1.6* (IAC node specification); *Charter* ss. 7 and 15 (unequal access to effective representation); the standard articulated in *R v R.R.* and similar competence jurisprudence; *Appendix RM §RM.6* (operational specification).
                 """)
 
             # ── Jump Principle panel (Ch 3 §3.5.3) ──────────────────────────
@@ -5776,7 +6127,7 @@ with TABS[4]:
             # ── N7 reliability modifier for this conviction (Ch 5 §5.1.7 + §RM.5.4) ──
             # Use chronological grading (accounts for cascade propagation
             # from earlier tainted convictions).
-            _n7_grade_card, _n7_mult_card, _n7_prop_card = _n7_grading[i]
+            _n7_grade_card, _n7_mult_card, _n7_prop_card, _n6_grade_card = _n7_grading[i]
             _n7_eff_pct    = e["cal_weight"] * _n7_mult_card * 100
             # Grade-specific colour
             _grade_col = {
@@ -5871,6 +6222,18 @@ with TABS[4]:
                 f"font-weight:500;color:{_grade_col};line-height:1.2'>{_n7_grade_card}</div>"
                 f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
                 f"color:{_grade_col};margin-top:1px'>×{_n7_mult_card:.2f} → {_n7_eff_pct:.0f}%</div>"
+                f"</div>"
+                # N6 confidence in representation (Chapter 5 §5.1.6 / §RM.6)
+                f"<div style='border-top:1px solid #EFEDE7;padding-top:6px;margin-top:6px'>"
+                f"<div style='font-size:0.62rem;text-transform:uppercase;letter-spacing:0.08em;"
+                f"color:#9E9E9E;font-weight:600;margin-bottom:2px'>N6 · IAC</div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-size:0.84rem;"
+                f"font-weight:500;color:" + (
+                    "#3B6D11" if _n6_grade_card == "High" else
+                    "#BA7517" if _n6_grade_card == "Moderate" else "#A32D2D"
+                ) + f";line-height:1.2'>{_n6_grade_card}</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:#707070;margin-top:1px'>+{N6_BOOST_BY_GRADE[_n6_grade_card]:.2f} boost</div>"
                 f"</div>"
                 # Jump-principle ceiling effect (Ch 3 §3.5.3)
                 f"<div style='border-top:1px solid #EFEDE7;padding-top:6px;margin-top:6px'>"

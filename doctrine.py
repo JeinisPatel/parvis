@@ -44,7 +44,7 @@ NODE_DOCTRINE = {
     2: {
         "node_name": "Serious violence / violent history",
         "function": "Primary aggravating factor for DO pattern designation under s.753 Criminal Code. "
-                    "Subject to Node 1 beyond-reasonable-doubt threshold and temporal attenuation (Node 15).",
+                    "Subject to Node 1 beyond-reasonable-doubt threshold and temporal attenuation (Node 14).",
         "primary_auth": [
             {
                 "citation": "Criminal Code RSC 1985 c C-46, s 753(1)(a)(i)",
@@ -88,7 +88,7 @@ NODE_DOCTRINE = {
             "Failing to apply Gladue at the designation stage — treating violent history as context-free",
             "Treating temporally remote convictions as equivalent to recent ones without attenuation",
             "Relying on uncontested actuarial risk scores without independent behavioural analysis",
-            "Failing to assess whether pattern reflects systemic over-criminalisation (over-policing, Node 14)",
+            "Failing to assess whether pattern reflects systemic over-criminalisation (over-policing, Node 17)",
         ],
         "ewert_caveat": "Where violent history is assessed through actuarial tools (VRAG, Static-99R), "
                         "Ewert requires cultural validation before those tools carry evidentiary weight.",
@@ -938,8 +938,8 @@ NODE_DOCTRINE = {
     # ── NODE 18: Dynamic risk factors ─────────────────────────────────────────
     18: {
         "node_name": "Dynamic risk factors",
-        "function": "Time-varying criminogenic needs. Subject to temporal corrections (Node 15), "
-                    "treatment availability (Node 11), and gaming detector (Node 13). "
+        "function": "Time-varying criminogenic needs. Subject to temporal corrections (Node 14), "
+                    "treatment availability (Node 9), and gaming detector (Node 11). "
                     "Must be assessed against structural conditions per Ipeelee.",
         "primary_auth": [
             {

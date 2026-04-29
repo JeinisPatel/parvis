@@ -1,31 +1,38 @@
 """
-PARVIS — CanLII API Client
+PARVIS — CanLII API Client (April 28 2026 rebuild)
 canlii_client.py
 
 Queries the CanLII API (api.canlii.org) for recent Canadian decisions
-relevant to the PARVIS node schema and the Tetrad + Proportionality doctrinal
-substrate.
+relevant to the PARVIS node schema and the binding-authority corpus.
 
 PURPOSE:
   doctrine.py provides the structural anchor (static authoritative rules).
   This module surfaces NEW developments — recent decisions that may have
   moved or refined the doctrine since doctrine.py was last updated.
 
-  The substrate tracked is symmetric across the fairness commitment:
-    - Tetrad lineage (Gladue/Ipeelee/Morris/Ewert) — distortion-mitigation
-    - Proportionality lineage (Lacasse/Friesen/Bissonnette/Sharma) — severity
+API SURFACE (exposed to app.py):
+  Existing (back-compat):
+    search_node_developments(node_id, max_results, user_jurisdiction, date_floor_label) → dict
+    get_tetrad_updates(since_year=2023) → dict
+    is_configured() → bool
+  
+  New (April 27 2026 rebuild, restored April 28 2026):
+    search_with_filters(query, user_jurisdiction, date_floor_label, max_results) → dict
+    get_tracked_updates(date_floor_label, user_jurisdiction, corpus) → dict
+    flatten_search_results(tiered_dict) → list
+    validate_api_key() → dict {valid, error}
+    ALL_TRACKED_CITATIONS — combined corpus
+    TETRAD_CITATIONS — Gladue/Ipeelee/Morris/Ewert lineage
+    PROPORTIONALITY_CITATIONS — Lacasse/Friesen/Bissonnette/Sharma lineage
 
-  Results are tiered by stare decisis position relative to the user's
-  jurisdiction:
-    - Binding: Supreme Court of Canada + the user-jurisdiction's Court of Appeal
-    - Persuasive: Other provincial Courts of Appeal
-    - Other: Lower courts (trial / inferior)
+JURISDICTION TIERING:
+  Per Canadian stare decisis: SCC binding everywhere; provincial CA binding
+  in own province, persuasive elsewhere; lower courts always Other.
 
 HOW TO GET A CANLII API KEY:
   1. Go to https://api.canlii.org
   2. Register for a free account (non-commercial use)
-  3. Copy your API key
-  4. Add to Streamlit secrets: CANLII_API_KEY = "your-key-here"
+  3. Add to Streamlit secrets: CANLII_API_KEY = "your-key-here"
      OR set environment variable: export CANLII_API_KEY="your-key-here"
 
 RATE LIMITS: CanLII free API — 100 requests/hour.
@@ -43,105 +50,124 @@ import requests
 from datetime import datetime, timedelta
 from typing import Optional
 
+
 # ── CanLII API configuration ──────────────────────────────────────────────────
 CANLII_BASE_URL = "https://api.canlii.org/v1"
-CACHE_TTL_HOURS = 24  # Cache results for 24 hours
+CACHE_TTL_HOURS = 24
 
 
-# ── Node-specific search queries ───────────────────────────────────────────────
-# Each node maps to a set of search terms that surface relevant recent cases.
-# NOTE: These queries are not yet symmetry-audited. Per JP's instruction, the
-# audit happens in a separate session against live API responses. The
-# proportionality corpus (Lacasse/Friesen/Bissonnette/Sharma) is added as
-# tracked citations below to close the most visible asymmetry tonight; the
-# per-node query rewriting is deferred.
+# ── Database identifier mapping for citation tracking ─────────────────────────
+# CanLII uses short database codes; map for clarity.
+COURT_DATABASES = {
+    "scc": "csc-scc", "csc": "csc-scc",
+    "onca": "onca", "bcca": "bcca", "abca": "abca",
+    "qcca": "qcca", "skca": "skca", "mbca": "mbca",
+    "nsca": "nsca", "nbca": "nbca", "nlca": "nlca",
+    "peca": "peca", "ytca": "ytca", "ntca": "ntca", "nuca": "nuca",
+}
+
+
+# ── Jurisdiction tiering — Canadian stare decisis ─────────────────────────────
+# SCC is binding everywhere. Provincial CA is binding in own province,
+# persuasive elsewhere. Lower courts are always Other tier.
+def _classify_tier(database: str, user_jurisdiction: str) -> str:
+    """Classify a case as binding, persuasive, or other for the user's jurisdiction.
+    
+    user_jurisdiction: ISO-style 2-letter province code or "*" for uniform tagging
+    """
+    db = (database or "").lower()
+    if db in ("csc-scc", "scc"):
+        return "binding"  # SCC binds everyone
+    if user_jurisdiction == "*":
+        return "binding" if "ca" in db and len(db) <= 5 else "persuasive"
+    # Provincial CA: binding in own province only
+    user_lower = user_jurisdiction.lower()
+    province_to_ca = {
+        "on": "onca", "bc": "bcca", "ab": "abca", "qc": "qcca",
+        "sk": "skca", "mb": "mbca", "ns": "nsca", "nb": "nbca",
+        "nl": "nlca", "pe": "peca", "yt": "ytca", "nt": "ntca", "nu": "nuca",
+    }
+    own_ca = province_to_ca.get(user_lower)
+    if own_ca and db == own_ca:
+        return "binding"
+    # Other provincial CA → persuasive
+    if db in province_to_ca.values():
+        return "persuasive"
+    return "other"
+
+
+# ── Date floor mapping ────────────────────────────────────────────────────────
+def _date_floor_to_year(date_floor_label: str) -> Optional[int]:
+    """Map UI label to a year cutoff. Returns None for 'All'."""
+    today = datetime.now()
+    mapping = {
+        "1 year":  today.year - 1,
+        "3 years": today.year - 3,
+        "5 years": today.year - 5,
+        "All":     None,
+    }
+    return mapping.get(date_floor_label, today.year - 3)
+
+
+# ── Node-specific search queries (CH5 canonical taxonomy) ─────────────────────
 NODE_SEARCH_QUERIES = {
+    # Per Chapter 5 (April 11, 2026) canonical taxonomy.
+    # ── Substantive Risk Layer ───────────────────────────────────────────
     2:  ["dangerous offender pattern behaviour", "s753 violent history pattern"],
-    3:  ["PCL-R psychopathy sentencing", "Ewert psychopathy assessment cultural"],
-    4:  ["Static-99R Indigenous sentencing", "Ewert Static-99 sexual offence"],
-    5:  ["Ewert actuarial cultural validity sentencing", "risk assessment Indigenous cultural"],
+    3:  ["sexual offence risk profile sentencing", "Ewert sexual offence assessment cultural"],
+    4:  ["dynamic risk factors sentencing", "criminogenic needs sentencing Indigenous"],
+    # ── Systemic Distortion and Doctrinal Fidelity Layer ─────────────────
+    5:  ["Ewert actuarial cultural validity sentencing", "risk assessment Indigenous cultural validity"],
     6:  ["ineffective counsel Gladue Indigenous", "GDB ineffective assistance sentencing"],
     7:  ["bail denial coercive plea Indigenous", "Antic wrongful guilty plea"],
-    9:  ["FASD sentencing mitigation", "fetal alcohol spectrum disorder dangerous offender"],
-    10: ["intergenerational trauma Gladue sentencing", "residential school sentencing Indigenous"],
-    11: ["cultural programming unavailable sentencing", "Natomagan rehabilitation treatment Indigenous"],
-    12: ["Gladue misapplication Morris sentencing", "social context evidence racialized sentencing"],
-    13: ["rehabilitation gaming dangerous offender", "strategic rehabilitation sentencing"],
-    14: ["over-policing criminal record sentencing", "Le racial profiling criminal record"],
-    15: ["mandatory minimum temporal sentencing", "age burnout recidivism sentencing"],
-    16: ["provincial tariff dangerous offender", "DO designation rate provincial"],
-    17: ["collider bias incarceration sentencing", "structural disadvantage criminal record"],
-    18: ["dynamic risk factors structural context", "Ipeelee dynamic risk systemic"],
-    19: ["rehabilitation absence Natomagan", "no programming treatment refusal dangerous offender"],
+    8:  ["FASD sentencing mitigation", "fetal alcohol spectrum disorder dangerous offender"],
+    9:  ["intergenerational trauma Gladue", "residential school sentencing Indigenous", "cultural programming unavailable Natomagan"],
+    10: ["Gladue misapplication Morris sentencing", "social context evidence judicial misapplication"],
+    11: ["rehabilitation gaming dangerous offender", "strategic rehabilitation sentencing"],
+    12: ["judicial reasoning reliability sentencing", "judging the judge Gladue compliance"],
+    13: ["structural systemic bias TraceRoute sentencing", "systemic discrimination Indigenous sentencing"],
+    14: ["temporal distortion prior convictions", "outdated sentencing regime mandatory minimum"],
+    15: ["interjurisdictional tariff distortion", "provincial sentencing parity disparity"],
+    16: ["s.718.04 victim aggravation Gladue mitigation conflict", "Indigenous victim Indigenous offender sentencing"],
+    17: ["over-policing criminal record sentencing", "Le racial profiling criminal record contamination"],
+    18: ["Gladue Ewert Morris Ellis profile audit", "social context evidence integration prior convictions"],
+    19: ["collider bias incarceration sentencing", "Berkson selection effect criminal justice data"],
+    # ── Structural Output ────────────────────────────────────────────────
     20: ["dangerous offender designation Gladue", "DO designation Morris Ellis Ewert"],
 }
 
-# ── Tetrad + downstream binding citations (distortion-mitigation lineage) ─────
+
+# ── Tracked binding-authority corpus ──────────────────────────────────────────
+# Each entry: db (CanLII database code), id (case identifier), label (display),
+#             corpus ("Distortion" = Tetrad lineage / "Proportionality" = severity)
 TETRAD_CITATIONS = [
-    {"id": "2021onca680",  "label": "R v Morris 2021 ONCA 680",       "db": "onca", "corpus": "Distortion"},
-    {"id": "2022bcca278",  "label": "R v Ellis 2022 BCCA 278",        "db": "bcca", "corpus": "Distortion"},
-    {"id": "2022abca48",   "label": "R v Natomagan 2022 ABCA 48",     "db": "abca", "corpus": "Distortion"},
-    {"id": "2024onca8",    "label": "R v Bourdon 2024 ONCA 8",        "db": "onca", "corpus": "Distortion"},
-    {"id": "2018scc30",    "label": "Ewert v Canada 2018 SCC 30",     "db": "scc",  "corpus": "Distortion"},
-    {"id": "2017scc64",    "label": "R v Boutilier 2017 SCC 64",      "db": "scc",  "corpus": "Distortion"},
-    {"id": "1999scc55",    "label": "R v Gladue 1999 1 SCR 688",      "db": "scc",  "corpus": "Distortion"},
-    {"id": "2012scc13",    "label": "R v Ipeelee 2012 SCC 13",        "db": "scc",  "corpus": "Distortion"},
+    {"db": "csc-scc", "id": "1999/1999scc679/1999scc679",  "label": "R v Gladue [1999] 1 SCR 688",         "corpus": "Distortion"},
+    {"db": "csc-scc", "id": "2012/2012scc13/2012scc13",     "label": "R v Ipeelee [2012] 1 SCR 433",        "corpus": "Distortion"},
+    {"db": "onca",    "id": "2021/2021onca680/2021onca680", "label": "R v Morris 2021 ONCA 680",            "corpus": "Distortion"},
+    {"db": "csc-scc", "id": "2018/2018scc30/2018scc30",     "label": "Ewert v Canada [2018] 2 SCR 165",     "corpus": "Distortion"},
+    {"db": "bcca",    "id": "2022/2022bcca278/2022bcca278", "label": "R v Ellis 2022 BCCA 278",             "corpus": "Distortion"},
+    {"db": "abca",    "id": "2022/2022abca48/2022abca48",   "label": "R v Natomagan 2022 ABCA 48",          "corpus": "Distortion"},
+    {"db": "onca",    "id": "2024/2024onca8/2024onca8",     "label": "R v Bourdon 2024 ONCA 8",             "corpus": "Distortion"},
+    {"db": "csc-scc", "id": "2017/2017scc27/2017scc27",     "label": "R v Antic [2017] 1 SCR 509",          "corpus": "Distortion"},
+    {"db": "csc-scc", "id": "2019/2019scc34/2019scc34",     "label": "R v Le [2019] 2 SCR 692",             "corpus": "Distortion"},
+    {"db": "csc-scc", "id": "2017/2017scc64/2017scc64",     "label": "R v Boutilier [2017] 2 SCR 936",      "corpus": "Distortion"},
 ]
 
-# ── Proportionality corpus (severity-tightening lineage) ──────────────────────
-# Added per JP's "side-build" instruction (option ii in the Tier 1 design)
-# to close the most visible asymmetry in the doctrinal substrate. These cases
-# represent the line of authority that tightens proportionality / parity /
-# limits on conditional sentence availability for serious offences. Their
-# presence in the tracked corpus is what makes the architecture's "symmetric
-# surface" claim accurate rather than aspirational.
 PROPORTIONALITY_CITATIONS = [
-    {"id": "2015scc64",  "label": "R v Lacasse 2015 SCC 64",      "db": "scc", "corpus": "Proportionality"},
-    {"id": "2020scc9",   "label": "R v Friesen 2020 SCC 9",       "db": "scc", "corpus": "Proportionality"},
-    {"id": "2022scc23",  "label": "R v Bissonnette 2022 SCC 23",  "db": "scc", "corpus": "Proportionality"},
-    {"id": "2022scc39",  "label": "R v Sharma 2022 SCC 39",       "db": "scc", "corpus": "Proportionality"},
+    {"db": "csc-scc", "id": "2015/2015scc64/2015scc64", "label": "R v Lacasse [2015] 3 SCR 1089",      "corpus": "Proportionality"},
+    {"db": "csc-scc", "id": "2020/2020scc9/2020scc9",   "label": "R v Friesen [2020] 1 SCR 424",       "corpus": "Proportionality"},
+    {"db": "csc-scc", "id": "2022/2022scc23/2022scc23", "label": "R v Bissonnette 2022 SCC 23",        "corpus": "Proportionality"},
+    {"db": "csc-scc", "id": "2022/2022scc39/2022scc39", "label": "R v Sharma 2022 SCC 39",             "corpus": "Proportionality"},
+    {"db": "csc-scc", "id": "2015/2015scc15/2015scc15", "label": "R v Nur [2015] 1 SCR 773",           "corpus": "Proportionality"},
+    {"db": "csc-scc", "id": "2016/2016scc13/2016scc13", "label": "R v Lloyd [2016] 1 SCR 130",         "corpus": "Proportionality"},
 ]
 
-# Combined tracked-case set (Tetrad + Proportionality)
 ALL_TRACKED_CITATIONS = TETRAD_CITATIONS + PROPORTIONALITY_CITATIONS
 
-# ── Canadian court database IDs ────────────────────────────────────────────────
-COURT_DATABASES = {
-    "scc":   "csc-scc",
-    "onca":  "onca",
-    "bcca":  "bcca",
-    "abca":  "abca",
-    "mbca":  "mbca",
-    "skca":  "skca",
-    "qcca":  "qcca",
-    "nsca":  "nsca",
-    "nbca":  "nbca",
-    "peca":  "peca",
-    "nlca":  "nlca",
-    "nuca":  "nuca",
-    "ntca":  "ntca",
-    "ytca":  "yuca",
-}
 
-# ── Court tier classification (for binding/persuasive/other tagging) ──────────
-COURT_TIER = {
-    "csc-scc": "supreme",
-    "onca": "appellate", "bcca": "appellate", "abca": "appellate",
-    "mbca": "appellate", "skca": "appellate", "qcca": "appellate",
-    "nsca": "appellate", "nbca": "appellate", "peca": "appellate",
-    "nlca": "appellate", "nuca": "appellate", "ntca": "appellate",
-    "yuca": "appellate",
-}
-
-# ── Jurisdiction → binding-court map ──────────────────────────────────────────
-# For each province/territory, lists which appellate court is binding in
-# addition to the SCC. SCC binds everywhere by definition.
-JURISDICTION_APPELLATE_DB = {
-    "ON": "onca", "BC": "bcca", "AB": "abca", "QC": "qcca",
-    "SK": "skca", "MB": "mbca", "NS": "nsca", "NB": "nbca",
-    "NL": "nlca", "PE": "peca", "YT": "yuca", "NT": "ntca", "NU": "nuca",
-}
-
+# ═══════════════════════════════════════════════════════════════════════════
+# Internal helpers
+# ═══════════════════════════════════════════════════════════════════════════
 
 def _get_api_key() -> Optional[str]:
     """Resolve CanLII API key from Streamlit secrets or environment."""
@@ -157,60 +183,63 @@ def _cache_key(query: str) -> str:
     return hashlib.md5(query.encode()).hexdigest()
 
 
-def _date_floor_to_iso(date_floor_label: str) -> Optional[str]:
-    """
-    Convert a UI date-floor label to an ISO date string.
+def _normalise_case(case: dict) -> dict:
+    """Normalise a CanLII case payload into the shape app.py expects."""
+    cid = case.get("caseId", {})
+    if isinstance(cid, dict):
+        cid_str = cid.get("en", "") or cid.get("fr", "")
+    else:
+        cid_str = str(cid) if cid else ""
+    db = case.get("databaseId", "")
+    return {
+        "title":     case.get("title", "") or case.get("citation", ""),
+        "citation":  case.get("citation", "") or case.get("title", ""),
+        "date":      case.get("decisionDate", ""),
+        "url":       case.get("url", ""),
+        "database":  db,
+        "case_id":   cid_str,
+    }
 
-    Accepts: "1 year", "3 years", "5 years", "All" (or None).
-    Returns: YYYY-MM-DD string for the floor date, or None for "All".
-    """
-    if not date_floor_label or date_floor_label.lower() == "all":
-        return None
-    today = datetime.now()
-    years = {"1 year": 1, "3 years": 3, "5 years": 5}.get(date_floor_label, 3)
-    floor = today - timedelta(days=years * 365)
-    return floor.strftime("%Y-%m-%d")
+
+def _tier_results(cases: list, user_jurisdiction: str, year_floor: Optional[int]) -> dict:
+    """Sort cases into binding/persuasive/other tiers, applying date floor."""
+    binding, persuasive, other = [], [], []
+    for c in cases:
+        nc = _normalise_case(c)
+        # Date filter
+        if year_floor is not None:
+            year_str = (nc.get("date") or "")[:4]
+            try:
+                if int(year_str) < year_floor:
+                    continue
+            except ValueError:
+                pass
+        tier = _classify_tier(nc.get("database", ""), user_jurisdiction)
+        if tier == "binding":
+            binding.append(nc)
+        elif tier == "persuasive":
+            persuasive.append(nc)
+        else:
+            other.append(nc)
+    # Sort each tier by date desc
+    for tier_list in (binding, persuasive, other):
+        tier_list.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return {
+        "binding":    binding,
+        "persuasive": persuasive,
+        "other":      other,
+        "total":      len(binding) + len(persuasive) + len(other),
+        "error":      None,
+    }
 
 
-def _classify_tier(database_id: str, user_jurisdiction: str = "*") -> str:
-    """
-    Classify a result's stare-decisis tier relative to the user's jurisdiction.
-
-    Returns one of: "binding", "persuasive", "other".
-      binding    — SCC always; user-jurisdiction's CA when set
-      persuasive — Other provincial CAs
-      other      — Lower courts (trial/provincial), or unrecognised db
-    """
-    tier = COURT_TIER.get(database_id, "other")
-    if tier == "supreme":
-        return "binding"
-    if tier == "appellate":
-        # Is this the user-jurisdiction's CA?
-        if user_jurisdiction and user_jurisdiction != "*":
-            jur_db = JURISDICTION_APPELLATE_DB.get(user_jurisdiction)
-            if jur_db and database_id == jur_db:
-                return "binding"
-        return "persuasive"
-    return "other"
-
+# ═══════════════════════════════════════════════════════════════════════════
+# Core API calls (cached)
+# ═══════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=3600 * CACHE_TTL_HOURS, show_spinner=False)
-def search_canlii(query: str,
-                  language: str = "en",
-                  results_per_page: int = 10,
-                  decision_date_after: Optional[str] = None) -> dict:
-    """
-    Search CanLII for cases matching query.
-
-    Args:
-      query: full-text search string
-      language: "en" or "fr"
-      results_per_page: max results to return (1-20 reasonable; 100 hard max)
-      decision_date_after: optional YYYY-MM-DD floor; the API filters server-side
-
-    Results cached for CACHE_TTL_HOURS.
-    Returns dict with keys: results, total_count, error
-    """
+def search_canlii(query: str, language: str = "en", results_per_page: int = 5) -> dict:
+    """Search CanLII for cases matching query."""
     api_key = _get_api_key()
     if not api_key:
         return {"results": [], "total_count": 0,
@@ -223,9 +252,6 @@ def search_canlii(query: str,
         "resultCount": results_per_page,
         "offset": 0,
     }
-    if decision_date_after:
-        params["decisionDateAfter"] = decision_date_after
-
     try:
         resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
@@ -245,48 +271,36 @@ def search_canlii(query: str,
 
 @st.cache_data(ttl=3600 * CACHE_TTL_HOURS, show_spinner=False)
 def get_case_text(database_id: str, case_id: str) -> dict:
-    """
-    Retrieve full text of a specific CanLII decision.
-    Returns dict with keys: content, title, citation, date, error
-    """
+    """Retrieve full text of a specific CanLII decision."""
     api_key = _get_api_key()
     if not api_key:
         return {"content": None, "error": "No CanLII API key"}
-
     url = f"{CANLII_BASE_URL}/caseBrowse/en/{database_id}/{case_id}/"
-    params = {"api_key": api_key}
-
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params={"api_key": api_key}, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         return {
-            "content": data.get("content", ""),
-            "title":   data.get("title", ""),
+            "content":  data.get("content", ""),
+            "title":    data.get("title", ""),
             "citation": data.get("citation", ""),
-            "date":    data.get("decisionDate", ""),
-            "url":     data.get("url", ""),
-            "error":   None,
+            "date":     data.get("decisionDate", ""),
+            "url":      data.get("url", ""),
+            "error":    None,
         }
     except Exception as e:
         return {"content": None, "error": str(e)}
 
 
 @st.cache_data(ttl=3600 * CACHE_TTL_HOURS, show_spinner=False)
-def get_citing_cases(database_id: str, case_id: str, results: int = 20) -> dict:
-    """
-    Get cases that cite a specific decision.
-    Useful for tracking subsequent history of Tetrad/Proportionality decisions.
-    """
+def get_citing_cases(database_id: str, case_id: str, results: int = 10) -> dict:
+    """Get cases that cite a specific decision."""
     api_key = _get_api_key()
     if not api_key:
         return {"cases": [], "error": "No CanLII API key"}
-
     url = f"{CANLII_BASE_URL}/caseCitator/en/{database_id}/{case_id}/citingCases"
-    params = {"api_key": api_key, "resultCount": results}
-
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(url, params={"api_key": api_key, "resultCount": results}, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         return {"cases": data.get("citingCases", []), "error": None}
@@ -294,276 +308,173 @@ def get_citing_cases(database_id: str, case_id: str, results: int = 20) -> dict:
         return {"cases": [], "error": str(e)}
 
 
-def _format_case(case: dict, user_jurisdiction: str = "*") -> dict:
+# ═══════════════════════════════════════════════════════════════════════════
+# Public API surface (consumed by app.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def is_configured() -> bool:
+    """Check if CanLII API key is available."""
+    return bool(_get_api_key())
+
+
+def validate_api_key() -> dict:
+    """Probe API with a trivial query to verify the configured key works.
+    Returns {valid: bool, error: str|None}.
     """
-    Normalise a raw API case-dict into PARVIS's display format,
-    with stare-decisis tier classification attached.
-    """
-    cid_raw = case.get("caseId", "")
-    if isinstance(cid_raw, dict):
-        cid = cid_raw.get("en", "") or cid_raw.get("fr", "")
-    else:
-        cid = str(cid_raw)
-    db = case.get("databaseId", "")
-    return {
-        "title":    case.get("title", ""),
-        "citation": case.get("citation", ""),
-        "date":     case.get("decisionDate", ""),
-        "url":      case.get("url", ""),
-        "database": db,
-        "case_id":  cid,
-        "tier":     _classify_tier(db, user_jurisdiction),
-    }
+    if not _get_api_key():
+        return {"valid": False, "error": "No CanLII API key configured"}
+    # Trivial probe: search for "Antic" with 1 result
+    probe = search_canlii("Antic bail", results_per_page=1)
+    if probe.get("error"):
+        return {"valid": False, "error": probe["error"]}
+    return {"valid": True, "error": None}
 
 
-def search_with_filters(
-    query: str,
-    user_jurisdiction: str = "*",
-    date_floor_label: str = "3 years",
-    max_results: int = 12,
-) -> dict:
-    """
-    Run a full-text query with jurisdictional + date filtering.
-
-    Args:
-      query: free-text query string
-      user_jurisdiction: province/territory code ("ON", "BC", etc.) or "*"
-      date_floor_label: "1 year" / "3 years" / "5 years" / "All"
-      max_results: max items returned per tier
-
-    Returns dict:
-      {
-        "binding":    [...],   # SCC + user-jurisdiction's CA
-        "persuasive": [...],   # Other provincial CAs
-        "other":      [...],   # Lower courts
-        "total":      int,
-        "error":      str or None,
-      }
-    """
-    date_floor = _date_floor_to_iso(date_floor_label)
-    # Pull a wider result set so the tiering has material to work with
-    pull_count = max(20, max_results * 3)
-    data = search_canlii(query=query,
-                         results_per_page=pull_count,
-                         decision_date_after=date_floor)
-    if data.get("error"):
-        return {"binding": [], "persuasive": [], "other": [],
-                "total": 0, "error": data["error"]}
-
-    binding, persuasive, other = [], [], []
-    seen_ids = set()
-    for raw in data.get("results", []):
-        formatted = _format_case(raw, user_jurisdiction)
-        cid = formatted.get("case_id", "")
-        if not cid or cid in seen_ids:
-            continue
-        seen_ids.add(cid)
-        tier = formatted["tier"]
-        if tier == "binding" and len(binding) < max_results:
-            binding.append(formatted)
-        elif tier == "persuasive" and len(persuasive) < max_results:
-            persuasive.append(formatted)
-        elif tier == "other" and len(other) < max_results:
-            other.append(formatted)
-
-    # Sort each tier by date descending
-    for tier_list in (binding, persuasive, other):
-        tier_list.sort(key=lambda x: x.get("date", ""), reverse=True)
-
-    return {
-        "binding": binding,
-        "persuasive": persuasive,
-        "other": other,
-        "total": len(binding) + len(persuasive) + len(other),
-        "error": None,
-    }
-
-
-def search_node_developments(node_id: int,
-                             max_results: int = 5,
-                             user_jurisdiction: str = "*",
-                             date_floor_label: str = "3 years") -> dict:
-    """
-    Search CanLII for recent decisions relevant to a specific PARVIS node.
-
-    Returns the same tiered structure as search_with_filters().
-
-    BACKWARD-COMPATIBILITY NOTE: previously returned a flat list. Existing
-    callers that consume the flat structure can use the helper
-    `flatten_search_results()` below.
+def search_node_developments(node_id: int, max_results: int = 5,
+                              user_jurisdiction: str = "*",
+                              date_floor_label: str = "3 years") -> dict:
+    """Search CanLII for recent decisions relevant to a specific PARVIS node.
+    
+    Returns tiered dict: {binding, persuasive, other, total, error}
     """
     queries = NODE_SEARCH_QUERIES.get(node_id, [])
     if not queries:
-        return {"binding": [], "persuasive": [], "other": [], "total": 0,
-                "error": f"No search queries defined for node {node_id}"}
+        return {"binding": [], "persuasive": [], "other": [], "total": 0, "error": None}
 
-    date_floor = _date_floor_to_iso(date_floor_label)
-    pull_count = max(20, max_results * 3)
-
-    binding, persuasive, other = [], [], []
+    year_floor = _date_floor_to_year(date_floor_label)
+    all_cases = []
     seen_ids = set()
+    last_error = None
 
-    # Use first 2 queries to stay within rate limits
-    for query in queries[:2]:
-        data = search_canlii(query=query,
-                             results_per_page=pull_count,
-                             decision_date_after=date_floor)
+    for query in queries[:2]:  # First 2 queries to stay within rate limits
+        data = search_canlii(query, results_per_page=max_results * 2)
         if data.get("error"):
+            last_error = data["error"]
             continue
-        for raw in data.get("results", []):
-            formatted = _format_case(raw, user_jurisdiction)
-            cid = formatted.get("case_id", "")
-            if not cid or cid in seen_ids:
-                continue
-            seen_ids.add(cid)
-            tier = formatted["tier"]
-            if tier == "binding" and len(binding) < max_results:
-                binding.append(formatted)
-            elif tier == "persuasive" and len(persuasive) < max_results:
-                persuasive.append(formatted)
-            elif tier == "other" and len(other) < max_results:
-                other.append(formatted)
+        for case in data.get("results", []):
+            cid = case.get("caseId", {})
+            cid_str = cid.get("en", "") if isinstance(cid, dict) else str(cid)
+            if cid_str and cid_str not in seen_ids:
+                seen_ids.add(cid_str)
+                all_cases.append(case)
 
-    for tier_list in (binding, persuasive, other):
-        tier_list.sort(key=lambda x: x.get("date", ""), reverse=True)
+    if not all_cases and last_error:
+        return {"binding": [], "persuasive": [], "other": [], "total": 0, "error": last_error}
 
-    return {
-        "binding": binding,
-        "persuasive": persuasive,
-        "other": other,
-        "total": len(binding) + len(persuasive) + len(other),
-        "error": None,
-    }
+    tiered = _tier_results(all_cases, user_jurisdiction, year_floor)
+    # Cap each tier
+    tiered["binding"] = tiered["binding"][:max_results]
+    tiered["persuasive"] = tiered["persuasive"][:max_results]
+    tiered["other"] = tiered["other"][:max_results]
+    tiered["total"] = len(tiered["binding"]) + len(tiered["persuasive"]) + len(tiered["other"])
+    return tiered
 
 
-def flatten_search_results(tiered: dict, max_total: int = 5) -> list:
+def search_with_filters(query: str, user_jurisdiction: str = "*",
+                         date_floor_label: str = "3 years",
+                         max_results: int = 8) -> dict:
+    """Free-text search with jurisdiction tiering and date floor.
+    
+    Returns tiered dict: {binding, persuasive, other, total, error}
     """
-    Backward-compat helper: flatten a tiered result dict into a single list.
-    Binding cases come first, then persuasive, then other; date-sorted within tier.
-    """
-    flat = list(tiered.get("binding", [])) + \
-           list(tiered.get("persuasive", [])) + \
-           list(tiered.get("other", []))
-    return flat[:max_total]
+    if not query.strip():
+        return {"binding": [], "persuasive": [], "other": [], "total": 0,
+                "error": "Empty query"}
+    year_floor = _date_floor_to_year(date_floor_label)
+    data = search_canlii(query.strip(), results_per_page=max_results * 2)
+    if data.get("error"):
+        return {"binding": [], "persuasive": [], "other": [], "total": 0,
+                "error": data["error"]}
+    tiered = _tier_results(data.get("results", []), user_jurisdiction, year_floor)
+    tiered["binding"] = tiered["binding"][:max_results]
+    tiered["persuasive"] = tiered["persuasive"][:max_results]
+    tiered["other"] = tiered["other"][:max_results]
+    tiered["total"] = len(tiered["binding"]) + len(tiered["persuasive"]) + len(tiered["other"])
+    return tiered
 
 
 def get_tracked_updates(date_floor_label: str = "3 years",
-                        user_jurisdiction: str = "*",
-                        corpus: str = "all") -> dict:
+                         user_jurisdiction: str = "*",
+                         corpus: str = "all") -> dict:
+    """Check for recent citing cases for tracked binding-authority corpus.
+    
+    corpus: "all" | "Distortion" | "Proportionality"
+    
+    Returns dict keyed by case label, each value is:
+      {corpus, total, binding, persuasive, other}
     """
-    Check for recent citing cases for tracked decisions
-    (Tetrad and/or Proportionality corpus).
-
-    Args:
-      date_floor_label: "1 year" / "3 years" / "5 years" / "All"
-      user_jurisdiction: for tier classification of citing cases
-      corpus: "all" / "Distortion" / "Proportionality" — which corpus to track
-
-    Returns:
-      {
-        case_label: {
-          "corpus": "Distortion" | "Proportionality",
-          "binding":    [...citing cases...],
-          "persuasive": [...citing cases...],
-          "other":      [...citing cases...],
-          "total":      int,
-        },
-        ...
-      }
-    """
-    if corpus == "Distortion":
-        cases = TETRAD_CITATIONS
-    elif corpus == "Proportionality":
-        cases = PROPORTIONALITY_CITATIONS
+    if corpus.lower() == "distortion":
+        sources = TETRAD_CITATIONS
+    elif corpus.lower() == "proportionality":
+        sources = PROPORTIONALITY_CITATIONS
     else:
-        cases = ALL_TRACKED_CITATIONS
+        sources = ALL_TRACKED_CITATIONS
 
-    date_floor = _date_floor_to_iso(date_floor_label)
+    year_floor = _date_floor_to_year(date_floor_label)
     updates = {}
-
-    for case in cases:
+    for case in sources:
         citing = get_citing_cases(
-            database_id=COURT_DATABASES.get(case["db"], case["db"]),
+            database_id=case["db"],
             case_id=case["id"],
-            results=20,
+            results=15,
         )
         if citing.get("error"):
             continue
-
-        binding, persuasive, other = [], [], []
-        for c in citing.get("cases", []):
-            cdate = c.get("decisionDate", "")
-            if date_floor and cdate < date_floor:
-                continue
-            formatted = _format_case(c, user_jurisdiction)
-            tier = formatted["tier"]
-            if tier == "binding":
-                binding.append(formatted)
-            elif tier == "persuasive":
-                persuasive.append(formatted)
-            else:
-                other.append(formatted)
-
-        for tl in (binding, persuasive, other):
-            tl.sort(key=lambda x: x.get("date", ""), reverse=True)
-
-        total = len(binding) + len(persuasive) + len(other)
-        if total > 0:
-            updates[case["label"]] = {
-                "corpus":     case["corpus"],
-                "binding":    binding,
-                "persuasive": persuasive,
-                "other":      other,
-                "total":      total,
-            }
+        cases_list = citing.get("cases", [])
+        if not cases_list:
+            continue
+        tiered = _tier_results(cases_list, user_jurisdiction, year_floor)
+        if tiered["total"] == 0:
+            continue
+        # Cap each tier for display
+        tiered["binding"]    = tiered["binding"][:6]
+        tiered["persuasive"] = tiered["persuasive"][:6]
+        tiered["other"]      = tiered["other"][:6]
+        tiered["corpus"]     = case.get("corpus", "Distortion")
+        updates[case["label"]] = tiered
     return updates
 
 
-# ── Backward-compatible wrapper for the existing get_tetrad_updates name ─────
 def get_tetrad_updates(since_year: int = 2023) -> dict:
+    """Back-compat: simple Tetrad-only update check.
+    Returns {label: [citing_cases]} for citing cases since since_year.
     """
-    DEPRECATED: backward-compatibility wrapper for the older API surface.
+    updates = {}
+    for case in TETRAD_CITATIONS:
+        citing = get_citing_cases(
+            database_id=case["db"],
+            case_id=case["id"],
+            results=10,
+        )
+        if citing.get("error"):
+            continue
+        recent = [
+            c for c in citing.get("cases", [])
+            if c.get("decisionDate", "")[:4] >= str(since_year)
+        ]
+        if recent:
+            updates[case["label"]] = recent
+    return updates
 
-    Existing callers in app.py may pass `since_year` as an integer
-    (e.g., 2023). This wrapper translates that to a date-floor and
-    flattens the new tiered structure to the old format.
 
-    New code should use get_tracked_updates() directly.
+def flatten_search_results(tiered_dict: dict) -> list:
+    """Flatten a tiered result dict into a single list, preserving tier label.
+    
+    Useful for downstream rendering that doesn't need tier separation.
     """
-    today = datetime.now()
-    years_back = max(1, today.year - since_year)
-    if years_back == 1:
-        floor_label = "1 year"
-    elif years_back <= 3:
-        floor_label = "3 years"
-    elif years_back <= 5:
-        floor_label = "5 years"
-    else:
-        floor_label = "All"
-
-    new_updates = get_tracked_updates(
-        date_floor_label=floor_label,
-        user_jurisdiction="*",
-        corpus="Distortion",  # The old function only tracked Tetrad
-    )
-    # Flatten tier structure to a single list (old format)
-    flat_updates = {}
-    for label, data in new_updates.items():
-        flat = (list(data.get("binding", [])) +
-                list(data.get("persuasive", [])) +
-                list(data.get("other", [])))
-        if flat:
-            flat_updates[label] = flat
-    return flat_updates
+    out = []
+    for tier_key, tier_label in [("binding", "Binding"),
+                                   ("persuasive", "Persuasive"),
+                                   ("other", "Other")]:
+        for case in tiered_dict.get(tier_key, []):
+            entry = dict(case)
+            entry["tier"] = tier_label
+            out.append(entry)
+    return out
 
 
-def format_canlii_results(results, node_name: str = "") -> str:
-    """
-    Format CanLII search results as readable text.
-    Accepts either a tiered dict or a flat list (backward compat).
-    """
-    if isinstance(results, dict) and "binding" in results:
-        results = flatten_search_results(results)
+def format_canlii_results(results: list, node_name: str = "") -> str:
+    """Format CanLII search results as readable text."""
     if not results:
         return "No recent CanLII decisions found."
     header = f"Recent CanLII decisions relevant to {node_name}:\n" if node_name else "Recent decisions:\n"
@@ -574,38 +485,3 @@ def format_canlii_results(results, node_name: str = "") -> str:
         if r.get("url"):
             lines.append(f"    {r['url']}")
     return "\n".join(lines)
-
-
-def is_configured() -> bool:
-    """Check if CanLII API key is available (does not validate the key)."""
-    return bool(_get_api_key())
-
-
-@st.cache_data(ttl=3600, show_spinner=False)  # 1-hour cache for validity check
-def validate_api_key() -> dict:
-    """
-    Make a minimal test query to verify the API key actually works.
-
-    Cached for 1 hour to avoid repeated probing on every page render.
-    Returns dict: {"valid": bool, "error": str or None}.
-    """
-    api_key = _get_api_key()
-    if not api_key:
-        return {"valid": False, "error": "No CanLII API key configured."}
-
-    # Minimal probe: list available case databases (cheap, always available).
-    url = f"{CANLII_BASE_URL}/caseBrowse/en/"
-    params = {"api_key": api_key}
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        if resp.status_code == 200:
-            return {"valid": True, "error": None}
-        if resp.status_code == 401:
-            return {"valid": False, "error": "API key rejected (401 Unauthorized)."}
-        if resp.status_code == 403:
-            return {"valid": False, "error": "API key forbidden (403)."}
-        return {"valid": False, "error": f"API returned status {resp.status_code}."}
-    except requests.Timeout:
-        return {"valid": False, "error": "API timeout during key validation."}
-    except Exception as e:
-        return {"valid": False, "error": str(e)}
