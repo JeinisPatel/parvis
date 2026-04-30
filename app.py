@@ -56,7 +56,7 @@ import base64, os
 from datetime import datetime
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-from model import build_model, get_inference_engine, query_do_risk, NODE_META, EDGES_VE as EDGES
+from model import build_model, get_inference_engine, query_do_risk, NODE_META, EDGES_VE as EDGES, compute_n1_prior_from_audit
 from quantum_diagnostics import diagnose, format_report
 from bloch_sphere import draw_bloch_sphere, draw_comparison_chart
 
@@ -819,6 +819,43 @@ def _doctrinal_frame():
 # ── Session state ─────────────────────────────────────────────────────────────
 def _init():
     defs = {"model":None,"engine":None,"profile_ev":{},"gladue_checked":set(),"criminal_record":[],"cr_doc_adj":{},"saved_scenarios":{},
+            # §5.1.17 N17b counsel attestation — case-level per JP M8/P2
+            # (over-policing is a case-wide policing-environment claim, not
+            # per-conviction). Stays on Profile tab.
+            "n17b_counsel_attestation":False,
+            # §5.1.18 N18a counsel attestation — case-level per JP M8/P2
+            # (concerns the present sentencing court's jurisdiction's
+            # SCE-integration precedent, not any prior conviction). Stays
+            # on Profile tab near the case-jurisdiction input.
+            "n18a_counsel_attestation":False,
+            # Mark 8 Phase 2 relocation: N14a/b/c, N15a/b/c, N18b/c moved
+            # to per-conviction storage on the criminal_record entries.
+            # Aggregate signals derived via _any_conviction_attests().
+            # See JP M8/P2 lock-in.
+            # §5.1.19 N19 collider-bias secondary computation slots (Q4=C)
+            "n19_collider_signal":None,        # set by run_inf via _n19_collider_signal
+            "n19_discounted_risk":None,        # set by run_inf via compute_do_risk(collider_discount=True)
+            # ── §5.1.1 N1 burden-of-proof audit (Mark 8) ──────────────────
+            # Per-input audit-state dict keyed by stable input ID.
+            # Each record carries: provenance ("crown"/"defence"/"agreed"/
+            # "judicial"), use ("aggravating"/"mitigating"/"contextual"/
+            # "agreed_fact"), judicial_finding_type (Ferguson sub-flag,
+            # only populated when provenance=="judicial"), applicable_burden
+            # ("BARD"/"BoP"/"none"), attestation (free text from user),
+            # attestation_status ("satisfied"/"insufficient"/"pending"),
+            # citations (list of authority strings), tab (origin tab),
+            # label (display description for §RM.1 register).
+            # Audit logic: model.compute_n1_prior_from_audit(audit_state)
+            # → target P(N1=High); fed to query_do_risk via virtual evidence
+            # so audit-derived N1 propagates structurally through VE.
+            # See model.py § "N1 burden-of-proof audit" for full doctrinal
+            # architecture (Gardiner, Ferguson, Angelillo, s.724(3)).
+            "n1_audit": {},
+            # Per-case strict-mode flag (Q3=A locked). Strict mode fires
+            # the burden-of-proof audit prompt at moment-of-entry rather
+            # than at tab-exit. Stored as case metadata so it round-trips
+            # on save/load (preserves audit semantics across user handoffs).
+            "strict_mode": False,
             "sce_checked":set(),"sce_values":{},"manual_ev":{},"doc_adj":{},"posteriors":{},
             "qdiags":{},"conn":"moderate","enex":"relevant","scefw":"morris","doc_res":[],"qbism_plain":"","qbism_dm":{},
             "case_id":"","case_jur":""}
@@ -937,6 +974,1111 @@ def _compute_sce_corrections_by_gate():
     return corrections_by_gate
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §5.1.17 N17 sub-node signal computation
+#
+# Per JP confirmation (Apr 28-29, 2026):
+#   M1: N17a derived from jurisdiction with Moderate default
+#   M2: N17c/N17d pattern-matched from criminal record now; schema migration later
+#   M3: N17b OR-gate over Gladue tab evidence with counsel attestation override
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Strong-match Gladue/SCE factor IDs that engage §5.1.17 §2 enforcement-disparity
+# patterns. OR-gate: any one fires → N17b signal high.
+_N17B_TRIGGER_FACTORS = {
+    "g_op",   # Over-policed community of origin
+    "s_ra",   # Anti-Black / racialized racism documented
+    "s_rp",   # Documented racial profiling
+    "s_bi",   # Anti-Black systemic incarceration patterns
+    "s_bb",   # Anti-Black bail practices documented
+    "s_nb",   # Neighbourhood structural disadvantage
+}
+
+# §5.1.17 §2 surveillance-trigger keyword patterns. Lowercased substring match
+# on offence text. Conservative — false positives possible (e.g. "possession of
+# stolen property" is included; counsel can override at per-conviction level
+# via the existing adj_police slider).
+_N17D_SURVEILLANCE_PATTERNS = (
+    "breach",
+    "fail to comply",
+    "fail to appear",
+    "administration of justice",
+    "aoj",
+    "possession",
+)
+
+# Violence keywords — any match disqualifies an offence from being counted as
+# "non-violent" for N17c regardless of seriousness tier. Matches §5.1.17 §2's
+# distinction between "non-violent charges" (low-harm/compliance) and
+# violence-driven entries.
+_N17C_VIOLENCE_PATTERNS = (
+    "assault",
+    "robbery",
+    "manslaughter",
+    "murder",
+    "homicide",
+    "sexual",
+    "firearm",
+    "aggravated",
+    "weapon",
+)
+
+
+def _n17a_signal(case_jur: str) -> int:
+    """
+    N17a — Jurisdictional Policing Disparity Index.
+
+    Per JP M1 confirmation: Moderate default for every jurisdiction with override
+    available later. Currently returns binary state: 0 (Low/Moderate) for default,
+    1 (High) only if jurisdiction is known to have documented over-policing
+    patterns AND we have explicit override evidence.
+
+    Conservative architectural choice: do not embed contested empirical claims
+    about specific provinces in the constructive-proof CPT. The override path
+    (counsel-input slider) is reserved for Stage 3 if needed.
+
+    Returns: 0 (Low/Moderate disparity) or 1 (High disparity)
+    """
+    # M1 conservative default: every jurisdiction starts Low/Moderate (state 0).
+    # Override mechanism deferred to Stage 3.
+    return 0
+
+
+def _n17b_signal() -> int:
+    """
+    N17b — Enforcement-Disparity Engagement.
+
+    Per JP M3 confirmation: OR-gate over Gladue/SCE tab evidence with counsel
+    attestation override. If any §5.1.17 §2 trigger factor is checked, OR if
+    counsel has attested, return 1 (High).
+
+    Read from st.session_state.gladue_checked (Gladue tab) and
+    st.session_state.sce_checked (Morris/Ellis SCE tab) — both contribute since
+    §5.1.17 §2 cites both Indigenous and Black community over-policing patterns.
+
+    Returns: 0 (no engagement) or 1 (documented engagement)
+    """
+    gladue = st.session_state.get("gladue_checked", set()) or set()
+    sce = st.session_state.get("sce_checked", set()) or set()
+    attestation = st.session_state.get("n17b_counsel_attestation", False)
+
+    # OR-gate: any trigger factor present, or attestation
+    if attestation:
+        return 1
+    if any(fid in _N17B_TRIGGER_FACTORS for fid in gladue):
+        return 1
+    if any(fid in _N17B_TRIGGER_FACTORS for fid in sce):
+        return 1
+    return 0
+
+
+def _n17c_signal(criminal_record) -> int:
+    """
+    N17c — Non-Violent Charge Density.
+
+    Per JP M2 confirmation: pattern-match offence text now, schema migration
+    later. Computes proportion of non-violent charges in the record. Threshold
+    at 0.50 — if more than half the record is low-harm/non-violent, signal High.
+
+    A conviction is counted as non-violent when:
+      (a) seriousness tier is Minor or Moderate, AND
+      (b) offence text contains no violence keywords
+
+    Returns: 0 (low non-violent density) or 1 (high non-violent density)
+    """
+    if not criminal_record:
+        return 0
+    total = len(criminal_record)
+    if total == 0:
+        return 0
+    non_violent_count = 0
+    for entry in criminal_record:
+        offence = (entry.get("offence", "") or "").lower()
+        seriousness_label = (entry.get("seriousness_label", "") or "").lower()
+        # Check seriousness tier
+        is_low_tier = ("minor" in seriousness_label or "moderate" in seriousness_label)
+        # Check for violence keywords
+        has_violence = any(p in offence for p in _N17C_VIOLENCE_PATTERNS)
+        if is_low_tier and not has_violence:
+            non_violent_count += 1
+    density = non_violent_count / total
+    return 1 if density > 0.50 else 0
+
+
+def _n17d_signal(criminal_record) -> int:
+    """
+    N17d — Surveillance-Triggered Entries.
+
+    Per JP M2 confirmation: pattern-match offence text for surveillance signatures
+    per §5.1.17 §2: breaches, AOJ offences, simple possession. Threshold at 0.30
+    — even moderate density of surveillance-triggered entries is concerning per
+    §5.1.17 §5 ("when surveillance-triggered entries dominate").
+
+    Returns: 0 (few surveillance-triggered) or 1 (many surveillance-triggered)
+    """
+    if not criminal_record:
+        return 0
+    total = len(criminal_record)
+    if total == 0:
+        return 0
+    surveillance_count = 0
+    for entry in criminal_record:
+        offence = (entry.get("offence", "") or "").lower()
+        if any(p in offence for p in _N17D_SURVEILLANCE_PATTERNS):
+            surveillance_count += 1
+    density = surveillance_count / total
+    return 1 if density >= 0.30 else 0
+
+
+def _compute_n17_evidence() -> dict:
+    """
+    Compute the four §5.1.17 N17 sub-node evidence states for inference.
+
+    Returns dict mapping pgmpy node IDs ('17a', '17b', '17c', '17d') to
+    binary states (0 or 1). Suitable for passing as hard evidence to
+    query_do_risk.
+    """
+    case_jur = st.session_state.get("case_jur", "") or ""
+    record = st.session_state.get("criminal_record", []) or []
+    return {
+        "17a": _n17a_signal(case_jur),
+        "17b": _n17b_signal(),
+        "17c": _n17c_signal(record),
+        "17d": _n17d_signal(record),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §5.1.14 N14 sub-node signal computation
+#
+# Per JP confirmation Q6 (α): year-based heuristics + counsel attestation
+# override. N14a/b/c are app-derived from criminal-record years and counsel
+# input; N14d is computed by the BN as a child of N10 (Judicial Misapplication).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Mandatory-minimum-era offence keywords. §5.1.14 §2 + Bill C-10 lineage:
+# drug trafficking, weapons offences, sexual offences against minors all had
+# MM provisions during 2008-2015. Many struck down post-Nur (2015) / Lloyd (2016).
+_N14B_MM_OFFENCE_PATTERNS = (
+    "trafficking",       # drug trafficking
+    "production",        # drug production
+    "import",            # drug importation
+    "firearm",           # weapons offences
+    "weapon",
+    "discharging",       # discharging firearm
+    "sexual interference",   # CC s.151
+    "sexual exploitation",   # CC s.153
+    "invitation to sexual",  # CC s.152
+    "child pornography",     # CC s.163.1
+)
+
+# Era boundaries (Canadian sentencing law context).
+_N14A_ERA_HIGH_START = 2008  # Bill C-10 era begins
+_N14A_ERA_HIGH_END = 2015    # post-Nur, MM strikedowns begin
+_N14B_MM_ERA_START = 2008
+_N14B_MM_ERA_END = 2015
+_N14C_SCE_AVAILABLE_FROM = 2012  # Ipeelee — SCE substantively available
+
+
+def _n14a_signal() -> int:
+    """
+    N14a — Sentencing Era Severity.
+
+    Per Q6 (α): year-based heuristic + counsel attestation override.
+    State 1 (High severity era) when:
+      - Counsel attestation present, OR
+      - Record contains conviction(s) from 2008-2015 (Bill C-10 era)
+
+    Returns: 0 (Low/Moderate era) or 1 (High severity era)
+    """
+    if _any_conviction_attests("n14a_attestation"):
+        return 1
+    record = st.session_state.get("criminal_record", []) or []
+    for entry in record:
+        try:
+            year = int(entry.get("year", 0))
+        except (TypeError, ValueError):
+            continue
+        if _N14A_ERA_HIGH_START <= year <= _N14A_ERA_HIGH_END:
+            return 1
+    return 0
+
+
+def _n14b_signal(criminal_record) -> int:
+    """
+    N14b — Historical Mandatory Minimum.
+
+    Per Q6 (α): pattern-match offence text + year against MM-era offences.
+    State 1 (MM-era conviction present) when:
+      - Counsel attestation present, OR
+      - Record contains MM-eligible offence from 2008-2015
+
+    Returns: 0 (no MM-era conviction) or 1 (MM-era conviction present)
+    """
+    if _any_conviction_attests("n14b_attestation"):
+        return 1
+    if not criminal_record:
+        return 0
+    for entry in criminal_record:
+        offence = (entry.get("offence", "") or "").lower()
+        try:
+            year = int(entry.get("year", 0))
+        except (TypeError, ValueError):
+            continue
+        # Within MM era and matches MM-eligible offence pattern
+        if _N14B_MM_ERA_START <= year <= _N14B_MM_ERA_END:
+            if any(p in offence for p in _N14B_MM_OFFENCE_PATTERNS):
+                return 1
+    return 0
+
+
+def _n14c_signal(criminal_record) -> int:
+    """
+    N14c — SCE Absent at Sentencing.
+
+    Per Q6 (α): year-based heuristic + counsel attestation (inverse).
+    State 1 (SCE absent — adverse) when:
+      - Record contains pre-2012 conviction (pre-Ipeelee era), AND
+      - Counsel has NOT attested SCE was applied at original sentencing
+    State 0 (SCE present) when:
+      - Counsel attests SCE was applied, OR
+      - All convictions are post-2012 (Ipeelee era and later)
+
+    Note: the attestation checkbox semantics are inverted for UX clarity —
+    counsel checks "SCE was applied at original sentencing" → that means N14c=Low.
+
+    Returns: 0 (SCE present) or 1 (SCE absent at sentencing)
+    """
+    # Counsel attestation: "SCE was applied at original sentencing"
+    # If ANY conviction has this flag set per JP M8/P2 any-prior aggregation,
+    # force N14c = 0 (SCE present, no distortion contribution). Inverse
+    # semantics preserved from the case-level original.
+    if _any_conviction_attests("n14c_sce_applied"):
+        return 0
+    if not criminal_record:
+        return 0  # no record → no SCE distortion to flag
+    # Heuristic: any pre-Ipeelee conviction → SCE likely absent/nominal
+    for entry in criminal_record:
+        try:
+            year = int(entry.get("year", 0))
+        except (TypeError, ValueError):
+            continue
+        if year > 0 and year < _N14C_SCE_AVAILABLE_FROM:
+            return 1
+    return 0
+
+
+def _compute_n14_evidence() -> dict:
+    """
+    Compute the §5.1.14 N14 sub-node evidence states for inference.
+
+    Note: N14d is NOT computed app-side — it is a BN node with parent N10
+    (Judicial Misapplication). Its posterior is computed by VE from N10's
+    evidence per §5.1.14 §5 + Q3 routing.
+
+    Returns dict mapping pgmpy node IDs ('14a', '14b', '14c') to binary states.
+    Suitable for passing as hard evidence to query_do_risk.
+    """
+    record = st.session_state.get("criminal_record", []) or []
+    return {
+        "14a": _n14a_signal(),
+        "14b": _n14b_signal(record),
+        "14c": _n14c_signal(record),
+        # 14d intentionally omitted — derived from N10 via BN inference per Q3
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §5.1.15 N15 sub-node signal computation
+#
+# Per JP confirmation Q6 (α): all four signals derived from existing criminal
+# record fields + counsel attestation overrides. No schema changes.
+#
+# §5.1.15 §5 parents (binary collapse per Q3):
+#   N15a — Tariff jurisdiction (1=High-tariff per Doob/Cesaroni/Roach lineage)
+#   N15b — Tariff-sensitive offence (1=Property/Drug/AOJ; 0=Violent/Sexual)
+#   N15c — Tariff-sensitive sentence length (offence-conditional threshold)
+#   N15d — Doctrine absent (1=no jurisprudence applied; shares n14c attestation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tariff-sensitive offence patterns (high tariff variability — sentence length
+# more likely to reflect regional norms than conduct severity). Property and
+# drug offences are the classic tariff-sensitive categories per §5.1.15 §2(d).
+_N15_TARIFF_SENSITIVE_PATTERNS = (
+    # Property
+    "theft", "fraud", "break and enter", "break-and-enter",
+    "possession of stolen", "stolen property", "mischief",
+    # Drug
+    "trafficking", "possession for purpose", "possession for the purpose",
+    "production of", "import", "drug", "controlled substance",
+    # Administration of justice
+    "breach", "fail to comply", "fail to appear",
+)
+
+# Conduct-driven offence patterns (less tariff-sensitive — sentence length
+# more reflects conduct severity than regional variation).
+_N15_CONDUCT_DRIVEN_PATTERNS = (
+    "assault", "robbery", "manslaughter", "murder", "homicide",
+    "sexual assault", "sexual interference", "sexual exploitation",
+    "invitation to sexual", "child pornography",
+    "kidnapping", "forcible confinement", "extortion",
+    "discharging firearm", "use of firearm",
+)
+
+# High-tariff jurisdictions per Doob/Cesaroni/Roach lineage.
+# Includes both province names and standard abbreviations to match
+# whatever format counsel enters in case_jur. Conservative classification —
+# counsel attestation overrides for case-specific nuance.
+_N15_HIGH_TARIFF_JURISDICTIONS = (
+    "ontario", "on ", " on,", "(on)",
+    "manitoba", "mb ", " mb,", "(mb)",
+    "saskatchewan", "sk ", " sk,", "(sk)",
+    "alberta", "ab ", " ab,", "(ab)",
+)
+
+
+def _n15a_signal(case_jur: str) -> int:
+    """
+    N15a — Tariff jurisdiction disparity.
+
+    Per Q6 (α): tier-classify case_jur against high-tariff jurisdiction set.
+    State 1 (High-tariff) when:
+      - Counsel attestation present, OR
+      - case_jur contains any high-tariff jurisdiction marker
+
+    Returns: 0 (Low-tariff) or 1 (High-tariff)
+    """
+    if _any_conviction_attests("n15a_attestation"):
+        return 1
+    if not case_jur:
+        return 0
+    case_lower = case_jur.lower()
+    return 1 if any(j in case_lower for j in _N15_HIGH_TARIFF_JURISDICTIONS) else 0
+
+
+def _n15b_signal(criminal_record) -> int:
+    """
+    N15b — Tariff-sensitive offence type.
+
+    Per Q6 (α): pattern-match offence text against tariff-sensitive categories.
+    State 1 (tariff-sensitive offence present) when:
+      - Counsel attestation present, OR
+      - Record contains at least one offence matching tariff-sensitive patterns
+        and NO conduct-driven pattern dominates that conviction
+
+    For binary collapse: an offence is tariff-sensitive if it matches a
+    tariff-sensitive pattern AND does not also match a conduct-driven pattern
+    (e.g., "drug-related assault" would match both — conduct-driven dominates).
+
+    Returns: 0 (no tariff-sensitive offences) or 1 (tariff-sensitive present)
+    """
+    if _any_conviction_attests("n15b_attestation"):
+        return 1
+    if not criminal_record:
+        return 0
+    for entry in criminal_record:
+        offence = (entry.get("offence", "") or "").lower()
+        is_tariff_sensitive = any(p in offence for p in _N15_TARIFF_SENSITIVE_PATTERNS)
+        is_conduct_driven = any(p in offence for p in _N15_CONDUCT_DRIVEN_PATTERNS)
+        if is_tariff_sensitive and not is_conduct_driven:
+            return 1
+    return 0
+
+
+def _n15c_signal(criminal_record) -> int:
+    """
+    N15c — Tariff-sensitive sentence length.
+
+    Per Q6 (α): offence-conditional threshold approach using sentence_type
+    categorical field as proxy for sentence length.
+
+    §5.1.15 §7 threshold structure (from illustrative CPT):
+      Tariff-sensitive offences (Property/Drug):  > 1 year is concerning
+      Conduct-driven offences (Violent/Sexual):   > 3 years is concerning
+
+    Sentence type mapping (categorical proxy for length):
+      Federal custody (2+ years)        → > 2 years (always exceeds 1-year
+                                          threshold; sometimes exceeds 3-year)
+      Provincial custody (< 2 years)    → 0 days to ~24 months (ambiguous)
+      Conditional / probation / fine    → effectively 0 custody
+      Time served                       → variable, default short
+
+    Conservative implementation: only Federal custody triggers state 1
+    automatically. Counsel attestation overrides for cases where Provincial
+    custody exceeded the offence-conditional threshold (e.g., 18-month
+    sentence for property offence).
+
+    Returns: 0 (sentence below threshold) or 1 (long sentence, tariff-relevant)
+    """
+    if _any_conviction_attests("n15c_attestation"):
+        return 1
+    if not criminal_record:
+        return 0
+    for entry in criminal_record:
+        sent_type = entry.get("sentence_type", "") or ""
+        if "Federal custody" in sent_type:
+            # 2+ years exceeds the 1-year tariff-sensitive threshold automatically
+            return 1
+    return 0
+
+
+def _n15d_signal() -> int:
+    """
+    N15d — Jurisprudential compliance absent.
+
+    Per Q6 (α) + Q3 binary collapse: state 1 (doctrine absent) by default;
+    state 0 when counsel attests SCE/Tetrad applied at original sentencing.
+
+    Shares n14c_sce_applied_attestation. Doctrinal rationale: the same
+    sentencing event either applied Tetrad/SCE jurisprudence or did not.
+    Distinguishing temporal-application (N14c) from tariff-application (N15d)
+    is artificial — Gladue, Ewert, Morris, Ellis all bear on both dimensions
+    when applied. Single attestation captures both.
+
+    Per Q3 binary collapse: G+E (binding) and M+E (persuasive) both map to
+    state 0 — any jurisprudence applied = doctrine present. Only "None
+    applied" maps to state 1.
+
+    Returns: 0 (jurisprudence applied) or 1 (no jurisprudence applied)
+    """
+    if _any_conviction_attests("n14c_sce_applied"):
+        return 0
+    return 1
+
+
+def _compute_n15_evidence() -> dict:
+    """
+    Compute the §5.1.15 N15 sub-node evidence states for inference.
+
+    Returns dict mapping pgmpy node IDs ('15a', '15b', '15c', '15d') to
+    binary states. Suitable for passing as hard evidence to query_do_risk.
+
+    Note: N15 itself (the node) is NOT directly fed evidence here — its
+    posterior is computed by VE from the four sub-node states + N14 posterior
+    (per Q4 (α): N14→N15 structural edge at node level).
+    """
+    case_jur = st.session_state.get("case_jur", "") or ""
+    record = st.session_state.get("criminal_record", []) or []
+    return {
+        "15a": _n15a_signal(case_jur),
+        "15b": _n15b_signal(record),
+        "15c": _n15c_signal(record),
+        "15d": _n15d_signal(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §5.1.18 N18 sub-node signal computation
+#
+# Per JP confirmations Q1=β + Q7=α: per-conviction SCE-integration tags
+# (Full / Partial / Nominal / Absent) drive aggregate sub-node signals;
+# counsel attestations override pattern-matched defaults.
+#
+# Per-conviction tag semantics (Morris Heuristic Audit-aligned):
+#   Full     — SCE substantively integrated into reasons for sentence
+#   Partial  — SCE referenced and partially integrated
+#   Nominal  — SCE mentioned but not substantively engaged
+#   Absent   — SCE not mentioned (default — most conservative)
+#
+# Sub-node binary mapping:
+#   N18b (SCE Presence): "Full"/"Partial"/"Nominal" → 0; "Absent" → 1
+#   N18c (SCE Substance): "Full"/"Partial" → 0; "Nominal"/"Absent" → 1
+#   The N18b/N18c split preserves the Morris insight that nominal-only
+#   mention without substantive integration is a distinct failure mode
+#   from outright absence.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Per-conviction SCE-integration tag values (Q1=β)
+_N18_TAG_VALUES = ("Full", "Partial", "Nominal", "Absent")
+_N18_TAG_DEFAULT = "Absent"  # most conservative default
+
+# Tags that count as "SCE substantively present" for N18b
+_N18_PRESENT_TAGS = ("Full", "Partial", "Nominal")
+# Tags that count as "SCE substantively integrated" for N18c
+_N18_SUBSTANTIVE_TAGS = ("Full", "Partial")
+
+# Jurisdictions with strong provincial appellate SCE-integration scrutiny.
+# ON post-Morris (2021 ONCA 680), BC post-Ellis (2022 BCCA 278), and SCC
+# nationwide cases. All others default to inflation risk (state 1).
+_N18_SCE_INTEGRATED_JURISDICTIONS = (
+    "ontario", "on ", " on,", "(on)",  # Morris ONCA
+    "british columbia", "bc ", " bc,", "(bc)",  # Ellis BCCA
+    "supreme court of canada", "scc ", " scc,", "(scc)",  # SCC
+)
+
+
+def _n18a_signal(case_jur: str) -> int:
+    """
+    N18a — Jurisdiction SCE-integration sensitivity.
+
+    Per Q7 (α): tier-classify case_jur against jurisdictions with strong
+    provincial appellate SCE-integration scrutiny.
+    State 1 (inflation risk — no Morris/Ellis precedent) when:
+      - Counsel attestation present, OR
+      - case_jur does NOT contain any SCE-integrated jurisdiction marker
+
+    Returns: 0 (Morris/Ellis/SCC jurisdiction) or 1 (no strong precedent)
+    """
+    if st.session_state.get("n18a_counsel_attestation", False):
+        return 1
+    if not case_jur:
+        return 1  # no jurisdiction info → conservative inflation risk
+    case_lower = case_jur.lower()
+    sce_integrated = any(j in case_lower for j in _N18_SCE_INTEGRATED_JURISDICTIONS)
+    return 0 if sce_integrated else 1
+
+
+def _n18b_signal(criminal_record) -> int:
+    """
+    N18b — SCE Presence in Reasons (aggregate).
+
+    Per Q1 (β) + Q7 (α): aggregate over per-conviction sce_integration_tag.
+    State 1 (SCE absent in at least one conviction) when:
+      - Counsel attestation present, OR
+      - Any conviction has tag "Absent" (no SCE reference in reasons)
+
+    Returns: 0 (all convictions have at least nominal SCE presence)
+             1 (at least one conviction has SCE absent)
+    """
+    if _any_conviction_attests("n18b_attestation"):
+        return 1
+    if not criminal_record:
+        return 0  # empty record → no inflation signal
+    for entry in criminal_record:
+        tag = entry.get("sce_integration_tag", _N18_TAG_DEFAULT)
+        if tag not in _N18_PRESENT_TAGS:
+            return 1
+    return 0
+
+
+def _n18c_signal(criminal_record) -> int:
+    """
+    N18c — SCE Substance.
+
+    Per Q1 (β) + Q7 (α) + Morris Heuristic Audit: aggregate over
+    per-conviction sce_integration_tag. State 1 (substance absent) when:
+      - Counsel attestation present, OR
+      - Any conviction has tag "Nominal" or "Absent" (no substantive
+        integration even if mentioned)
+
+    This captures the Morris Audit insight that nominal Gladue mention
+    without substantive integration is the most common failure mode.
+
+    Returns: 0 (all convictions Full/Partial — substantive integration)
+             1 (at least one conviction Nominal or Absent)
+    """
+    if _any_conviction_attests("n18c_attestation"):
+        return 1
+    if not criminal_record:
+        return 0
+    for entry in criminal_record:
+        tag = entry.get("sce_integration_tag", _N18_TAG_DEFAULT)
+        if tag not in _N18_SUBSTANTIVE_TAGS:
+            return 1
+    return 0
+
+
+def _compute_n18_evidence() -> dict:
+    """
+    Compute the §5.1.18 N18 sub-node evidence states for inference.
+
+    Returns dict mapping pgmpy node IDs ('18a', '18b', '18c') to binary
+    states. Suitable for passing as hard evidence to query_do_risk.
+
+    Note: N18d (Doctrinal Tagging compliance) is NOT computed app-side —
+    it is a BN node with parent N10 (Misapplication). Its posterior is
+    computed by Variable Elimination from N10's evidence per Q5 (α).
+    N18 itself is also NOT fed evidence — its posterior comes from VE
+    over the six parents (N12, N14, 18a, 18b, 18c, 18d).
+    """
+    case_jur = st.session_state.get("case_jur", "") or ""
+    record = st.session_state.get("criminal_record", []) or []
+    return {
+        "18a": _n18a_signal(case_jur),
+        "18b": _n18b_signal(record),
+        "18c": _n18c_signal(record),
+        # 18d intentionally omitted — derived from N10 via BN inference
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §5.1.19 N19 collider-bias signal computation (Q6=α, app-side complement)
+#
+# Per JP confirmation Q6=α: pattern-detection helper independent of the BN
+# posterior. The BN posterior P(N19=High) is computed by Variable Elimination
+# from the (N14, N17) parents per §5.1.19 §6 illustrative CPT. This helper
+# adds an INDEPENDENT app-side signal that fires when both upstream variables
+# are jointly elevated above 0.60 — making the structural condition visible
+# without requiring the user to interpret the probabilistic posterior.
+#
+# Per §5.1.19 §1, this signal does not "add evidence" to inference. It
+# surfaces the structural condition under which the inference drawn from
+# the criminal record is subject to collider bias. The threshold of 0.60
+# is calibrated to the §6 illustrative CPT: at both parents = 0.60, the
+# joint adverse condition is well above the (Low, Low) baseline column
+# while still permitting the user to identify the elevated structural
+# condition before either parent reaches saturation.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Joint-elevation threshold for app-side collider signal
+_N19_JOINT_THRESHOLD = 0.60
+
+
+# ── §5.1.1 N1 burden-of-proof audit helpers (Mark 8) ─────────────────────────
+# See model.py § "N1 burden-of-proof audit" for full doctrinal architecture.
+# These app-side helpers manage audit-record lifecycle, derive per-conviction
+# audit IDs, and support the §RM.1 register on the Report tab.
+
+# Citation registry — surfaced in prompts and the §RM.1 register.
+N1_CITATIONS = {
+    "gardiner":  "R. v. Gardiner, [1982] 2 SCR 368",
+    "s724":      "Criminal Code, RSC 1985, c. C-46, s. 724(3)",
+    "ferguson":  "R. v. Ferguson, 2008 SCC 6",
+    "angelillo": "R. v. Angelillo, 2006 SCC 55",
+    "lacasse":   "R. v. Lacasse, 2015 SCC 64 (contextual; sentencing-stage proof)",
+}
+
+# Common attestation-basis options for the dropdown shortcuts.
+ATTESTATION_BASES = [
+    "— Select basis —",
+    "Admitted by accused",
+    "Proven at trial",
+    "Agreed in PSR",
+    "Judicial finding (Ferguson — necessarily implied by verdict)",
+    "Judicial finding (sentencing judge's own finding on trial record)",
+    "Uncontested in plea agreement",
+    "Other (specify in attestation text)",
+]
+
+
+def _conviction_audit_id(idx: int, year, offence: str) -> str:
+    """
+    Stable input ID for a conviction in the criminal_record list.
+    Format: "record_{idx}_{year}" — index disambiguates same-year entries.
+    Year-only suffix is robust to the chronological resort that happens on
+    every entry-add (the index repositions but the conviction's audit
+    record can be re-keyed via _sync_conviction_audit_ids if needed).
+    """
+    return f"record_{idx}_{year}"
+
+
+def _sync_conviction_audit_ids():
+    """
+    Reconcile session_state.n1_audit with current criminal_record.
+
+    Called after any add/remove/sort operation on criminal_record. Removes
+    audit records whose corresponding conviction no longer exists (orphan
+    cleanup) and re-keys surviving records to match the new indices after
+    chronological resort.
+
+    Each conviction stores its audit-id key under entry["audit_id"] so we
+    can track records across re-sorts. New convictions are assigned an
+    audit_id at creation if missing.
+    """
+    rec = st.session_state.get("criminal_record", []) or []
+    audit = st.session_state.get("n1_audit", {})
+
+    # Stage 1: ensure every conviction has an audit_id
+    for idx, entry in enumerate(rec):
+        if "audit_id" not in entry:
+            entry["audit_id"] = _conviction_audit_id(
+                idx, entry.get("year", 0), entry.get("offence", "")
+            )
+
+    # Stage 2: remove orphaned records (audit records with no matching
+    # conviction). Non-record audits (e.g. from other tabs) preserved.
+    live_ids = {e.get("audit_id") for e in rec if "audit_id" in e}
+    for key in list(audit.keys()):
+        if key.startswith("record_") and key not in live_ids:
+            audit.pop(key, None)
+
+    st.session_state.n1_audit = audit
+
+
+def _audit_record_for_conviction(entry: dict, idx: int) -> dict:
+    """
+    Build or retrieve the audit record for a conviction.
+
+    For prior convictions at present sentencing, the doctrinally relevant
+    audit is Crown-reliance per Angelillo: is the Crown relying on this
+    prior as aggravating context, and if so, has BARD been met for the
+    aggravating use? Mere existence of the conviction is res judicata —
+    not subject to fresh burden audit at present sentencing (subject to
+    the prior-evidence audit carve-out under R. v. Bird 2019 SCC 7,
+    which is a Mark 9 build item per JP scoping).
+
+    Default record (when conviction is first audited): provenance="judicial",
+    use="contextual" (i.e. Crown is NOT yet relying on it as aggravating).
+    The user toggles "Crown relies as aggravating" to flip use→aggravating
+    and trigger the BARD audit.
+    """
+    audit = st.session_state.setdefault("n1_audit", {})
+    aid = entry.get("audit_id")
+    if not aid:
+        aid = _conviction_audit_id(idx, entry.get("year", 0),
+                                   entry.get("offence", ""))
+        entry["audit_id"] = aid
+
+    if aid not in audit:
+        # Default: prior conviction not yet relied on as aggravating.
+        # use="contextual" means no audit triggered; user toggles to
+        # change to "aggravating" which triggers the BARD audit.
+        audit[aid] = {
+            "tab": "criminal_record",
+            "label": (f"{entry.get('year', '?')} — "
+                      f"{(entry.get('offence', '') or 'Unknown offence')[:60]}"),
+            "provenance": "judicial",
+            "use": "contextual",
+            "judicial_finding_type": None,
+            "applicable_burden": "none",
+            "attestation": "",
+            "attestation_status": "pending",
+            "citations": [N1_CITATIONS["angelillo"], N1_CITATIONS["gardiner"]],
+            # Prior-evidence audit placeholder — Mark 9 build item.
+            # Per JP lock-in: visible-but-inert. Render as "[awaiting
+            # implementation]" in the UI; does not affect N1 derivation.
+            "prior_evidence_audit_status": "not_yet_conducted",
+        }
+    return audit[aid]
+
+
+def _set_conviction_audit_use(aid: str, crown_relies_aggravating: bool):
+    """
+    Toggle a conviction's audit use between "contextual" (Crown not relying
+    as aggravating; no audit triggered) and "aggravating" (Crown relying as
+    aggravating; BARD audit triggered per Angelillo).
+
+    Provenance flips correspondingly: when Crown is relying, provenance
+    becomes "crown" (the Crown is now actively tendering this fact for
+    aggravating use). When not relying, provenance reverts to "judicial"
+    (the prior conviction is just historical record, not contested).
+    """
+    audit = st.session_state.get("n1_audit", {})
+    if aid not in audit:
+        return
+    if crown_relies_aggravating:
+        audit[aid]["provenance"] = "crown"
+        audit[aid]["use"] = "aggravating"
+        audit[aid]["applicable_burden"] = "BARD"
+    else:
+        audit[aid]["provenance"] = "judicial"
+        audit[aid]["use"] = "contextual"
+        audit[aid]["applicable_burden"] = "none"
+        # Clear pending attestation status when reverting — fresh audit
+        # if Crown re-asserts reliance later.
+        if audit[aid].get("attestation_status") == "pending":
+            audit[aid]["attestation"] = ""
+    st.session_state.n1_audit = audit
+
+
+def _audit_status_for_conviction(aid: str) -> tuple:
+    """
+    Return (icon, label, color) for a conviction's audit status indicator.
+    Used by the Criminal Record tab to render per-conviction audit chips.
+    """
+    audit = st.session_state.get("n1_audit", {})
+    rec = audit.get(aid)
+    if not rec:
+        return ("·", "Not audited", "#9E9E9E")
+    use = rec.get("use", "contextual")
+    if use in ("contextual", "agreed_fact"):
+        return ("·", "No audit required", "#9E9E9E")
+    status = rec.get("attestation_status", "pending")
+    if status == "satisfied":
+        return ("✓", "Burden attested", "#3B6D11")
+    if status == "insufficient":
+        return ("✗", "Burden insufficient", "#A32D2D")
+    return ("⚠", "Attestation pending", "#BA7517")
+
+
+# ── §5.1.1 Default-classification helpers (Mark 8 Phase 2) ─────────────────────
+# Pattern A defaults per tab. Each evidentiary input receives a default
+# classification at entry — the user only encounters the audit UI when
+# (a) the default is wrong for a specific input and they override, or
+# (b) strict mode is on and at-tab-exit review surfaces every classification
+# for explicit confirmation. See JP M8/P2 lock-in.
+
+# Tab-level default mapping. None means "no default — prompt the user."
+_TAB_DEFAULT_CLASSIFICATION = {
+    "intake":          None,  # always prompt (free-form fact entry)
+    "gladue":          {"provenance": "defence", "use": "mitigating"},
+    "sce":             {"provenance": "defence", "use": "mitigating"},
+    "risk_substantive": {"provenance": "crown",  "use": "aggravating"},  # N2/N3/N4
+    "risk_distortion":  {"provenance": "defence", "use": "mitigating"},  # N5–N8
+    "risk_mitigation":  {"provenance": "defence", "use": "mitigating"},  # N9 IGT
+    "risk_other":      None,  # N11/N13/N16 — prompt
+    "criminal_record": {"provenance": "judicial", "use": "contextual"},  # default
+    # Profile inputs are case-context parameters, not evidentiary claims —
+    # no audit applied at Profile level (per JP M8/P2 lock-in).
+}
+
+# Burden derivation from provenance × use (per Gardiner asymmetry).
+def _applicable_burden(provenance: str, use: str,
+                        judicial_finding_type: str = None) -> str:
+    """
+    Return the doctrinally applicable burden for an audit record.
+    See model.compute_n1_prior_from_audit for the full cross-product.
+    """
+    if provenance == "crown" and use == "aggravating":
+        return "BARD"
+    if provenance == "defence" and use == "mitigating":
+        return "BoP"
+    if provenance == "judicial" and judicial_finding_type == "found_by_sentencing_judge":
+        if use == "aggravating":
+            return "BARD"
+        if use == "mitigating":
+            return "BoP"
+    return "none"
+
+
+def _default_audit_record(tab: str, label: str,
+                          input_id: str = None,
+                          override_provenance: str = None,
+                          override_use: str = None) -> dict:
+    """
+    Build a default audit record for an evidentiary input.
+
+    tab: one of the keys in _TAB_DEFAULT_CLASSIFICATION
+    label: display description for the §RM.1 register
+    override_provenance/override_use: explicit values that override defaults
+
+    Returns a dict ready to insert into ss["n1_audit"].
+    """
+    defaults = _TAB_DEFAULT_CLASSIFICATION.get(tab) or {}
+    provenance = override_provenance or defaults.get("provenance") or "unspecified"
+    use = override_use or defaults.get("use") or "unspecified"
+    burden = _applicable_burden(provenance, use)
+
+    # Initial status: if both provenance and use have defaults (and aren't
+    # "unspecified"), seed as "pending" so the user can attest. If anything
+    # is unspecified (Pattern A no-default tabs), keep as "pending" but the
+    # UI flags it as "needs classification" rather than "needs attestation."
+    citations = [N1_CITATIONS["gardiner"], N1_CITATIONS["s724"]]
+    if tab == "criminal_record":
+        citations.append(N1_CITATIONS["angelillo"])
+
+    return {
+        "tab": tab,
+        "label": label,
+        "provenance": provenance,
+        "use": use,
+        "judicial_finding_type": None,
+        "applicable_burden": burden,
+        "attestation": "",
+        "attestation_basis": ATTESTATION_BASES[0],
+        "attestation_status": "pending",
+        "citations": citations,
+        "is_default_classified": True,  # flag for UI: classification came from defaults
+    }
+
+
+def _ensure_audit_record(input_id: str, tab: str, label: str,
+                          provenance: str = None, use: str = None) -> dict:
+    """
+    Get or create the audit record for an arbitrary evidentiary input.
+
+    Used by per-tab integration code (Intake / Gladue / SCE / Risk &
+    Distortions). For Criminal Record, see _audit_record_for_conviction.
+    """
+    audit = st.session_state.setdefault("n1_audit", {})
+    if input_id not in audit:
+        audit[input_id] = _default_audit_record(
+            tab, label,
+            input_id=input_id,
+            override_provenance=provenance,
+            override_use=use,
+        )
+    return audit[input_id]
+
+
+def _remove_audit_record(input_id: str):
+    """Remove an audit record (called when an input is deleted/unselected)."""
+    audit = st.session_state.get("n1_audit", {})
+    audit.pop(input_id, None)
+    st.session_state.n1_audit = audit
+
+
+def _classification_chip(audit_rec: dict) -> str:
+    """
+    Build an HTML chip showing an audit record's classification state.
+
+    Chip format: [provenance · use · burden] [status icon]
+    Pattern (b) per JP lock-in: visible classification on every input so
+    override is easy. Strict mode triggers tab-exit review where these
+    chips become editable for bulk reclassification.
+    """
+    provenance = audit_rec.get("provenance", "unspecified")
+    use = audit_rec.get("use", "unspecified")
+    burden = audit_rec.get("applicable_burden", "none")
+    status = audit_rec.get("attestation_status", "pending")
+
+    if use in ("contextual", "agreed_fact") or burden == "none":
+        # No audit triggered — display as informational only
+        return (
+            "<span style='display:inline-block;font-family:JetBrains Mono,monospace;"
+            "font-size:0.68rem;color:#9E9E9E;background:#F5F4F0;border:1px solid "
+            "#E5E2DA;border-radius:3px;padding:2px 6px;margin-left:6px'>"
+            f"{provenance} · {use}</span>"
+        )
+
+    # Status colours
+    if status == "satisfied":
+        bg, fg, border = "#F4F8EE", "#3B6D11", "#C5D7AC"
+        icon = "✓"
+    elif status == "insufficient":
+        bg, fg, border = "#FCEBEB", "#A32D2D", "#E5B5B5"
+        icon = "✗"
+    else:
+        bg, fg, border = "#FAEEDA", "#7A4F0E", "#E5CC95"
+        icon = "⚠"
+
+    return (
+        "<span style='display:inline-block;font-family:JetBrains Mono,monospace;"
+        f"font-size:0.68rem;color:{fg};background:{bg};border:1px solid {border};"
+        "border-radius:3px;padding:2px 6px;margin-left:6px;font-weight:500'>"
+        f"{icon} {provenance} · {use} · {burden}</span>"
+    )
+
+
+# ── Per-conviction attestation aggregators (Mark 8 Phase 2) ───────────────
+# After moving N14/N15/N18 attestations from Profile to per-conviction on
+# Criminal Record, the signal-computation helpers (_compute_n14_evidence
+# etc.) need to read aggregated values rather than single case-level flags.
+# Per JP "any-prior" aggregation rule (M8/P2): aggregate fires if any one
+# conviction has the per-conviction attestation set.
+
+def _any_conviction_attests(field: str) -> bool:
+    """
+    "Any-prior" aggregation: True iff any conviction in criminal_record
+    has the named attestation field set to True.
+
+    Used by _compute_n14_evidence / _compute_n15_evidence /
+    _compute_n18_evidence to derive aggregate audit signals from per-
+    conviction attestations after the Profile-to-Criminal-Record
+    relocation. See JP M8/P2 lock-in.
+    """
+    rec = st.session_state.get("criminal_record", []) or []
+    return any(e.get(field, False) for e in rec)
+
+
+def _strict_mode_review_panel(tab_filter: str = None):
+    """
+    Strict-mode at-tab-exit review (Mark 8 Phase 2 — Pattern B trigger).
+
+    When st.session_state.strict_mode is True, render an at-tab-exit review
+    panel listing audited inputs originating from the named tab (or all tabs
+    if tab_filter is None) and surfacing pending attestations or unspecified
+    classifications. The user can confirm or override classifications in
+    bulk before moving on.
+
+    Per JP M8/P2 lock-in (Pattern A defaults + strict mode triggering Pattern
+    B at-tab-exit review): in standard mode this panel is a no-op (defaults
+    are trusted, attestations can be deferred to Report-tab review). In
+    strict mode, surfaces every classification for explicit confirmation.
+
+    tab_filter: tab key to filter by ("intake", "gladue", "sce",
+    "criminal_record", "risk_*", etc.). None = show all.
+    """
+    if not st.session_state.get("strict_mode", False):
+        return  # Not in strict mode; standard Pattern A behaviour applies.
+
+    audit = st.session_state.get("n1_audit", {})
+    if not audit:
+        return
+
+    # Filter records by tab if requested
+    if tab_filter:
+        records = {aid: r for aid, r in audit.items()
+                   if r.get("tab", "").startswith(tab_filter)}
+    else:
+        records = audit
+
+    if not records:
+        return
+
+    # Identify records needing review: pending attestations OR
+    # unspecified classifications.
+    needs_review = []
+    for aid, r in records.items():
+        use = r.get("use", "unspecified")
+        status = r.get("attestation_status", "pending")
+        if use == "unspecified" or r.get("provenance") == "unspecified":
+            needs_review.append((aid, r, "needs_classification"))
+        elif use not in ("contextual", "agreed_fact") and status != "satisfied":
+            needs_review.append((aid, r, "needs_attestation"))
+
+    if not needs_review:
+        return  # Strict mode on but nothing to review on this tab.
+
+    with st.expander(
+        f"⚖ Strict-mode review — {len(needs_review)} input(s) "
+        f"awaiting classification or attestation",
+        expanded=True,
+    ):
+        st.markdown(
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#5A5A5A;margin-bottom:14px;line-height:1.55'>"
+            "Strict mode is active. Per <em>R. v. Gardiner</em>, [1982] 2 SCR 368 + "
+            "s. 724(3) <em>Criminal Code</em>, each input listed below requires "
+            "explicit classification (provenance + use) and attestation before "
+            "this case file is complete for adversarial handoff. The default "
+            "classification per Pattern A is shown; override below where the "
+            "default is wrong."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        for aid, r, reason in needs_review:
+            label = r.get("label", aid)
+            default_chip = _classification_chip(r)
+            st.markdown(
+                f"<div style='font-size:0.88rem;margin:8px 0 4px 0'>"
+                f"<strong>{label}</strong>{default_chip}</div>",
+                unsafe_allow_html=True,
+            )
+            if reason == "needs_classification":
+                st.caption(
+                    "⚠ Provenance and/or use are unspecified — this input "
+                    "is in a no-default tab. Open the Report tab §RM.1 "
+                    "register to classify and attest."
+                )
+            else:
+                st.caption(
+                    "⚠ Attestation pending. Open the Report tab §RM.1 "
+                    "register to record the basis on which the burden was met."
+                )
+
+
+def _n19_collider_signal(posteriors: dict) -> dict:
+    """
+    §5.1.19 N19 — App-side collider-bias signal.
+
+    Returns a dict describing the structural collider condition independent
+    of the BN posterior. The BN posterior on N19 is computed by VE; this
+    helper provides a complementary pattern-detection check.
+
+    Returns:
+      {
+        "active": bool,       # both N14 and N17 ≥ threshold
+        "n14": float,         # N14 posterior
+        "n17": float,         # N17 posterior
+        "n19_post": float,    # N19 posterior from BN (for downstream use)
+        "threshold": float,   # _N19_JOINT_THRESHOLD
+      }
+    """
+    n14 = float(posteriors.get(14, 0.5))
+    n17 = float(posteriors.get(17, 0.5))
+    n19_post = float(posteriors.get(19, 0.30))
+    active = (n14 >= _N19_JOINT_THRESHOLD) and (n17 >= _N19_JOINT_THRESHOLD)
+    return {
+        "active": active,
+        "n14": n14,
+        "n17": n17,
+        "n19_post": n19_post,
+        "threshold": _N19_JOINT_THRESHOLD,
+    }
+
+
 # ── Inference ─────────────────────────────────────────────────────────────────
 def run_inf():
     from model import compute_do_risk
@@ -954,7 +2096,74 @@ def run_inf():
         if prob>=0.85 or prob<=0.15:  # Only very certain manual overrides
             hard_ev[str(nid)]=1 if prob>=0.5 else 0
     hard_ev.pop("20",None)
-    post=query_do_risk(st.session_state.engine, hard_ev)
+
+    # §5.1.17 N17 sub-node evidence — feed N17a/N17b/N17c/N17d states to VE
+    # so that N17's posterior is computed against §5.1.17 §7 illustrative CPT.
+    # Computed from session state via the four signal helpers above.
+    # Manual overrides (st.session_state.manual_ev) take precedence if present.
+    n17_ev = _compute_n17_evidence()
+    for sub_nid, state in n17_ev.items():
+        if sub_nid not in hard_ev:
+            hard_ev[sub_nid] = state
+
+    # §5.1.14 N14 sub-node evidence — feed N14a/N14b/N14c states to VE so that
+    # N14's posterior is computed against §5.1.14 §7 illustrative CPT.
+    # N14d is NOT fed here — it's a BN node with parent N10 per Q3 routing.
+    n14_ev = _compute_n14_evidence()
+    for sub_nid, state in n14_ev.items():
+        if sub_nid not in hard_ev:
+            hard_ev[sub_nid] = state
+
+    # §5.1.15 N15 sub-node evidence — feed N15a/b/c/d states to VE so that
+    # N15's posterior is computed against §5.1.15 §7 illustrative CPT.
+    # N15 itself is NOT fed — it's downstream of N14 and the four sub-nodes
+    # via the 5-parent structural edge per Q4 (α).
+    n15_ev = _compute_n15_evidence()
+    for sub_nid, state in n15_ev.items():
+        if sub_nid not in hard_ev:
+            hard_ev[sub_nid] = state
+
+    # §5.1.18 N18 sub-node evidence — feed N18a/b/c states to VE so that
+    # N18's posterior is computed against §5.1.18 §7 illustrative CPT.
+    # N18d is NOT fed (BN-derived from N10 per Q5 (α)); N18 itself is NOT
+    # fed — its posterior comes from VE over the 6-parent structure
+    # (N12 + N14 + 18a/b/c/d).
+    n18_ev = _compute_n18_evidence()
+    for sub_nid, state in n18_ev.items():
+        if sub_nid not in hard_ev:
+            hard_ev[sub_nid] = state
+
+    # ── §5.1.1 N1 burden-of-proof audit target (Mark 8) ───────────────────
+    # Compute audit-derived target P(N1=High) from session_state.n1_audit
+    # and pass to query_do_risk. The audit-derived value propagates
+    # structurally through VE to N1's children (N2, N3, N4, N6, N8) — not
+    # just displayed cosmetically. Returns None when audit-state is empty
+    # or contains no inputs requiring a burden audit, in which case N1
+    # falls back to its static prior [[0.17],[0.83]].
+    # See model.py § "N1 burden-of-proof audit" for doctrinal architecture.
+    n1_audit_target = compute_n1_prior_from_audit(
+        st.session_state.get("n1_audit", {})
+    )
+    # Only pass target when it differs meaningfully from the default prior
+    # (avoid unnecessary virtual-evidence overhead when audit is inactive).
+    from model import _N1_DEFAULT_POSTERIOR as _N1_DEF
+    if abs(n1_audit_target - _N1_DEF) < 0.001:
+        n1_audit_target = None
+
+    post=query_do_risk(st.session_state.engine, hard_ev,
+                       n1_audit_target=n1_audit_target)
+
+    # ── §5.1.19 N19 collider-bias secondary computation (Q4=C) ─────────────
+    # Per §5.1.19 §1, the headline DO posterior in post[20] is unchanged.
+    # Per §5.1.19 §8, a secondary collider-discounted risk is computed for
+    # contingent display when the collider structure is active. The
+    # discount is multiplicative on the final risk, scaled to N19's
+    # posterior — see model.py compute_do_risk(collider_discount=True).
+    from model import compute_do_risk as _cdr  # local import for the kwarg path
+    _collider_signal = _n19_collider_signal(post)
+    _discounted = _cdr(post, collider_discount=True)
+    st.session_state["n19_collider_signal"] = _collider_signal
+    st.session_state["n19_discounted_risk"] = float(_discounted)
 
     # Step 2: Apply profile evidence as direct continuous posterior values
     # Profile_ev represents the case-specific probability for each node —
@@ -1002,9 +2211,12 @@ def _sync_profile_from_widgets():
     # header DO chip to show ~31.5% before snapping to ~24.9% on widget population.
     viol   = ss.get("viol", "None")
     fasd   = ss.get("fasd", "None / not assessed")
-    sub    = ss.get("sub", "None / in remission")
-    peers  = ss.get("peers", "None identified")
-    stab   = ss.get("stab", "Stable")
+    # NOTE: sub/peers/stab widgets retained on Profile tab UI but no longer
+    # read here — their stale-taxonomy mapping to pev[18] (BUG 1, Mark 8)
+    # was clobbering the BN-computed N18 (SCE Profile audit) posterior.
+    # Awaiting doctrinal-mapping review per CH5 canonical taxonomy before
+    # rewiring these inputs (likely candidates: folded into N9/IGT or N18
+    # sub-node signals; see handoff brief Mark 8 § BUG 1).
     det    = ss.get("det", 60)
     counsel= ss.get("counsel", "Adequate")
     gr     = ss.get("gr", "Yes — full report before court")
@@ -1034,13 +2246,14 @@ def _sync_profile_from_widgets():
     pev[14]={"No evidence":.15,"Some — marginal":.50,"Strong — documented over-surveillance":.85}.get(pol,.50)
     pev[15]=.85 if age>=55 else .70 if age>=45 else .40 if age>=35 else .20
     pev[16]={"Low DO designation rate":.20,"Medium rate":.45,"High DO designation rate":.72}.get(prov,.45)
-    sv ={"None / in remission":.15,"Low":.35,"Moderate":.60,"High — dependency":.80}.get(sub,.60)
-    pv ={"None identified":.10,"Some — limited":.35,"Strong — primary network":.65}.get(peers,.35)
-    stv={"Stable":.10,"Marginal":.40,"Unstable / homeless":.70}.get(stab,.40)
-    pev[18]=float(np.clip((sv+pv+stv)/3+.05,.05,.92))
-    rv ={"Strong — consistent":.10,"Moderate":.35,"Minimal":.60,"None — apparent refusal":.80,
-         "Anomalously positive (gaming risk)":.30}.get(rehab,.60)
-    pev[19]=float(np.clip(rv+(.12 if prog=="No culturally appropriate programming" else 0),.05,.90))
+    # BUG 1 FIX (Mark 8): stale-taxonomy override of pev[18] (substance/peer/
+    # stability composite) and pev[19] (rehab+programming composite) deleted.
+    # Under CH5 canonical taxonomy, N18 = SCE Profile audit (Gladue/Ewert/
+    # Morris/Ellis) and N19 = Collider Bias — neither is computed from these
+    # widget inputs. The override loop at ~L1710 was silently clobbering the
+    # BN-computed posteriors for both nodes before display, invalidating the
+    # §5.1.18 §7 Morris audit anchors and §5.1.19 §6 collider mechanism.
+    # Awaiting doctrinal-mapping review for substance/peer/stability inputs.
     # Also sync Gladue and SCE checked sets from checkbox keys
     gl_checked = {f["id"] for f in GF if ss.get(f"gl_{f['id']}", False)}
     sce_checked = {f["id"] for f in SF if ss.get(f"sce_{f['id']}", False)}
@@ -1121,7 +2334,27 @@ NP={1:(.50,.92),2:(.12,.73),3:(.50,.73),4:(.88,.73),
     5:(.07,.55),6:(.23,.55),9:(.40,.55),13:(.57,.55),15:(.73,.55),
     7:(.07,.38),10:(.23,.38),11:(.40,.38),14:(.57,.38),17:(.73,.38),
     8:(.07,.20),12:(.23,.20),16:(.40,.20),18:(.57,.20),19:(.73,.20),
-    20:(.50,.03)}
+    20:(.50,.03),
+    # ── §5.1.17 sub-nodes (cluster around N17) ──
+    "17a":(.66,.46),  # between N13 and N17 — receives N13→17a edge
+    "17b":(.85,.50),  # above-right of N17
+    "17c":(.85,.42),  # right of N17
+    "17d":(.93,.42),  # far-right of N17
+    # ── §5.1.14 sub-nodes (cluster around N14) ──
+    "14a":(.50,.46),  # above-left of N14 — receives N13→14a edge
+    "14b":(.49,.32),  # below-left of N14 (root evidence)
+    "14c":(.57,.30),  # below N14 (root evidence)
+    "14d":(.36,.32),  # left of N14 — receives N10→14d edge
+    # ── §5.1.15 sub-nodes (cluster around N15 at (.73,.55)) ──
+    "15a":(.66,.62),  # above-left of N15 — receives N13→15a edge
+    "15b":(.78,.65),  # above-right of N15 (root evidence)
+    "15c":(.85,.60),  # right of N15 (root evidence)
+    "15d":(.85,.52),  # below-right of N15 (shared n14c attestation)
+    # ── §5.1.18 sub-nodes (cluster around N18 at (.57,.20)) ──
+    "18a":(.50,.26),  # above-left of N18 — receives N13→18a edge (long)
+    "18b":(.50,.14),  # below-left of N18 (root evidence — driven by per-conv tags)
+    "18c":(.58,.12),  # below N18 (root evidence — driven by per-conv tags)
+    "18d":(.66,.26)}  # above-right of N18 — receives N10→18d edge
 
 def draw_dag(post,sel=None):
     fig,ax=plt.subplots(figsize=(13,9),facecolor='#fafafa')
@@ -1137,18 +2370,36 @@ def draw_dag(post,sel=None):
         ax.annotate("",xy=(x2,y2),xytext=(x1,y1),
             arrowprops=dict(arrowstyle="-|>",color='#888' if hi else '#ccc',lw=1.2 if hi else .6,
             connectionstyle="arc3,rad=0.05"))
-    NR={1:.055,20:.055}
+    NR={1:.055,20:.055,
+        # §5.1.17 sub-nodes — smaller radius for visual hierarchy
+        "17a":.025, "17b":.025, "17c":.025, "17d":.025,
+        # §5.1.14 sub-nodes — same smaller radius
+        "14a":.025, "14b":.025, "14c":.025, "14d":.025,
+        # §5.1.15 sub-nodes — same smaller radius
+        "15a":.025, "15b":.025, "15c":.025, "15d":.025,
+        # §5.1.18 sub-nodes — same smaller radius
+        "18a":.025, "18b":.025, "18c":.025, "18d":.025}
     for nid,(x,y) in NP.items():
         m=NODE_META[nid];col=TC[m["type"]];p=post.get(nid,.5);iS=sel==nid
         r=NR.get(nid,.040)
         ax.add_patch(plt.Circle((x,y),r,color=col if iS else col+'28',ec=col,lw=2 if iS else 1,zorder=3))
         th=np.linspace(-np.pi/2,-np.pi/2+2*np.pi*p,60)
         ax.plot(x+(r+.010)*np.cos(th),y+(r+.010)*np.sin(th),color=col,lw=2.5,alpha=.85,zorder=4)
-        ax.text(x,y,str(nid),ha='center',va='center',fontsize=8 if nid<10 else 7,
+        # Font size: 8 for single-digit ints, 7 for double-digit, 5.5 for sub-nodes
+        if isinstance(nid, str):
+            _fs = 5.5
+        else:
+            _fs = 8 if nid < 10 else 7
+        ax.text(x,y,str(nid),ha='center',va='center',fontsize=_fs,
                 fontweight='bold',color='white' if iS else col,zorder=5)
         lbl=m["short"][:14]+("…" if len(m["short"])>14 else "")
-        ax.text(x,y-r-.025,lbl,ha='center',va='top',fontsize=6.5,color='#555',zorder=5)
-        ax.text(x,y-r-.050,f'{p*100:.0f}%',ha='center',va='top',fontsize=6,color=col,fontweight='bold',zorder=5,alpha=.8)
+        # Sub-nodes use tighter label spacing and slightly smaller text
+        if isinstance(nid, str):
+            ax.text(x,y-r-.018,lbl,ha='center',va='top',fontsize=5.5,color='#555',zorder=5)
+            ax.text(x,y-r-.034,f'{p*100:.0f}%',ha='center',va='top',fontsize=5,color=col,fontweight='bold',zorder=5,alpha=.8)
+        else:
+            ax.text(x,y-r-.025,lbl,ha='center',va='top',fontsize=6.5,color='#555',zorder=5)
+            ax.text(x,y-r-.050,f'{p*100:.0f}%',ha='center',va='top',fontsize=6,color=col,fontweight='bold',zorder=5,alpha=.8)
     handles=[plt.Line2D([0],[0],marker='o',color='w',markerfacecolor=c,markeredgecolor=c,
              markersize=8,label=TL[t]) for t,c in TC.items()]
     ax.legend(handles=handles,loc='upper right',fontsize=7.5,framealpha=.92,edgecolor='#ddd')
@@ -1627,6 +2878,460 @@ with TABS[0]:
         else:
             st.caption("No decreasing-side drivers above threshold.")
 
+    # ── Zone 2.5: §5.1.17 N17 audit signal breakdown (if active) ────────────
+    # Surfaces the four-parent contributions when N17 is materially active.
+    # N17 is "active" when its posterior is above its baseline default (~10%)
+    # OR when any of the four sub-nodes signals High. This panel renders only
+    # when there is something meaningful to display — for clean records with
+    # no §5.1.17 signals, the panel stays hidden to avoid clutter.
+    _n17_post = float(P.get(17, 0.10))
+    _n17a_post = float(P.get("17a", 0.0))
+    _n17b_post = float(P.get("17b", 0.0))
+    _n17c_post = float(P.get("17c", 0.0))
+    _n17d_post = float(P.get("17d", 0.0))
+    _n17_active = (_n17_post > 0.20) or any(
+        v >= 0.50 for v in (_n17a_post, _n17b_post, _n17c_post, _n17d_post)
+    )
+    if _n17_active and not _empty:
+        st.markdown(
+            "<div style='margin-top:24px;font-size:0.92rem;font-weight:500;"
+            "font-family:DM Sans, sans-serif;color:#1A1A1A;letter-spacing:-0.005em'>"
+            "§5.1.17 audit signal — four-parent breakdown</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Per Chapter 5 §5.1.17 §4, N17 (over-policing & epistemic "
+            "contamination) has four parent inputs. This panel surfaces the "
+            "current state of each contribution. N17 high → record reliability "
+            "falls per §5.1.17 §6."
+        )
+
+        _n17_color = "#185FA5"  # distortion blue per TC palette
+        # Four sub-node tiles in a horizontal grid
+        _sub_nodes = [
+            ("17a", "Jurisdictional disparity", _n17a_post,
+             "Index per case jurisdiction · §5.1.17 §4 row 1"),
+            ("17b", "Enforcement-disparity engagement", _n17b_post,
+             "OR-gate over Gladue/SCE evidence · §5.1.17 §4 row 2"),
+            ("17c", "Non-violent charge density", _n17c_post,
+             "Pattern-matched from record · §5.1.17 §4 row 3"),
+            ("17d", "Surveillance-triggered entries", _n17d_post,
+             "Pattern-matched from record · §5.1.17 §4 row 4"),
+        ]
+        _tile_cols = st.columns(4)
+        for _col, (_sid, _name, _p, _desc) in zip(_tile_cols, _sub_nodes):
+            with _col:
+                _state_label = "High" if _p >= 0.50 else "Low"
+                _state_color = "#A32D2D" if _p >= 0.50 else "#9E9E9E"
+                _bg_color = "#FAEEDA" if _p >= 0.50 else "#FBFAF7"
+                _border_color = "#E5CC95" if _p >= 0.50 else "#E0DDD6"
+                st.markdown(
+                    f"<div style='background:{_bg_color};border:1px solid {_border_color};"
+                    f"border-radius:8px;padding:10px 12px;height:100%;min-height:120px'>"
+                    f"<div style='display:flex;align-items:baseline;justify-content:space-between;"
+                    f"margin-bottom:6px'>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+                    f"font-weight:600;color:{_n17_color};background:{_n17_color}18;"
+                    f"padding:2px 6px;border-radius:4px'>N{_sid}</span>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                    f"font-weight:600;color:{_state_color}'>{_state_label}</span>"
+                    f"</div>"
+                    f"<div style='font-size:0.78rem;font-weight:500;color:#1A1A1A;"
+                    f"line-height:1.35;margin-bottom:6px'>{_name}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1rem;"
+                    f"font-weight:600;color:{_n17_color}'>{_p*100:.1f}%</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.7rem;color:#888;margin-top:4px;line-height:1.4'>{_desc}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Aggregate N17 row beneath the four tiles
+        _n17_color_top = "#A32D2D" if _n17_post >= 0.50 else "#185FA5"
+        st.markdown(
+            f"<div style='margin-top:10px;padding:10px 14px;background:#F6F4F0;"
+            f"border:1px solid #E5E0D8;border-radius:8px;"
+            f"display:flex;justify-content:space-between;align-items:center'>"
+            f"<div>"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+            f"font-weight:600;color:{_n17_color};background:{_n17_color}18;"
+            f"padding:2px 6px;border-radius:4px;margin-right:8px'>N17</span>"
+            f"<span style='font-size:0.86rem;font-weight:500;color:#1A1A1A'>"
+            f"Over-policing & epistemic contamination</span>"
+            f"</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:{_n17_color_top}'>{_n17_post*100:.1f}%</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Zone 2.6: §5.1.14 N14 audit signal breakdown (if active) ─────────
+    # Same conditional-render pattern as N17 — only appears when N14 is materially
+    # active (posterior > 25% or any sub-node ≥ 50%). N14's baseline default is
+    # ~23% so threshold is set slightly above that to filter floor noise.
+    _n14_post = float(P.get(14, 0.23))
+    _n14a_post = float(P.get("14a", 0.0))
+    _n14b_post = float(P.get("14b", 0.0))
+    _n14c_post = float(P.get("14c", 0.0))
+    _n14d_post = float(P.get("14d", 0.0))
+    _n14_active = (_n14_post > 0.25) or any(
+        v >= 0.50 for v in (_n14a_post, _n14b_post, _n14c_post, _n14d_post)
+    )
+    if _n14_active and not _empty:
+        st.markdown(
+            "<div style='margin-top:24px;font-size:0.92rem;font-weight:500;"
+            "font-family:DM Sans, sans-serif;color:#1A1A1A;letter-spacing:-0.005em'>"
+            "§5.1.14 audit signal — four-parent breakdown</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Per Chapter 5 §5.1.14 §5, N14 (temporal distortion in prior records) "
+            "has four parent inputs that condition how production-era factors "
+            "compromise record reliability. N14 high → record reliability falls "
+            "per §5.1.14 §6."
+        )
+
+        _n14_color = "#185FA5"  # distortion blue per TC palette
+        _sub_nodes = [
+            ("14a", "Sentencing era severity", _n14a_post,
+             "Year-derived (2008–2015) · §5.1.14 §5 row 1"),
+            ("14b", "Historical mandatory minimum", _n14b_post,
+             "Pattern-matched offence + year · §5.1.14 §5 row 2"),
+            ("14c", "SCE absent at sentencing", _n14c_post,
+             "Pre-Ipeelee year heuristic · §5.1.14 §5 row 3"),
+            ("14d", "Judicial competence absent", _n14d_post,
+             "BN-derived from N10 · §5.1.14 §5 row 4"),
+        ]
+        _tile_cols = st.columns(4)
+        for _col, (_sid, _name, _p, _desc) in zip(_tile_cols, _sub_nodes):
+            with _col:
+                _state_label = "High" if _p >= 0.50 else "Low"
+                _state_color = "#A32D2D" if _p >= 0.50 else "#9E9E9E"
+                _bg_color = "#FAEEDA" if _p >= 0.50 else "#FBFAF7"
+                _border_color = "#E5CC95" if _p >= 0.50 else "#E0DDD6"
+                st.markdown(
+                    f"<div style='background:{_bg_color};border:1px solid {_border_color};"
+                    f"border-radius:8px;padding:10px 12px;height:100%;min-height:120px'>"
+                    f"<div style='display:flex;align-items:baseline;justify-content:space-between;"
+                    f"margin-bottom:6px'>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+                    f"font-weight:600;color:{_n14_color};background:{_n14_color}18;"
+                    f"padding:2px 6px;border-radius:4px'>N{_sid}</span>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                    f"font-weight:600;color:{_state_color}'>{_state_label}</span>"
+                    f"</div>"
+                    f"<div style='font-size:0.78rem;font-weight:500;color:#1A1A1A;"
+                    f"line-height:1.35;margin-bottom:6px'>{_name}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1rem;"
+                    f"font-weight:600;color:{_n14_color}'>{_p*100:.1f}%</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.7rem;color:#888;margin-top:4px;line-height:1.4'>{_desc}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Aggregate N14 row beneath the four tiles
+        _n14_color_top = "#A32D2D" if _n14_post >= 0.50 else "#185FA5"
+        st.markdown(
+            f"<div style='margin-top:10px;padding:10px 14px;background:#F6F4F0;"
+            f"border:1px solid #E5E0D8;border-radius:8px;"
+            f"display:flex;justify-content:space-between;align-items:center'>"
+            f"<div>"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+            f"font-weight:600;color:{_n14_color};background:{_n14_color}18;"
+            f"padding:2px 6px;border-radius:4px;margin-right:8px'>N14</span>"
+            f"<span style='font-size:0.86rem;font-weight:500;color:#1A1A1A'>"
+            f"Temporal distortion in prior records</span>"
+            f"</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:{_n14_color_top}'>{_n14_post*100:.1f}%</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Zone 2.7: §5.1.15 N15 audit signal breakdown (if active) ─────────
+    # Conditional render: appears when N15 is materially active (posterior >
+    # 25% or any sub-node ≥ 50%). N15 baseline default ~17% so threshold is
+    # set at 25% to filter floor noise.
+    _n15_post = float(P.get(15, 0.17))
+    _n15a_post = float(P.get("15a", 0.0))
+    _n15b_post = float(P.get("15b", 0.0))
+    _n15c_post = float(P.get("15c", 0.0))
+    _n15d_post = float(P.get("15d", 0.0))
+    _n15_active = (_n15_post > 0.25) or any(
+        v >= 0.50 for v in (_n15a_post, _n15b_post, _n15c_post, _n15d_post)
+    )
+    if _n15_active and not _empty:
+        st.markdown(
+            "<div style='margin-top:24px;font-size:0.92rem;font-weight:500;"
+            "font-family:DM Sans, sans-serif;color:#1A1A1A;letter-spacing:-0.005em'>"
+            "§5.1.15 audit signal — four-sub-node breakdown</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Per Chapter 5 §5.1.15 §5, N15 (interjurisdictional tariff distortion) "
+            "has four sub-node parents conditioning how regional sentencing norms "
+            "produce non-comparable record artifacts. N15 also receives N14 as a "
+            "structural parent per §5.1.15 §Position — temporal and tariff "
+            "distortions compound when both are present. N15 operates as a "
+            "calibration / interpretive distortion (per Q5 (α)) rather than a "
+            "production-condition reliability degrader — distinct mechanism from "
+            "N14 and N17."
+        )
+
+        _n15_color = "#185FA5"  # distortion blue per TC palette
+        _sub_nodes = [
+            ("15a", "Tariff jurisdiction disparity", _n15a_post,
+             "case_jur tier-classified · §5.1.15 §5 row 1"),
+            ("15b", "Tariff-sensitive offence", _n15b_post,
+             "Offence-text pattern · §5.1.15 §5 row 2"),
+            ("15c", "Tariff-sensitive sentence length", _n15c_post,
+             "Sentence-type heuristic · §5.1.15 §5 row 3"),
+            ("15d", "Doctrine absent", _n15d_post,
+             "Shared n14c attestation · §5.1.15 §5 row 5"),
+        ]
+        _tile_cols = st.columns(4)
+        for _col, (_sid, _name, _p, _desc) in zip(_tile_cols, _sub_nodes):
+            with _col:
+                _state_label = "High" if _p >= 0.50 else "Low"
+                _state_color = "#A32D2D" if _p >= 0.50 else "#9E9E9E"
+                _bg_color = "#FAEEDA" if _p >= 0.50 else "#FBFAF7"
+                _border_color = "#E5CC95" if _p >= 0.50 else "#E0DDD6"
+                st.markdown(
+                    f"<div style='background:{_bg_color};border:1px solid {_border_color};"
+                    f"border-radius:8px;padding:10px 12px;height:100%;min-height:120px'>"
+                    f"<div style='display:flex;align-items:baseline;justify-content:space-between;"
+                    f"margin-bottom:6px'>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+                    f"font-weight:600;color:{_n15_color};background:{_n15_color}18;"
+                    f"padding:2px 6px;border-radius:4px'>N{_sid}</span>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                    f"font-weight:600;color:{_state_color}'>{_state_label}</span>"
+                    f"</div>"
+                    f"<div style='font-size:0.78rem;font-weight:500;color:#1A1A1A;"
+                    f"line-height:1.35;margin-bottom:6px'>{_name}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1rem;"
+                    f"font-weight:600;color:{_n15_color}'>{_p*100:.1f}%</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.7rem;color:#888;margin-top:4px;line-height:1.4'>{_desc}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Aggregate N15 row beneath the four tiles
+        _n15_color_top = "#A32D2D" if _n15_post >= 0.50 else "#185FA5"
+        st.markdown(
+            f"<div style='margin-top:10px;padding:10px 14px;background:#F6F4F0;"
+            f"border:1px solid #E5E0D8;border-radius:8px;"
+            f"display:flex;justify-content:space-between;align-items:center'>"
+            f"<div>"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+            f"font-weight:600;color:{_n15_color};background:{_n15_color}18;"
+            f"padding:2px 6px;border-radius:4px;margin-right:8px'>N15</span>"
+            f"<span style='font-size:0.86rem;font-weight:500;color:#1A1A1A'>"
+            f"Interjurisdictional tariff distortion</span>"
+            f"</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:{_n15_color_top}'>{_n15_post*100:.1f}%</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Zone 2.8: §5.1.18 N18 audit signal breakdown (if active) ─────────
+    # Conditional render: appears when N18 is materially active (posterior >
+    # 25% or any sub-node ≥ 50%). N18 baseline default ~30-40% so threshold
+    # at 25% catches meaningful elevations.
+    _n18_post = float(P.get(18, 0.30))
+    _n18a_post = float(P.get("18a", 0.0))
+    _n18b_post = float(P.get("18b", 0.0))
+    _n18c_post = float(P.get("18c", 0.0))
+    _n18d_post = float(P.get("18d", 0.0))
+    _n18_active = (_n18_post > 0.25) or any(
+        v >= 0.50 for v in (_n18a_post, _n18b_post, _n18c_post, _n18d_post)
+    )
+    if _n18_active and not _empty:
+        st.markdown(
+            "<div style='margin-top:24px;font-size:0.92rem;font-weight:500;"
+            "font-family:DM Sans, sans-serif;color:#1A1A1A;letter-spacing:-0.005em'>"
+            "§5.1.18 audit signal — four-sub-node breakdown</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Per Chapter 5 §5.1.18 §1, N18 audits whether prior convictions "
+            "substantively integrated SCE / Tetrad jurisprudence. Framed as a "
+            "metadata tagging layer evaluating how a record should be "
+            "interpreted today, not whether it was properly decided then. "
+            "Per Q6=A, N18 routes through record_reliability — high N18 "
+            "(Inflated) discounts the evidentiary weight of N2 (validated risk "
+            "elevators) consistent with §5.1.18 §6 (\"Criminal Record "
+            "Reliability Modifier\")."
+        )
+
+        _n18_color = "#185FA5"  # distortion blue per TC palette
+        _sub_nodes = [
+            ("18a", "Jurisdiction sensitivity", _n18a_post,
+             "case_jur tier-classified · §5.1.18 §5 row 2"),
+            ("18b", "SCE Presence in reasons", _n18b_post,
+             "Per-conviction tag aggregate · §5.1.18 §5 row 3"),
+            ("18c", "SCE Substance (Morris Audit)", _n18c_post,
+             "Per-conviction tag aggregate · Morris Heuristic Audit"),
+            ("18d", "Doctrinal tagging compliance", _n18d_post,
+             "BN-derived from N10 · §5.1.18 §5 row 4"),
+        ]
+        _tile_cols = st.columns(4)
+        for _col, (_sid, _name, _p, _desc) in zip(_tile_cols, _sub_nodes):
+            with _col:
+                _state_label = "High" if _p >= 0.50 else "Low"
+                _state_color = "#A32D2D" if _p >= 0.50 else "#9E9E9E"
+                _bg_color = "#FAEEDA" if _p >= 0.50 else "#FBFAF7"
+                _border_color = "#E5CC95" if _p >= 0.50 else "#E0DDD6"
+                st.markdown(
+                    f"<div style='background:{_bg_color};border:1px solid {_border_color};"
+                    f"border-radius:8px;padding:10px 12px;height:100%;min-height:120px'>"
+                    f"<div style='display:flex;align-items:baseline;justify-content:space-between;"
+                    f"margin-bottom:6px'>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+                    f"font-weight:600;color:{_n18_color};background:{_n18_color}18;"
+                    f"padding:2px 6px;border-radius:4px'>N{_sid}</span>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                    f"font-weight:600;color:{_state_color}'>{_state_label}</span>"
+                    f"</div>"
+                    f"<div style='font-size:0.78rem;font-weight:500;color:#1A1A1A;"
+                    f"line-height:1.35;margin-bottom:6px'>{_name}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1rem;"
+                    f"font-weight:600;color:{_n18_color}'>{_p*100:.1f}%</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.7rem;color:#888;margin-top:4px;line-height:1.4'>{_desc}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Aggregate N18 row beneath the four tiles
+        _n18_color_top = "#A32D2D" if _n18_post >= 0.50 else "#185FA5"
+        st.markdown(
+            f"<div style='margin-top:10px;padding:10px 14px;background:#F6F4F0;"
+            f"border:1px solid #E5E0D8;border-radius:8px;"
+            f"display:flex;justify-content:space-between;align-items:center'>"
+            f"<div>"
+            f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+            f"font-weight:600;color:{_n18_color};background:{_n18_color}18;"
+            f"padding:2px 6px;border-radius:4px;margin-right:8px'>N18</span>"
+            f"<span style='font-size:0.86rem;font-weight:500;color:#1A1A1A'>"
+            f"SCE Profile audit (Gladue / Ewert / Morris / Ellis)</span>"
+            f"</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:1.05rem;"
+            f"font-weight:600;color:{_n18_color_top}'>{_n18_post*100:.1f}%</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Zone 2.9: §5.1.19 N19 collider-bias breakdown (if active) ────────
+    # Conditional render: appears when N19 posterior ≥ 0.50 OR the app-side
+    # joint-elevation signal is active. Per §5.1.19 §1, the headline DO
+    # posterior is not modified — the secondary discounted figure is shown
+    # alongside as a contingent display per Q4=C.
+    _n19_post = float(P.get(19, 0.30))
+    _n19_signal_dict = st.session_state.get("n19_collider_signal") or {}
+    _n19_signal_active = bool(_n19_signal_dict.get("active", False))
+    _n19_active = (_n19_post >= 0.50) or _n19_signal_active
+    if _n19_active and not _empty:
+        _disc_risk_summary = st.session_state.get("n19_discounted_risk")
+        _headline_summary = float(P.get(20, 0.30))
+        _n14_p_summary = float(P.get(14, 0.5))
+        _n17_p_summary = float(P.get(17, 0.5))
+
+        st.markdown(
+            "<div style='margin-top:24px;font-size:0.92rem;font-weight:500;"
+            "font-family:DM Sans, sans-serif;color:#1A1A1A;letter-spacing:-0.005em'>"
+            "§5.1.19 collider-bias detection — inference integrity check"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Per Chapter 5 §5.1.19 §1, N19 flags when the inference drawn "
+            "from the criminal record may be systematically unreliable due "
+            "to the geometry of the reasoning itself — without adding "
+            "evidence to the headline posterior. The secondary discounted "
+            "figure operationalises §5.1.19 §8 (\"final risk scores reflect "
+            "causal uncertainty rather than inflated confidence\") for "
+            "contingent display."
+        )
+
+        _n19_color = "#185FA5"
+
+        # Three tiles: N14, N17 (parents), N19 (collider posterior)
+        _tile_cols = st.columns(3)
+        _tile_data = [
+            ("N14", "Temporal distortion (Case-Complexity proxy)", _n14_p_summary),
+            ("N17", "Over-policing intensity",                     _n17_p_summary),
+            ("N19", "Collider-bias detection",                     _n19_post),
+        ]
+        for _col, (_lbl, _desc, _val) in zip(_tile_cols, _tile_data):
+            with _col:
+                _state_high = _val >= 0.60
+                _state_color = "#A32D2D" if _state_high else "#9E9E9E"
+                _bg_color = "#FAEEDA" if _state_high else "#FBFAF7"
+                _border_color = "#E5CC95" if _state_high else "#E0DDD6"
+                st.markdown(
+                    f"<div style='background:{_bg_color};border:1px solid {_border_color};"
+                    f"border-radius:8px;padding:10px 12px;height:100%;min-height:110px'>"
+                    f"<div style='display:flex;align-items:baseline;justify-content:space-between;"
+                    f"margin-bottom:6px'>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+                    f"font-weight:600;color:{_n19_color};background:{_n19_color}18;"
+                    f"padding:2px 6px;border-radius:4px'>{_lbl}</span>"
+                    f"<span style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                    f"font-weight:600;color:{_state_color}'>{'High' if _state_high else 'Low'}</span>"
+                    f"</div>"
+                    f"<div style='font-size:0.78rem;font-weight:500;color:#1A1A1A;"
+                    f"line-height:1.35;margin-bottom:6px'>{_desc}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:1rem;"
+                    f"font-weight:600;color:{_n19_color}'>{_val*100:.1f}%</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Headline + discounted comparison (the Q4=C contingent display)
+        if _disc_risk_summary is not None:
+            _delta_pp_s = (_disc_risk_summary - _headline_summary) * 100
+            _delta_color = "#A32D2D" if _delta_pp_s <= -1.0 else "#9E9E9E"
+            st.markdown(
+                f"<div style='margin-top:12px;padding:14px 18px;"
+                f"background:linear-gradient(90deg, #FBFAF7 0%, #F6F4F0 100%);"
+                f"border:1px solid #E5E0D8;border-radius:8px'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:center;"
+                f"flex-wrap:wrap;gap:12px'>"
+                f"<div>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem;margin-bottom:2px'>"
+                f"DO posterior — headline vs collider-discounted (§1 vs §8)"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.76rem;color:#707070'>"
+                f"Headline preserved per §1; secondary contingent per §8."
+                f"</div>"
+                f"</div>"
+                f"<div style='display:flex;align-items:baseline;gap:14px'>"
+                f"<div style='text-align:right'>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+                f"color:#888'>HEADLINE</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.15rem;"
+                f"font-weight:600;color:#1A1A1A'>{_headline_summary*100:.1f}%</div>"
+                f"</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.1rem;"
+                f"color:#999'>→</div>"
+                f"<div style='text-align:right'>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.7rem;"
+                f"color:{_delta_color}'>DISCOUNTED ({_delta_pp_s:+.1f}pp)</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:1.15rem;"
+                f"font-weight:600;color:{_delta_color}'>{_disc_risk_summary*100:.1f}%</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
     st.markdown("---")
 
     # ── Zone 3: Completeness + Doctrinal frame ───────────────────────────────
@@ -1747,7 +3452,20 @@ with TABS[0]:
 with TABS[1]:
     cl,cr=st.columns([3,1])
     with cl:
-        opts={None:"— none —"};opts.update({n:f"N{n}: {NODE_META[n]['name']}" for n in range(1,21)})
+        opts={None:"— none —"}
+        opts.update({n:f"N{n}: {NODE_META[n]['name']}" for n in range(1,21)})
+        # §5.1.17 sub-nodes — appended after main nodes
+        for sub_id in ("17a", "17b", "17c", "17d"):
+            opts[sub_id] = f"N{sub_id}: {NODE_META[sub_id]['name']}"
+        # §5.1.14 sub-nodes — appended after §5.1.17 sub-nodes
+        for sub_id in ("14a", "14b", "14c", "14d"):
+            opts[sub_id] = f"N{sub_id}: {NODE_META[sub_id]['name']}"
+        # §5.1.15 sub-nodes — appended after §5.1.14 sub-nodes
+        for sub_id in ("15a", "15b", "15c", "15d"):
+            opts[sub_id] = f"N{sub_id}: {NODE_META[sub_id]['name']}"
+        # §5.1.18 sub-nodes — appended after §5.1.15 sub-nodes
+        for sub_id in ("18a", "18b", "18c", "18d"):
+            opts[sub_id] = f"N{sub_id}: {NODE_META[sub_id]['name']}"
         sel=st.selectbox("Inspect node",list(opts.keys()),format_func=lambda x:opts[x])
         st.pyplot(draw_dag(P,sel),use_container_width=True)
     with cr:
@@ -1822,6 +3540,129 @@ with TABS[2]:
     with _ci_col2:
         st.text_input("Jurisdiction / location", key="case_jur",
                       placeholder="e.g. Calgary · Alberta")
+
+    # ── §5.1.1 Burden-of-proof audit configuration (Mark 8) ───────────────
+    # Per-case strict-mode flag (Q3=A). Stored in session_state and round-
+    # trips on save/load — preserves audit semantics across user handoffs
+    # (defence → Crown → bench review).
+    with st.expander(
+        "⚖ Burden-of-proof audit — case configuration",
+        expanded=False,
+    ):
+        st.markdown(
+            "<div style='font-family:Fraunces,serif;font-style:italic;"
+            "font-size:0.86rem;color:#5A5A5A;margin-bottom:14px;line-height:1.55;"
+            "max-width:780px'>"
+            "PARVIS audits each evidentiary input against its applicable burden "
+            "of proof per <em>R. v. Gardiner</em>, [1982] 2 SCR 368 + s. 724(3) "
+            "<em>Criminal Code</em>. Crown-tendered aggravating facts must clear "
+            "BARD; defence-tendered mitigating facts must clear BoP. Audit "
+            "results drive N1 via virtual evidence so audit failures propagate "
+            "structurally through the BN to N1's children. See §RM.1 register on "
+            "Report tab for the full audit ledger."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.checkbox(
+            "**Strict mode** — fire burden-of-proof audit prompt at moment "
+            "of entry rather than at tab-exit",
+            key="strict_mode",
+            help=(
+                "When enabled, each evidentiary input must be classified "
+                "(provenance + use) and attested at the point of entry "
+                "before the user can move on. When disabled (default), "
+                "classification can be deferred to tab-exit or Report-"
+                "generation review. Strict mode is recommended for "
+                "courtroom-handoff scenarios where the audit must be "
+                "complete before transmission. Setting persists with "
+                "the case (round-trips on save/load)."
+            ),
+        )
+        if st.session_state.get("strict_mode", False):
+            st.markdown(
+                "<div style='background:#FFF7E8;border-left:3px solid #BA7517;"
+                "padding:8px 12px;margin-top:8px;border-radius:4px;"
+                "font-size:0.82rem;color:#3A3A3A;line-height:1.5'>"
+                "Strict mode is <strong>active</strong>. Note: full at-entry "
+                "firing is implemented for the Criminal Record tab in the "
+                "current build. Other tabs (Intake, Gladue, SCE, Risk &amp; "
+                "Distortions) currently use tab-exit firing pending Mark 9 "
+                "integration."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+    # ── §5.1.17 N17b counsel attestation (override path) ──────────────────
+    # Per JP confirmation M3: primary signal is OR-gate over Gladue/SCE tab
+    # evidence; this checkbox is the override for cases where documentation
+    # exists but is not yet captured in the Gladue/SCE tab fields, or where
+    # counsel's professional judgment supports engagement that the structured
+    # fields don't fully accommodate.
+    st.markdown(
+        "<div style='margin:14px 0 4px 0; font-size:0.78rem; "
+        "font-family:DM Sans, sans-serif; color:#5A5A5A; "
+        "letter-spacing:0.04em; text-transform:uppercase;'>"
+        "§5.1.17 audit signal (N17b)"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.checkbox(
+        "Counsel attests this case engages documented enforcement-disparity "
+        "patterns per §5.1.17 §2",
+        key="n17b_counsel_attestation",
+        help=(
+            "§5.1.17 §2 references documented over-policing patterns affecting "
+            "Indigenous and Black communities (carding, proactive patrols, "
+            "compliance-focused enforcement). The primary signal for N17b is "
+            "automatically derived from Gladue/SCE tab fields you populate "
+            "(over-policed community of origin, racial profiling documentation, "
+            "anti-Black bail practices, etc.). Use this attestation only as an "
+            "override where evidence engages §5.1.17 §2 patterns but is not yet "
+            "captured in those structured fields."
+        ),
+    )
+
+    # ── §5.1.14 / §5.1.15 / §5.1.18 attestations relocated to per-conviction ──
+    # Mark 8 Phase 2 (per JP M8/P2 lock-in): N14a/b/c, N15a/b/c, N18b/c
+    # attestations are now per-conviction on the Criminal Record tab. The
+    # aggregate signals (any-prior aggregation) are derived via
+    # _any_conviction_attests() in the signal-computation helpers. This
+    # decluttering is doctrinally meaningful — a 1998 conviction can carry
+    # "imposed under severe era ✓" while a 2018 prior carries it as ✗,
+    # closer to how a sentencing judge would actually reason. Profile tab
+    # retains only case-level attestations: N17b (over-policing — case-wide
+    # policing-environment claim) and N18a (sentencing court's jurisdictional
+    # SCE-integration precedent).
+
+    # ── §5.1.18 N18a counsel attestation (case-level — jurisdiction precedent) ──
+    # Per Q1=β + Q7=α: N18a concerns whether the present sentencing court's
+    # jurisdiction has strong SCE-integration appellate precedent (Morris/
+    # Ellis-equivalent). This is jurisdictional, not per-conviction —
+    # belongs on Profile near case_jur input.
+    st.markdown(
+        "<div style='margin:14px 0 4px 0; font-size:0.78rem; "
+        "font-family:DM Sans, sans-serif; color:#5A5A5A; "
+        "letter-spacing:0.04em; text-transform:uppercase;'>"
+        "§5.1.18 audit signal (N18a — jurisdictional)"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.checkbox(
+        "Counsel attests sentencing jurisdiction lacks strong provincial "
+        "SCE-integration precedent (no Morris/Ellis-equivalent)",
+        key="n18a_counsel_attestation",
+        help=(
+            "§5.1.18 §1 frames N18 as profiling whether prior convictions "
+            "substantively integrated SCE/Tetrad. Provincial appellate-level "
+            "SCE-integration scrutiny is strongest in Ontario post-Morris "
+            "(2021 ONCA 680) and BC post-Ellis (2022 BCCA 278); SCC cases bind "
+            "nationwide. The primary heuristic auto-detects ON/BC/SCC. Use "
+            "this override where case-specific context indicates weaker "
+            "SCE-integration scrutiny than the jurisdictional default suggests. "
+            "N18b (SCE presence in reasons) and N18c (SCE substance) are now "
+            "per-conviction on the Criminal Record tab."
+        ),
+    )
 
     # Visual separator below case-id
     st.markdown(
@@ -1948,6 +3789,15 @@ with TABS[2]:
         )
 
         # ─── Section: Dynamic risk (risk stripe) ───────────────────────────
+        # TODO (Mark 8 / BUG 1 follow-up): UI label "Dynamic risk" with
+        # subscript "N18" reflects pre-CH5 taxonomy. Under CH5, N18 = SCE
+        # Profile audit (Gladue/Ewert/Morris/Ellis), not a substance/peer/
+        # stability composite. This section's widgets (sub/peers/stab) no
+        # longer drive any BN node — see BUG 1 fix at _sync_profile_from_
+        # widgets and the parallel Profile tab posterior-calc block.
+        # Pending doctrinal-mapping review: relabel section header, revise
+        # subscript, and rewire widgets to appropriate CH5 nodes (likely
+        # candidates: N9 IGT/cultural-treatment, or N18 sub-node signals).
         st.markdown("<div style='margin-top:18px'></div>", unsafe_allow_html=True)
         st.markdown(
             _section_head(
@@ -2130,12 +3980,12 @@ with TABS[2]:
     pev[14]={"No evidence":.15,"Some — marginal":.50,"Strong — documented over-surveillance":.85}[pol]
     pev[15]=.85 if age>=55 else .70 if age>=45 else .40 if age>=35 else .20
     pev[16]={"Low DO designation rate":.20,"Medium rate":.45,"High DO designation rate":.72}[prov]
-    sv={"None / in remission":.15,"Low":.35,"Moderate":.60,"High — dependency":.80}[sub]
-    pv={"None identified":.10,"Some — limited":.35,"Strong — primary network":.65}[peers]
-    stv={"Stable":.10,"Marginal":.40,"Unstable / homeless":.70}[stab]
-    pev[18]=float(np.clip((sv+pv+stv)/3+.05,.05,.92))
-    rv={"Strong — consistent":.10,"Moderate":.35,"Minimal":.60,"None — apparent refusal":.80,"Anomalously positive (gaming risk)":.30}[rehab]
-    pev[19]=float(np.clip(rv+(.12 if prog=="No culturally appropriate programming" else 0),.05,.90))
+    # BUG 1 FIX (Mark 8): stale-taxonomy override of pev[18] and pev[19]
+    # deleted from this Profile tab posterior-calc block, mirroring the
+    # parallel fix in _sync_profile_from_widgets. See that function for full
+    # rationale. The sub/peers/stab/rehab Profile tab widgets remain in place
+    # (rehab still drives pev[13] gaming-risk detection on N13); their
+    # remaining values await doctrinal-mapping review under CH5 taxonomy.
     st.session_state.profile_ev=pev
     run_inf();P=st.session_state.posteriors
     bl2,bc2,_=rb(P[20])
@@ -2344,6 +4194,27 @@ with TABS[5]:
 
     # Update session state with current checked set
     st.session_state.gladue_checked = cg
+
+    # ── §5.1.1 N1 audit reconciliation (Mark 8 Phase 2) ───────────────────
+    # Each checked Gladue factor becomes an audited input with default
+    # classification: defence-tendered, mitigating, BoP. Unchecked factors
+    # have their audit records removed (orphan cleanup). Per JP M8/P2:
+    # Pattern A defaults — user only sees audit UI when overriding or
+    # when strict mode triggers tab-exit review.
+    _gladue_audit_ids_now = {f"gladue_{fid}" for fid in cg}
+    # Add audit records for newly-checked factors
+    for f in GF:
+        if f["id"] in cg:
+            aid = f"gladue_{f['id']}"
+            _ensure_audit_record(
+                aid, "gladue", f"Gladue factor — {f['l']}"
+            )
+    # Remove audit records for newly-unchecked factors
+    _existing = st.session_state.get("n1_audit", {})
+    for aid in list(_existing.keys()):
+        if aid.startswith("gladue_") and aid not in _gladue_audit_ids_now:
+            _remove_audit_record(aid)
+
     run_inf()
     P = st.session_state.posteriors
     bl, _bc, _bg = rb(P[20])
@@ -2704,6 +4575,23 @@ with TABS[6]:
     st.session_state.sce_values = sce_vals
     # Keep sce_checked in sync for backwards compatibility with QBism diagnostics
     st.session_state.sce_checked = {fid for fid, v in sce_vals.items() if v > 0.01}
+
+    # ── §5.1.1 N1 audit reconciliation (Mark 8 Phase 2) ───────────────────
+    # Each active SCE factor becomes an audited input with default
+    # classification: defence-tendered, mitigating, BoP (per Morris/Ellis
+    # framework). Unchecked factors have audit records removed.
+    _sce_audit_ids_now = {f"sce_{fid}" for fid in st.session_state.sce_checked}
+    for f in SF:
+        if f["id"] in st.session_state.sce_checked:
+            aid = f"sce_{f['id']}"
+            _ensure_audit_record(
+                aid, "sce", f"SCE factor — {f['l']}"
+            )
+    _existing_sce = st.session_state.get("n1_audit", {})
+    for aid in list(_existing_sce.keys()):
+        if aid.startswith("sce_") and aid not in _sce_audit_ids_now:
+            _remove_audit_record(aid)
+
     run_inf()
     P = st.session_state.posteriors
     bl_sce, _bc_sce, _bg_sce = rb(P[20])
@@ -2955,6 +4843,54 @@ with TABS[7]:
     # Save manual_ev state
     st.session_state.manual_ev = man
 
+    # ── §5.1.1 N1 audit reconciliation (Mark 8 Phase 2) ───────────────────
+    # Each manually-overridden node becomes an audited input. Default
+    # classification by node type per JP M8/P2 lock-in:
+    #   "risk"       → Crown-tendered, aggravating, BARD (N2/N3/N4)
+    #   "distortion" → defence-tendered, mitigating, BoP (N5/N6/N7/N10/etc.)
+    #   "mitigation" → defence-tendered, mitigating, BoP (N9 IGT)
+    #   "dual"       → defence-tendered, mitigating, BoP (N8 FASD — JP lean)
+    #   "special"    → no default (prompt; N11 gaming detector)
+    # Override functionality (changing the default for a specific node) is
+    # available via the §RM.1 register on the Report tab and via strict-mode
+    # at-tab-exit review. Most users will not need to override defaults.
+    _risk_type_to_default = {
+        "risk":       ("crown",   "aggravating"),
+        "distortion": ("defence", "mitigating"),
+        "mitigation": ("defence", "mitigating"),
+        "dual":       ("defence", "mitigating"),
+        # "special" → no entry (default is None, triggers no-default path)
+    }
+    _risk_audit_ids_now = set()
+    for _nid in st.session_state.manual_ev.keys():
+        # manual_ev keys are the int node IDs of overridden nodes
+        _meta = NODE_META.get(_nid, {})
+        _type = _meta.get("type", "")
+        _label = _meta.get("short", f"Node {_nid}")
+        _default = _risk_type_to_default.get(_type)
+        _aid = f"risk_n{_nid}"
+        _risk_audit_ids_now.add(_aid)
+        if _default:
+            _prov, _use = _default
+        else:
+            # No default for this node type ("special"). Create an audit
+            # record with unspecified provenance/use so the user is
+            # prompted via §RM.1 register or strict-mode review.
+            _prov, _use = None, None
+        _ensure_audit_record(
+            _aid, "risk_substantive" if _type == "risk"
+                  else ("risk_distortion" if _type == "distortion"
+                        else ("risk_mitigation" if _type in ("mitigation", "dual")
+                              else "risk_other")),
+            f"Risk override — N{_nid} {_label}",
+            provenance=_prov, use=_use,
+        )
+    # Remove audit records for nodes no longer overridden
+    _existing_risk = st.session_state.get("n1_audit", {})
+    for aid in list(_existing_risk.keys()):
+        if aid.startswith("risk_n") and aid not in _risk_audit_ids_now:
+            _remove_audit_record(aid)
+
     # ── Reset action ──────────────────────────────────────────────────────
     rsc1, rsc2, rsc3 = st.columns([1, 1, 2])
     with rsc1:
@@ -2963,6 +4899,15 @@ with TABS[7]:
                 st.session_state[k] = {}
             st.session_state.gladue_checked = set()
             st.session_state.sce_checked = set()
+            # Mark 8 Phase 2: also clear audit records sourced from these
+            # tabs (gladue_*, sce_*, risk_n*). Criminal Record audits are
+            # left intact since reset doesn't clear convictions.
+            _audit = st.session_state.get("n1_audit", {})
+            for aid in list(_audit.keys()):
+                if (aid.startswith("gladue_") or aid.startswith("sce_")
+                        or aid.startswith("risk_n")):
+                    _audit.pop(aid, None)
+            st.session_state.n1_audit = _audit
             st.rerun()
 
     # ── Run inference + slim live-result strip ────────────────────────────
@@ -3041,6 +4986,145 @@ with TABS[8]:
             <div style="height:4px;background:#eee;border-radius:2px;margin-top:3px">
               <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:2px"></div>
             </div></div>""",unsafe_allow_html=True)
+
+    # ── §5.1.19 N19 collider-bias methodology expander ─────────────────────
+    # Sits on Inference tab (where structural-distortion content lives)
+    # alongside the per-node posterior grid. Surfaces both the BN posterior
+    # mechanism (§6 CPT) and the Q4=C secondary discount mechanism (§8).
+    if not _empty:
+        with st.expander("📚 §5.1.19 collider-bias detection — how N19 is computed and applied"):
+            _signal = st.session_state.get("n19_collider_signal") or {}
+            _disc_risk = st.session_state.get("n19_discounted_risk")
+            _n14_p = float(P.get(14, 0.5))
+            _n17_p = float(P.get(17, 0.5))
+            _n19_p = float(P.get(19, 0.30))
+            _headline = float(P.get(20, 0.30))
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.88rem;color:#3A3A3A;line-height:1.55;margin-bottom:14px'>"
+                "Per Chapter 5 §5.1.19 §1, N19 surfaces collider bias arising "
+                "when sentencing inference conditions on system-entry variables "
+                "(arrest, charge, conviction) that are simultaneously caused "
+                "by upstream factors including over-policing intensity and "
+                "case complexity. The architectural commitment is "
+                "<strong style='font-weight:500;color:#1A1A1A;font-style:normal'>"
+                "non-evidentiary</strong> — N19 does not add evidence to the "
+                "headline DO posterior. Instead, it flags when the inference "
+                "drawn from the criminal record may be systematically "
+                "unreliable due to the geometry of the reasoning itself "
+                "(Berkson&apos;s paradox)."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            # §6 CPT mechanism card
+            _cpt_color = "#A32D2D" if _n19_p >= 0.50 else "#185FA5"
+            st.markdown(
+                f"<div style='border-left:3px solid {_cpt_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>BN posterior — §5.1.19 §6 mechanism</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_cpt_color};font-weight:600'>"
+                f"P(N19=High) = {_n19_p*100:.1f}%</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:6px;line-height:1.5'>"
+                f"Computed by Variable Elimination over §5.1.19 §6&apos;s 2-parent CPT: "
+                f"P(N19=High) at (Over-Policing × Case Complexity) = "
+                f"(L,L)→0.25, (L,H)→0.50, (H,L)→0.50, (H,H)→0.85. "
+                f"N17 (over-policing) is the §6 first parent; N14 (temporal "
+                f"distortion) is the doctrinal proxy for §6&apos;s "
+                f"&quot;Case Complexity&quot; — N14&apos;s era-of-sentencing "
+                f"severity captures historical case-complexity drivers. "
+                f"Current parent posteriors: N14={_n14_p*100:.1f}%, "
+                f"N17={_n17_p*100:.1f}%."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # App-side joint-elevation signal card
+            _signal_active = bool(_signal.get("active", False))
+            _signal_color = "#A32D2D" if _signal_active else "#3B6D11"
+            _signal_text = "ACTIVE — both parents above threshold" if _signal_active else "Inactive"
+            _threshold = _signal.get("threshold", 0.60)
+            st.markdown(
+                f"<div style='border-left:3px solid {_signal_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>App-side joint-elevation signal (Q6=α)</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_signal_color};font-weight:600'>{_signal_text}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:6px;line-height:1.5'>"
+                f"Independent pattern-detection check: fires when both N14 "
+                f"and N17 are jointly elevated above threshold "
+                f"({_threshold:.2f}). Complements the BN posterior by "
+                f"making the structural condition visible without requiring "
+                f"the user to interpret the probabilistic computation. "
+                f"Per §5.1.19 §1, this signal does not add evidence — it "
+                f"surfaces the structural condition under which collider "
+                f"bias is doctrinally implicated."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # §8 secondary-discount mechanism card
+            if _disc_risk is not None:
+                _delta_pp = (_disc_risk - _headline) * 100
+                _disc_color = "#A32D2D" if _delta_pp <= -1.0 else "#9E9E9E"
+                st.markdown(
+                    f"<div style='border-left:3px solid {_disc_color};padding:.6rem .9rem;"
+                    f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                    f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                    f"color:#1A1A1A;font-size:0.94rem'>Secondary collider-discounted risk (Q4=C)</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                    f"color:{_disc_color};font-weight:600'>"
+                    f"Headline {_headline*100:.1f}% &nbsp;→&nbsp; Discounted "
+                    f"{_disc_risk*100:.1f}% &nbsp;({_delta_pp:+.1f}pp)</div>"
+                    f"</div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.78rem;color:#5A5A5A;margin-top:6px;line-height:1.5'>"
+                    f"Per §5.1.19 §8, when collider bias is active the final "
+                    f"risk score is multiplicatively discounted by "
+                    f"(1 - 0.30 × N19) to reflect causal uncertainty rather "
+                    f"than inflated confidence. At §6 baseline (N19=0.25) "
+                    f"the discount is 7.5%; at §6 peak (N19=0.85) the "
+                    f"discount is 25.5%. This number is "
+                    f"<strong style='font-weight:500;color:#1A1A1A;"
+                    f"font-style:normal'>contingent</strong> — it is "
+                    f"displayed alongside the headline rather than replacing "
+                    f"it, preserving the §5.1.19 §1 commitment that N19 does "
+                    f"not add evidence to the inference."
+                    f"</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.80rem;color:#707070;margin-top:14px;line-height:1.55'>"
+                "<strong style='font-weight:500;color:#3A3A3A;font-style:normal'>"
+                "Doctrinal note.</strong> "
+                "§5.1.19 §1 (&quot;not to add evidence to the inference&quot;) "
+                "and §8 (&quot;final risk scores reflect causal uncertainty&quot;) "
+                "are reconciled by the architecture: the §1 commitment is "
+                "preserved at the headline-posterior level, and the §8 "
+                "mechanism operates at the secondary-display level. Defence "
+                "counsel reviewing the architecture&apos;s output sees both "
+                "numbers and can address the inference-integrity concern in "
+                "submissions without the architecture pre-empting the legal "
+                "argument with a single contestable figure."
+                "</div>",
+                unsafe_allow_html=True,
+            )
 
 # ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
 with TABS[11]:
@@ -5447,6 +7531,39 @@ with TABS[4]:
             ["ON","BC","AB","QC","SK","MB","NS","NB","NL","PE","YT","NT","NU","Federal"],
             key="cr_jur")
 
+        # ─── Subsection: §5.1.18 SCE-integration tagging (per-conviction) ───
+        # Per JP confirmation Q1=β: per-conviction tags exposed in UI;
+        # tags drive N18b (SCE Presence) and N18c (SCE Substance) sub-node
+        # aggregate signals. Default "Absent" (most conservative — defers to
+        # Morris Heuristic Audit empirical finding that nominal-or-absent is
+        # the modal failure mode).
+        st.markdown(
+            "<div style='font-size:0.66rem;text-transform:uppercase;"
+            "letter-spacing:0.14em;color:#707070;font-weight:600;"
+            "margin:18px 0 12px 0;padding-top:14px;"
+            "border-top:1px solid #EFEDE7'>§5.1.18 SCE integration tag</div>",
+            unsafe_allow_html=True,
+        )
+        cr_sce_tag = st.selectbox(
+            "Tetrad / SCE integration in reasons for sentence",
+            options=["Absent", "Nominal", "Partial", "Full"],
+            index=0,  # default "Absent"
+            key="cr_sce_tag",
+            help=(
+                "Per §5.1.18 §1, this profiles whether the original conviction "
+                "substantively integrated SCE / Tetrad jurisprudence — not "
+                "whether the sentence was correct. Tag values:\n\n"
+                "• **Full** — SCE substantively integrated into reasons\n"
+                "• **Partial** — SCE referenced and partially integrated\n"
+                "• **Nominal** — SCE mentioned but not substantively engaged "
+                "(Morris Heuristic Audit modal failure mode)\n"
+                "• **Absent** — SCE not mentioned in reasons (default)\n\n"
+                "Aggregates over per-conviction tags drive N18b (Presence) "
+                "and N18c (Substance). Counsel attestations on the Profile "
+                "tab can override the per-conviction tag aggregates."
+            ),
+        )
+
         # ─── Subsection: Sentence outcome ─────────────────────────────────
         st.markdown(
             "<div style='font-size:0.66rem;text-transform:uppercase;"
@@ -5674,6 +7791,8 @@ with TABS[4]:
                     "sentence_detail":   cr_sentence_detail.strip(),
                     "sent_modifier":     sent_mod,
                     "jurisdiction":      cr_jurisdiction,
+                    # §5.1.18 per-conviction SCE-integration tag (Q1=β)
+                    "sce_integration_tag": cr_sce_tag,
                     "seriousness":       _ser_map.get(cr_seriousness, 0.65),
                     "seriousness_label": cr_seriousness,
                     "agg_boost":         agg_boost,
@@ -5703,6 +7822,17 @@ with TABS[4]:
                     "raw_weight":  1.0,
                     "cal_weight":  cal_wt,
                 }
+                # ── §5.1.1 N1 audit (Mark 8) — assign stable audit_id ─────
+                # before append so that _audit_record_for_conviction can
+                # use it. Index is len(criminal_record) before the append
+                # — i.e. the position this entry will occupy.
+                _new_idx = len(st.session_state.criminal_record)
+                entry["audit_id"] = _conviction_audit_id(
+                    _new_idx, entry["year"], entry.get("offence", "")
+                )
+                # Create default audit record (use="contextual", no audit
+                # triggered until user toggles Crown-reliance flag).
+                _audit_record_for_conviction(entry, _new_idx)
                 st.session_state.criminal_record.append(entry)
                 # Sort chronologically (earliest first) — stable, by year only
                 # (so insertions of multiple convictions in the same year retain
@@ -5710,6 +7840,10 @@ with TABS[4]:
                 st.session_state.criminal_record.sort(
                     key=lambda e: int(e.get("year", 0))
                 )
+                # Reconcile audit IDs after the sort (Mark 8 N1 audit).
+                # Removes orphans and ensures every conviction has an
+                # audit_id matching its current index.
+                _sync_conviction_audit_ids()
                 # Feed calibrated N2 and distortion corrections back into the network
                 _cr_feed_nodes()
                 st.rerun()
@@ -5719,6 +7853,21 @@ with TABS[4]:
     # ── Record table ──────────────────────────────────────────────────────────
     rec = st.session_state.criminal_record
     if rec:
+        # ── Mark 8 hotfix: hoist chronological grading to top of block ─────
+        # Pre-existing latent bug — _n7_grading and _jump_chain were defined
+        # later in the per-conviction loop entry (around line 8042 in current
+        # numbering), but the Methodology — N7 reliability modifier expander
+        # (further down inside this block) references _n7_grading. Streamlit
+        # expanders execute their contents on every render regardless of
+        # expanded= state, so when rec was non-empty the methodology block
+        # would NameError on _n7_grading before the per-conviction loop
+        # defined it. Hoisting to top of `if rec:` makes the definitions
+        # available throughout the block. Original definitions further down
+        # are left in place (harmless re-computation, ~5ms; preserves the
+        # original code's locality of reference for the per-conviction loop).
+        _jump_chain = _jump_cumulative_chain(rec)
+        _n7_grading = _n7_grades_chronological(rec)
+
         st.markdown(
             "<div style='border-top:1px solid #EFEDE7;margin:24px 0 18px 0'></div>",
             unsafe_allow_html=True,
@@ -6413,8 +8562,345 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
             with cb3:
                 if st.button("Remove", key=f"cr_del_{i}"):
                     st.session_state.criminal_record.pop(i)
+                    # Reconcile audit IDs — removes orphan record from
+                    # session_state.n1_audit (Mark 8 N1 audit).
+                    _sync_conviction_audit_ids()
                     _cr_feed_nodes()
                     st.rerun()
+
+            # ── §5.1.1 N1 burden-of-proof audit (Mark 8) ─────────────────
+            # Crown-reliance audit per Angelillo: is the Crown relying on
+            # this prior as aggravating context? If yes, BARD per Gardiner.
+            # Prior-evidence audit (Bird carve-out) is a Mark 9 build item;
+            # placeholder rendered visible-but-inert per JP scoping.
+            audit_rec = _audit_record_for_conviction(e, i)
+            audit_id = e.get("audit_id")
+            _icon, _label, _color = _audit_status_for_conviction(audit_id)
+
+            with st.expander(
+                f"{_icon}  Burden-of-proof audit — {_label}",
+                expanded=False,
+            ):
+                st.markdown(
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:0.86rem;color:#5A5A5A;margin-bottom:12px;"
+                    f"line-height:1.55'>"
+                    f"Per <em>R. v. Angelillo</em> 2006 SCC 55, Crown reliance on "
+                    f"a prior conviction as <em>aggravating</em> context at present "
+                    f"sentencing must clear BARD. Mere existence of the conviction "
+                    f"is res judicata and not subject to fresh audit (subject to "
+                    f"<em>R. v. Bird</em> 2019 SCC 7 collateral-attack carve-outs — "
+                    f"see prior-evidence audit below)."
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+                _crown_relies_default = (
+                    audit_rec.get("use") == "aggravating"
+                )
+                _crown_relies = st.checkbox(
+                    "Crown is relying on this prior as **aggravating context** "
+                    "at present sentencing",
+                    value=_crown_relies_default,
+                    key=f"cr_audit_relies_{i}",
+                )
+                if _crown_relies != _crown_relies_default:
+                    _set_conviction_audit_use(audit_id, _crown_relies)
+                    st.rerun()
+
+                if _crown_relies:
+                    st.markdown(
+                        "<div style='background:#FFF7E8;border-left:3px solid "
+                        "#BA7517;padding:10px 14px;margin:12px 0 14px 0;"
+                        "border-radius:4px;font-size:0.86rem;color:#3A3A3A;"
+                        "line-height:1.55'>"
+                        "<strong style='color:#7A4F0E'>BARD audit required.</strong> "
+                        "Per <em style='font-family:Fraunces,serif'>R. v. Gardiner</em>, "
+                        "[1982] 2 SCR 368 + s. 724(3)(e) <em>Criminal Code</em>: "
+                        "Crown-tendered aggravating facts must be proven beyond "
+                        "a reasonable doubt. Record the basis on which BARD is "
+                        "claimed to be met, or mark the attestation insufficient."
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # Attestation basis dropdown shortcut
+                    _basis_default = audit_rec.get("attestation_basis",
+                                                   ATTESTATION_BASES[0])
+                    if _basis_default not in ATTESTATION_BASES:
+                        _basis_default = ATTESTATION_BASES[0]
+                    _basis = st.selectbox(
+                        "Basis on which BARD is claimed to be met",
+                        ATTESTATION_BASES,
+                        index=ATTESTATION_BASES.index(_basis_default),
+                        key=f"cr_audit_basis_{i}",
+                    )
+
+                    # Attestation free text
+                    _att_default = audit_rec.get("attestation", "")
+                    _att = st.text_area(
+                        "Attestation detail (free text — recorded verbatim "
+                        "in the §RM.1 register)",
+                        value=_att_default,
+                        height=80,
+                        key=f"cr_audit_att_{i}",
+                        placeholder="e.g. 'Admitted by accused at para 14 of "
+                                    "guilty plea allocution; transcript appended.'",
+                    )
+
+                    # Attestation status
+                    _status_options = ["pending", "satisfied", "insufficient"]
+                    _status_labels = {
+                        "pending": "⚠ Pending — attestation incomplete",
+                        "satisfied": "✓ Satisfied — BARD met on the record",
+                        "insufficient": "✗ Insufficient — burden not met "
+                                        "for this aggravating use",
+                    }
+                    _current_status = audit_rec.get("attestation_status",
+                                                    "pending")
+                    if _current_status not in _status_options:
+                        _current_status = "pending"
+                    _status = st.radio(
+                        "Audit status",
+                        _status_options,
+                        index=_status_options.index(_current_status),
+                        format_func=lambda s: _status_labels[s],
+                        key=f"cr_audit_status_{i}",
+                    )
+
+                    # Persist any changes back into the audit record
+                    _changed = (
+                        _basis != _basis_default or
+                        _att != _att_default or
+                        _status != _current_status
+                    )
+                    if _changed:
+                        audit_rec["attestation_basis"] = _basis
+                        audit_rec["attestation"] = _att
+                        audit_rec["attestation_status"] = _status
+                        st.session_state.n1_audit[audit_id] = audit_rec
+                        # No rerun here — let normal Streamlit rerun cycle
+                        # propagate. Avoids duplicate-render thrash on
+                        # rapid keystrokes in the text_area.
+
+                # ── §5.1.14 / §5.1.15 / §5.1.18 per-conviction attestations ──
+                # Mark 8 Phase 2: Layer II distortion attestations relocated
+                # from Profile to per-conviction. Aggregate signals derived
+                # via _any_conviction_attests("...") in the signal-computation
+                # helpers — any-prior aggregation per JP M8/P2 lock-in.
+                st.markdown(
+                    "<div style='border-top:1px dashed #D8D5CE;margin:14px 0 "
+                    "10px 0'></div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<div style='font-family:JetBrains Mono,monospace;"
+                    "font-size:0.74rem;color:#5A5A5A;margin-bottom:8px'>"
+                    "LAYER II DISTORTION ATTESTATIONS (per-conviction)"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<div style='font-family:Fraunces,serif;font-style:italic;"
+                    "font-size:0.82rem;color:#5A5A5A;margin-bottom:10px;"
+                    "line-height:1.5'>"
+                    "Counsel attestations specific to <em>this</em> "
+                    "conviction. Aggregate signals (any-prior) feed N14 "
+                    "(temporal distortion), N15 (tariff distortion), and N18 "
+                    "(SCE Profile audit)."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # ── §5.1.14 (temporal distortion) ─────────────────────────
+                st.markdown(
+                    "<div style='font-family:JetBrains Mono,monospace;"
+                    "font-size:0.70rem;color:#7A7A7A;letter-spacing:0.04em;"
+                    "text-transform:uppercase;margin:8px 0 2px 0'>"
+                    "§5.1.14 — N14 temporal distortion"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                _n14a_default = e.get("n14a_attestation", False)
+                _n14a_new = st.checkbox(
+                    "Imposed under severe sentencing era "
+                    "(Bill C-10 / pre-Sharma regime)",
+                    value=_n14a_default,
+                    key=f"cr_n14a_{i}",
+                    help=(
+                        "§5.1.14 §1 identifies sentencing eras characterised "
+                        "by mandatory minimums or 'tough-on-crime' policies "
+                        "as carriers of institutional severity. Auto-detects "
+                        "2008–2015 (Bill C-10 era); use this override where "
+                        "the conviction sits outside that window but was "
+                        "imposed under analogously severe regime conditions."
+                    ),
+                )
+                _n14b_default = e.get("n14b_attestation", False)
+                _n14b_new = st.checkbox(
+                    "Arose under mandatory-minimum framework",
+                    value=_n14b_default,
+                    key=f"cr_n14b_{i}",
+                    help=(
+                        "§5.1.14 §5: MM frameworks are a parent input to "
+                        "temporal distortion. Use where MM-eligible offences "
+                        "are present but the auto-detection (offence-text + "
+                        "year heuristic) hasn't flagged them."
+                    ),
+                )
+                _n14c_default = e.get("n14c_sce_applied", False)
+                _n14c_new = st.checkbox(
+                    "SCE / Tetrad **was** applied at this conviction's "
+                    "original sentencing",
+                    value=_n14c_default,
+                    key=f"cr_n14c_{i}",
+                    help=(
+                        "§5.1.14 §5: when SCE was substantively applied, "
+                        "temporal distortion is reduced. Inverse semantics: "
+                        "checked = SCE present = N14c → Low. Also drives N15d "
+                        "(jurisprudential compliance for tariff distortion)."
+                    ),
+                )
+
+                # ── §5.1.15 (tariff distortion) ───────────────────────────
+                st.markdown(
+                    "<div style='font-family:JetBrains Mono,monospace;"
+                    "font-size:0.70rem;color:#7A7A7A;letter-spacing:0.04em;"
+                    "text-transform:uppercase;margin:10px 0 2px 0'>"
+                    "§5.1.15 — N15 tariff distortion"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                _n15a_default = e.get("n15a_attestation", False)
+                _n15a_new = st.checkbox(
+                    "Imposed in high-tariff jurisdiction "
+                    "(Doob/Cesaroni/Roach lineage)",
+                    value=_n15a_default,
+                    key=f"cr_n15a_{i}",
+                    help=(
+                        "§5.1.15 §2(d): empirical research documents material "
+                        "interprovincial tariff disparities. Auto-detection "
+                        "covers ON/MB/SK/AB; override where this conviction's "
+                        "jurisdiction warrants different classification."
+                    ),
+                )
+                _n15b_default = e.get("n15b_attestation", False)
+                _n15b_new = st.checkbox(
+                    "Tariff-sensitive offence type",
+                    value=_n15b_default,
+                    key=f"cr_n15b_{i}",
+                    help=(
+                        "§5.1.15 §7: property and drug offences are the "
+                        "classic tariff-sensitive categories. Override where "
+                        "specialised offence terminology defeats keyword "
+                        "auto-detection."
+                    ),
+                )
+                _n15c_default = e.get("n15c_attestation", False)
+                _n15c_new = st.checkbox(
+                    "Sentence length exceeds offence-conditional tariff "
+                    "threshold",
+                    value=_n15c_default,
+                    key=f"cr_n15c_{i}",
+                    help=(
+                        "§5.1.15 §7 thresholds: tariff-sensitive offences "
+                        "above 1 year; conduct-driven (violent/sexual) above "
+                        "3 years. Override e.g. for an 18-month provincial "
+                        "property-offence sentence exceeding the 1-year cap."
+                    ),
+                )
+
+                # ── §5.1.18 (SCE Profile audit) ───────────────────────────
+                st.markdown(
+                    "<div style='font-family:JetBrains Mono,monospace;"
+                    "font-size:0.70rem;color:#7A7A7A;letter-spacing:0.04em;"
+                    "text-transform:uppercase;margin:10px 0 2px 0'>"
+                    "§5.1.18 — N18 SCE profile audit"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                _n18b_default = e.get("n18b_attestation", False)
+                _n18b_new = st.checkbox(
+                    "SCE absent from reasons in this conviction",
+                    value=_n18b_default,
+                    key=f"cr_n18b_{i}",
+                    help=(
+                        "§5.1.18 §5 row 3: SCE Presence in Reasons. Aggregate "
+                        "signal fires if any prior has SCE absent. Use where "
+                        "this conviction's reasons lack SCE engagement."
+                    ),
+                )
+                _n18c_default = e.get("n18c_attestation", False)
+                _n18c_new = st.checkbox(
+                    "SCE substance nominal-only or absent in this conviction "
+                    "(Morris Heuristic Audit)",
+                    value=_n18c_default,
+                    key=f"cr_n18c_{i}",
+                    help=(
+                        "§5.1.18: even where Gladue is cited, substantive "
+                        "sentencing impact is often absent or minimal. Use "
+                        "where this conviction's SCE engagement was nominal "
+                        "(referenced but not substantively applied)."
+                    ),
+                )
+
+                # Persist any toggles back to the conviction entry. Avoid
+                # rerun thrash by only writing when something changed.
+                _attestation_changed = (
+                    _n14a_new != _n14a_default or
+                    _n14b_new != _n14b_default or
+                    _n14c_new != _n14c_default or
+                    _n15a_new != _n15a_default or
+                    _n15b_new != _n15b_default or
+                    _n15c_new != _n15c_default or
+                    _n18b_new != _n18b_default or
+                    _n18c_new != _n18c_default
+                )
+                if _attestation_changed:
+                    e["n14a_attestation"] = _n14a_new
+                    e["n14b_attestation"] = _n14b_new
+                    e["n14c_sce_applied"] = _n14c_new
+                    e["n15a_attestation"] = _n15a_new
+                    e["n15b_attestation"] = _n15b_new
+                    e["n15c_attestation"] = _n15c_new
+                    e["n18b_attestation"] = _n18b_new
+                    e["n18c_attestation"] = _n18c_new
+                    # entry is a reference into st.session_state.criminal_record;
+                    # the mutation is already persisted. Trigger rerun so the
+                    # signal helpers re-read on next pass.
+                    st.rerun()
+
+                # ── PRIOR-EVIDENCE AUDIT placeholder (Mark 9 deferred) ────
+                st.markdown(
+                    "<div style='border-top:1px dashed #D8D5CE;margin:14px 0 "
+                    "10px 0'></div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<div style='font-family:JetBrains Mono,monospace;"
+                    "font-size:0.74rem;color:#9E9E9E;margin-bottom:6px'>"
+                    "PRIOR-EVIDENCE AUDIT (Layer 2 — Mark 9 deferred)"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    "<div style='background:#F5F4F0;border:1px solid #E5E2DA;"
+                    "border-radius:4px;padding:9px 12px;font-size:0.83rem;"
+                    "color:#5A5A5A;line-height:1.55'>"
+                    "<strong>Status:</strong> "
+                    "<span style='font-family:JetBrains Mono,monospace;"
+                    "font-size:0.78rem;color:#7A7A7A'>"
+                    "[awaiting implementation]</span><br>"
+                    "Defence challenge to evidentiary basis of the prior "
+                    "conviction itself, per <em style='font-family:Fraunces,serif'>"
+                    "R. v. Bird</em> 2019 SCC 7 collateral-attack carve-out. "
+                    "Full implementation pending doctrinal scoping and "
+                    "integration with Layer II distortion-detection nodes "
+                    "(N15 IAC, N17 over-policing, N5 invalid risk tools). "
+                    "Will be wired in next development cycle."
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
         # ── Document analysis integration ──────────────────────────────────────
         st.markdown(
@@ -6500,6 +8986,515 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
                     f"font-size:0.82rem;color:#3A3A3A;margin-top:2px'>{cite}</div>"
                     f"</div>",
                     unsafe_allow_html=True)
+
+        # ── §5.1.17 audit-signal methodology (N17c / N17d auto-detection) ──
+        with st.expander("📚 §5.1.17 audit signal — how N17c and N17d are computed"):
+            # Compute live values for the current record
+            _record = st.session_state.get("criminal_record", []) or []
+            _n_total = len(_record)
+            # Recompute density values for display
+            _n17c_count = 0
+            _n17d_count = 0
+            for _e in _record:
+                _off = (_e.get("offence", "") or "").lower()
+                _ser = (_e.get("seriousness_label", "") or "").lower()
+                _is_low_tier = ("minor" in _ser or "moderate" in _ser)
+                _has_violence = any(p in _off for p in _N17C_VIOLENCE_PATTERNS)
+                if _is_low_tier and not _has_violence:
+                    _n17c_count += 1
+                if any(p in _off for p in _N17D_SURVEILLANCE_PATTERNS):
+                    _n17d_count += 1
+            _n17c_density = (_n17c_count / _n_total) if _n_total else 0.0
+            _n17d_density = (_n17d_count / _n_total) if _n_total else 0.0
+            _n17c_state = "High" if _n17c_density > 0.50 else "Low"
+            _n17d_state = "High" if _n17d_density >= 0.30 else "Low"
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.88rem;color:#3A3A3A;line-height:1.55;margin-bottom:14px'>"
+                "Per Chapter 5 §5.1.17 §2, criminal records are institutionally-"
+                "produced artifacts. Where exposure to policing is uneven, record "
+                "density is unreliable as a proxy for criminality. Two of N17's "
+                "four parents (N17c, N17d) are auto-computed from the offence "
+                "text of each conviction below:"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N17c live status card
+            _n17c_color = "#A32D2D" if _n17c_state == "High" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n17c_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N17c — Non-violent charge density</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n17c_color};font-weight:600'>{_n17c_count}/{_n_total} = "
+                f"{_n17c_density*100:.0f}% · {_n17c_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Counts entries where seriousness tier is Minor/Moderate AND "
+                f"offence text contains no violence keywords "
+                f"(<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;color:#888'>"
+                f"assault, robbery, manslaughter, murder, sexual, firearm, aggravated, weapon</code>). "
+                f"State is High when density &gt; 50%."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N17d live status card
+            _n17d_color = "#A32D2D" if _n17d_state == "High" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n17d_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N17d — Surveillance-triggered entries</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n17d_color};font-weight:600'>{_n17d_count}/{_n_total} = "
+                f"{_n17d_density*100:.0f}% · {_n17d_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Pattern-matches §5.1.17 §2 surveillance signatures in offence text "
+                f"(<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;color:#888'>"
+                f"breach, fail to comply, fail to appear, administration of justice, possession</code>). "
+                f"State is High when density ≥ 30%."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.80rem;color:#707070;margin-top:14px;line-height:1.55'>"
+                "<strong style='font-weight:500;color:#3A3A3A;font-style:normal'>Override path.</strong> "
+                "Pattern-matching against offence text is conservative — false positives "
+                "(e.g. \"possession of stolen property\" matching \"possession\") are possible. "
+                "Counsel can override at the per-conviction level via the "
+                "<strong style='font-weight:500'>Over-policing slider</strong> in the conviction "
+                "form above, which feeds the existing N17 over-policing pathway independently "
+                "of N17c/N17d. The two pathways are doctrinally complementary: the slider "
+                "captures per-conviction nuance; the audit signal captures aggregate "
+                "composition of the record per §5.1.17 §5."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── §5.1.14 audit-signal methodology (N14a/N14b/N14c year-based) ────
+        with st.expander("📚 §5.1.14 audit signal — how N14a, N14b, N14c are computed"):
+            # Compute live values for the current record
+            _record = st.session_state.get("criminal_record", []) or []
+            _n_total = len(_record)
+            
+            # Replicate _n14a_signal logic for display
+            _n14a_count = sum(1 for e in _record
+                              if 2008 <= int(e.get("year", 0) or 0) <= 2015)
+            _n14a_attest = _any_conviction_attests("n14a_attestation")
+            _n14a_state = "High" if (_n14a_count > 0 or _n14a_attest) else "Low"
+            
+            # Replicate _n14b_signal logic
+            _n14b_count = 0
+            for _e in _record:
+                _off = (_e.get("offence", "") or "").lower()
+                try:
+                    _yr = int(_e.get("year", 0))
+                except (TypeError, ValueError):
+                    continue
+                if 2008 <= _yr <= 2015 and any(p in _off for p in _N14B_MM_OFFENCE_PATTERNS):
+                    _n14b_count += 1
+            _n14b_attest = _any_conviction_attests("n14b_attestation")
+            _n14b_state = "High" if (_n14b_count > 0 or _n14b_attest) else "Low"
+            
+            # Replicate _n14c_signal logic
+            _n14c_pre_ipeelee = sum(1 for e in _record
+                                    if 0 < int(e.get("year", 0) or 0) < 2012)
+            _n14c_attest = _any_conviction_attests("n14c_sce_applied")
+            _n14c_state = ("Low (SCE present)" if _n14c_attest 
+                           else ("High (SCE absent)" if _n14c_pre_ipeelee > 0 else "Low"))
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.88rem;color:#3A3A3A;line-height:1.55;margin-bottom:14px'>"
+                "Per Chapter 5 §5.1.14 §1, time becomes a source of inferential error "
+                "when convictions imposed under outdated regimes are imported wholesale "
+                "into contemporary risk assessment. Three of N14's four parents (N14a, "
+                "N14b, N14c) are auto-derived from conviction years and offence text. "
+                "N14d (judicial competence) is computed by the Bayesian network from "
+                "N10 (Judicial Misapplication) per §5.1.14 §Position."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N14a status card
+            _n14a_color = "#A32D2D" if _n14a_state == "High" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n14a_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N14a — Sentencing era severity</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n14a_color};font-weight:600'>{_n14a_count} conviction(s) in 2008–2015"
+                f"{' · attested' if _n14a_attest else ''} · {_n14a_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Flags High when record contains conviction(s) from 2008–2015 (Bill C-10 "
+                f"era of mandatory-minimum expansion and pre-<em>Sharma</em> regime). "
+                f"Counsel attestation overrides for analogous severity outside this window."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N14b status card
+            _n14b_color = "#A32D2D" if _n14b_state == "High" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n14b_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N14b — Historical mandatory minimum</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n14b_color};font-weight:600'>{_n14b_count} MM-eligible conviction(s)"
+                f"{' · attested' if _n14b_attest else ''} · {_n14b_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Pattern-matches MM-eligible offences "
+                f"(<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;color:#888'>"
+                f"trafficking, firearm, sexual interference, child pornography</code>) "
+                f"against 2008–2015 conviction years. Many of these MMs were struck down "
+                f"post-<em>Nur</em> (2015) / <em>Lloyd</em> (2016), but convictions imposed "
+                f"during their force carry doctrinal residue per §5.1.14 §2."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N14c status card
+            _n14c_is_high = _n14c_state.startswith("High")
+            _n14c_color = "#A32D2D" if _n14c_is_high else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n14c_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N14c — SCE absent at sentencing</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n14c_color};font-weight:600'>{_n14c_pre_ipeelee} pre-2012 conviction(s)"
+                f"{' · attested SCE applied' if _n14c_attest else ''} · {_n14c_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Flags SCE absent when record contains pre-<em>Ipeelee</em> (pre-2012) "
+                f"conviction(s) — SCE was formally available post-<em>Gladue</em> (1999) but "
+                f"often only nominally applied until <em>Ipeelee</em> made substantive "
+                f"integration mandatory. Attestation override sets state to Low when SCE "
+                f"WAS substantively applied at original sentencing (architecture treats this "
+                f"as no temporal-distortion contribution from N14c)."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.80rem;color:#707070;margin-top:14px;line-height:1.55'>"
+                "<strong style='font-weight:500;color:#3A3A3A;font-style:normal'>Note on N14d.</strong> "
+                "N14d (judicial competence absent) has no app-derived signal. "
+                "Per §5.1.14 §Position + the model topology, N14d is a Bayesian "
+                "network node downstream of N10 (Judicial Misapplication of SCE). "
+                "Its posterior is computed by Variable Elimination from N10's "
+                "evidence — when N10 indicates misapplication, N14d rises proportionally."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── §5.1.15 audit-signal methodology (N15a/b/c — N15d shares n14c) ──
+        with st.expander("📚 §5.1.15 audit signal — how N15a, N15b, N15c are computed"):
+            _record = st.session_state.get("criminal_record", []) or []
+            _case_jur = st.session_state.get("case_jur", "") or ""
+
+            # Replicate _n15a logic for display
+            _case_lower = _case_jur.lower()
+            _n15a_match = any(j in _case_lower for j in _N15_HIGH_TARIFF_JURISDICTIONS)
+            _n15a_attest = _any_conviction_attests("n15a_attestation")
+            _n15a_state = "High-tariff" if (_n15a_match or _n15a_attest) else "Low-tariff"
+
+            # Replicate _n15b logic
+            _n15b_count = 0
+            for _e in _record:
+                _off = (_e.get("offence", "") or "").lower()
+                _ts = any(p in _off for p in _N15_TARIFF_SENSITIVE_PATTERNS)
+                _cd = any(p in _off for p in _N15_CONDUCT_DRIVEN_PATTERNS)
+                if _ts and not _cd:
+                    _n15b_count += 1
+            _n15b_attest = _any_conviction_attests("n15b_attestation")
+            _n15b_state = "Tariff-sensitive" if (_n15b_count > 0 or _n15b_attest) else "Conduct-driven / none"
+
+            # Replicate _n15c logic
+            _n15c_fed_count = sum(1 for _e in _record
+                                   if "Federal custody" in (_e.get("sentence_type", "") or ""))
+            _n15c_attest = _any_conviction_attests("n15c_attestation")
+            _n15c_state = "Long sentence" if (_n15c_fed_count > 0 or _n15c_attest) else "Short / none"
+
+            # N15d shares n14c
+            _n15d_attest = _any_conviction_attests("n14c_sce_applied")
+            _n15d_state = "Doctrine present" if _n15d_attest else "Doctrine absent"
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.88rem;color:#3A3A3A;line-height:1.55;margin-bottom:14px'>"
+                "Per Chapter 5 §5.1.15 §1, interjurisdictional tariff distortion arises "
+                "when sentence length and conviction severity are treated as uniform "
+                "indicators of culpability across provinces, despite documented regional "
+                "variation in sentencing norms (Doob, Cesaroni, Roach). Three of N15's "
+                "four parents (N15a/b/c) are auto-derived from case_jur, offence text, "
+                "and sentence_type. N15d (jurisprudential compliance) shares the §5.1.14 "
+                "SCE-applied attestation — the same doctrinal-application question covers "
+                "both temporal and tariff dimensions. N15 itself is computed by the "
+                "Bayesian network from these four sub-nodes plus N14 (per §5.1.15 §Position)."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N15a status card
+            _n15a_color = "#A32D2D" if _n15a_state == "High-tariff" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n15a_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N15a — Tariff jurisdiction disparity</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n15a_color};font-weight:600'>"
+                f"{_case_jur if _case_jur else '(no jurisdiction set)'}"
+                f"{' · attested' if _n15a_attest else ''} · {_n15a_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Tier-classifies <code style='font-family:JetBrains Mono,monospace;"
+                f"font-size:0.74rem;color:#888'>case_jur</code> against high-tariff "
+                f"jurisdiction set per Doob/Cesaroni/Roach lineage (Ontario, Manitoba, "
+                f"Saskatchewan, Alberta). Counsel attestation overrides for case-specific "
+                f"tariff classification."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N15b status card
+            _n15b_color = "#A32D2D" if _n15b_state == "Tariff-sensitive" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n15b_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N15b — Tariff-sensitive offence type</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n15b_color};font-weight:600'>{_n15b_count} tariff-sensitive offence(s)"
+                f"{' · attested' if _n15b_attest else ''} · {_n15b_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Pattern-matches offence text against tariff-sensitive categories "
+                f"(<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:#888'>theft, fraud, trafficking, breach</code>). Conduct-driven "
+                f"offences (assault, sexual offences) treated as tariff-resistant per "
+                f"§5.1.15 §7 — sentence length more reflects conduct severity than "
+                f"regional variation."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N15c status card
+            _n15c_color = "#A32D2D" if _n15c_state == "Long sentence" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n15c_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N15c — Tariff-sensitive sentence length</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n15c_color};font-weight:600'>{_n15c_fed_count} federal-custody conviction(s)"
+                f"{' · attested' if _n15c_attest else ''} · {_n15c_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"§5.1.15 §7 thresholds: tariff-sensitive offences become tariff-prone "
+                f"above 1 year; conduct-driven offences above 3 years. Heuristic "
+                f"auto-detects Federal custody (2+ years) which always exceeds the "
+                f"1-year threshold. Use attestation for Provincial custody cases that "
+                f"exceeded the offence-conditional threshold (e.g., 18-month sentence "
+                f"for property offence)."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.80rem;color:#707070;margin-top:14px;line-height:1.55'>"
+                f"<strong style='font-weight:500;color:#3A3A3A;font-style:normal'>"
+                f"Note on N15d.</strong> "
+                f"N15d (jurisprudential compliance absent) shares the §5.1.14 "
+                f"SCE-applied attestation — the same sentencing event either applied "
+                f"Tetrad/SCE jurisprudence or did not, and that single doctrinal-"
+                f"application question covers both temporal-distortion (N14c) and "
+                f"tariff-distortion (N15d) dimensions. Per Q3 binary collapse: "
+                f"<em>Gladue+Ewert</em> (binding) and <em>Morris+Ellis</em> "
+                f"(persuasive) both map to state 0 — any jurisprudence applied means "
+                f"doctrine present. Current state: <strong style='color:{("#3B6D11" if _n15d_attest else "#A32D2D")}'>"
+                f"{_n15d_state}</strong>."
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── §5.1.18 audit-signal methodology (N18a/b/c — N18d BN-derived) ──
+        with st.expander("📚 §5.1.18 audit signal — how N18a, N18b, N18c are computed"):
+            _record = st.session_state.get("criminal_record", []) or []
+            _case_jur = st.session_state.get("case_jur", "") or ""
+
+            # Replicate _n18a logic for display
+            _case_lower = _case_jur.lower()
+            _n18a_match = any(j in _case_lower for j in _N18_SCE_INTEGRATED_JURISDICTIONS)
+            _n18a_attest = st.session_state.get("n18a_counsel_attestation", False)
+            _n18a_state = "No Morris/Ellis" if (not _n18a_match or _n18a_attest) else "Morris/Ellis/SCC"
+
+            # Replicate _n18b/c logic — count tag distribution
+            _n18b_attest = _any_conviction_attests("n18b_attestation")
+            _n18c_attest = _any_conviction_attests("n18c_attestation")
+            _tag_counts = {"Full":0, "Partial":0, "Nominal":0, "Absent":0}
+            for _e in _record:
+                _t = _e.get("sce_integration_tag", _N18_TAG_DEFAULT)
+                if _t in _tag_counts:
+                    _tag_counts[_t] += 1
+            _n18b_state = "Absent" if (_tag_counts["Absent"] > 0 or _n18b_attest) else "Present"
+            _n18c_state = ("Nominal/Absent" if (_tag_counts["Nominal"] + _tag_counts["Absent"] > 0
+                                                  or _n18c_attest)
+                           else "Substantive")
+
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.88rem;color:#3A3A3A;line-height:1.55;margin-bottom:14px'>"
+                "Per Chapter 5 §5.1.18 §1, N18 audits whether prior convictions "
+                "substantively integrated SCE / Tetrad jurisprudence — "
+                "<em>not</em> whether the original sentence was correct. It is "
+                "framed as a metadata tagging layer, evaluating how a record "
+                "should be interpreted today rather than whether it was properly "
+                "decided then. Three of N18's six parents (N18a/b/c) are auto-"
+                "derived from case_jur and per-conviction SCE-integration tags. "
+                "N18d (Doctrinal Tagging compliance) is BN-derived from N10 "
+                "(Misapplication). N18 itself is computed by the Bayesian network "
+                "from these four sub-nodes plus N12 and N14 as structural "
+                "amplifiers per §5.1.18 §Position."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N18a status card
+            _n18a_color = "#A32D2D" if _n18a_state == "No Morris/Ellis" else "#3B6D11"
+            st.markdown(
+                f"<div style='border-left:3px solid {_n18a_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N18a — Jurisdiction SCE-integration sensitivity</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n18a_color};font-weight:600'>"
+                f"{_case_jur if _case_jur else '(no jurisdiction set)'}"
+                f"{' · attested' if _n18a_attest else ''} · {_n18a_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Tier-classifies <code style='font-family:JetBrains Mono,monospace;"
+                f"font-size:0.74rem;color:#888'>case_jur</code> against jurisdictions "
+                f"with strong provincial appellate SCE-integration scrutiny: ON post-"
+                f"Morris (2021 ONCA 680), BC post-Ellis (2022 BCCA 278), and SCC. "
+                f"All other jurisdictions default to inflation risk."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N18b status card with tag distribution
+            _n18b_color = "#A32D2D" if _n18b_state == "Absent" else "#3B6D11"
+            _tag_dist_str = (
+                f"Full: {_tag_counts['Full']} · Partial: {_tag_counts['Partial']} · "
+                f"Nominal: {_tag_counts['Nominal']} · Absent: {_tag_counts['Absent']}"
+            )
+            st.markdown(
+                f"<div style='border-left:3px solid {_n18b_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N18b — SCE Presence in reasons</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n18b_color};font-weight:600'>"
+                f"{_tag_dist_str}{' · attested' if _n18b_attest else ''} · {_n18b_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"Aggregates over per-conviction SCE-integration tags. State 1 "
+                f"(SCE absent) when at least one conviction tagged "
+                f"<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:#888'>Absent</code>. Tags Full/Partial/Nominal all count "
+                f"as SCE present in reasons."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # N18c status card — emphasises Morris Heuristic Audit
+            _n18c_color = "#A32D2D" if _n18c_state == "Nominal/Absent" else "#3B6D11"
+            _morris_count = _tag_counts["Nominal"] + _tag_counts["Absent"]
+            st.markdown(
+                f"<div style='border-left:3px solid {_n18c_color};padding:.6rem .9rem;"
+                f"margin-bottom:.7rem;background:#FBFAF7;border-radius:0 6px 6px 0'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:baseline'>"
+                f"<div style='font-family:Fraunces,Georgia,serif;font-weight:500;"
+                f"color:#1A1A1A;font-size:0.94rem'>N18c — SCE Substance (Morris Heuristic Audit)</div>"
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:0.80rem;"
+                f"color:{_n18c_color};font-weight:600'>"
+                f"{_morris_count} non-substantive conviction(s)"
+                f"{' · attested' if _n18c_attest else ''} · {_n18c_state}</div>"
+                f"</div>"
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+                f"State 1 when any conviction tagged "
+                f"<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:#888'>Nominal</code> or "
+                f"<code style='font-family:JetBrains Mono,monospace;font-size:0.74rem;"
+                f"color:#888'>Absent</code>. Captures the Morris Heuristic Audit "
+                f"finding that nominal Gladue mention without substantive "
+                f"integration is a distinct failure mode from outright absence."
+                f"</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                f"font-size:0.80rem;color:#707070;margin-top:14px;line-height:1.55'>"
+                f"<strong style='font-weight:500;color:#3A3A3A;font-style:normal'>"
+                f"Note on N18d.</strong> "
+                f"N18d (Doctrinal Tagging compliance) has no app-derived signal. "
+                f"Per §5.1.18 §5 + Q5 (α), N18d is a Bayesian network node "
+                f"downstream of N10 (Judicial Misapplication of SCE). Its "
+                f"posterior is computed by Variable Elimination from N10's "
+                f"evidence — when N10 indicates misapplication, N18d rises "
+                f"proportionally, reflecting the increased likelihood of "
+                f"incomplete or error-flagged doctrinal tagging at original "
+                f"sentencing."
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
         if st.button("Clear entire record", key="cr_clear"):
             st.session_state.criminal_record = []
@@ -6858,6 +9853,137 @@ with TABS[12]:
             f"\n\n  Pattern (Boutilier): {esc_info.get('pattern','—').title()}\n"
             f"  {esc_info.get('note','')}\n{'─'*60}</div>",
             unsafe_allow_html=True)
+
+    # ── §RM.1 register: N1 burden-of-proof audit ledger (Mark 8 Phase 2) ────
+    # Per JP architecture lock-in (Q1=A, Q2=A, Q3=A, Q4=B + M8/P2 Pattern A):
+    # every audited input across all integrated tabs surfaces here with
+    # provenance, applicable burden, attestation text, audit status, and
+    # citations. The register makes the trust-with-transparency model
+    # visible: PARVIS records the user's attestation as an assumption-of-
+    # record and displays it for adversarial review.
+
+    # Strict-mode review panel — surfaces pending classifications and
+    # attestations across all tabs. No-op when strict_mode is off.
+    _strict_mode_review_panel(tab_filter=None)
+
+    n1_audit_state = st.session_state.get("n1_audit", {})
+    n1_target = compute_n1_prior_from_audit(n1_audit_state)
+    st.markdown(
+        f"<div class='at' style='margin-top:.8rem'>"
+        f"{'─'*60}\n  §RM.1 — BURDEN-OF-PROOF AUDIT REGISTER\n{'─'*60}\n"
+        f"  Doctrinal basis:\n"
+        f"    {N1_CITATIONS['gardiner']}\n"
+        f"    {N1_CITATIONS['s724']}\n"
+        f"    {N1_CITATIONS['ferguson']}\n"
+        f"    {N1_CITATIONS['angelillo']}\n"
+        f"    {N1_CITATIONS['lacasse']}\n\n"
+        f"  Audit-derived target P(N1=High):  {n1_target*100:.1f}%\n"
+        f"  Live N1 posterior (post-VE):      "
+        f"{Pa.get(1, 0.83)*100:.1f}%\n"
+        f"  Strict mode:                      "
+        f"{'ON' if st.session_state.get('strict_mode', False) else 'off'}\n"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    if not n1_audit_state:
+        st.markdown(
+            "<div class='at'>  No inputs audited yet.\n"
+            "  Per Mark 8 Phase 2 build status:\n"
+            "    • Criminal Record tab     — full audit live\n"
+            "    • Gladue tab              — full audit live\n"
+            "    • SCE tab                 — full audit live\n"
+            "    • Risk &amp; Distortions  — full audit live\n"
+            "    • Intake tab              — [awaiting Mark 9 integration]\n"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        # Group audit records by tab for the register
+        by_tab = {}
+        for aid, rec_audit in n1_audit_state.items():
+            tab_key = rec_audit.get("tab", "unknown")
+            by_tab.setdefault(tab_key, []).append((aid, rec_audit))
+
+        register_lines = []
+        # Status legend
+        _legend = {
+            "satisfied":    "[✓ SATISFIED]",
+            "insufficient": "[✗ INSUFFICIENT]",
+            "pending":      "[⚠ PENDING]",
+        }
+
+        for tab_key in sorted(by_tab.keys()):
+            tab_label = {
+                "criminal_record":   "CRIMINAL RECORD",
+                "intake":            "INTAKE",
+                "gladue":            "GLADUE",
+                "sce":               "SCE / MORRIS-ELLIS",
+                "risk_substantive":  "RISK & DISTORTIONS — SUBSTANTIVE (N2/N3/N4)",
+                "risk_distortion":   "RISK & DISTORTIONS — DISTORTION NODES",
+                "risk_mitigation":   "RISK & DISTORTIONS — MITIGATION (N8/N9)",
+                "risk_other":        "RISK & DISTORTIONS — OTHER (N11 GAMING, ETC.)",
+            }.get(tab_key, tab_key.upper())
+            register_lines.append(f"\n  ── {tab_label} ──")
+
+            for aid, rec_audit in by_tab[tab_key]:
+                use = rec_audit.get("use", "contextual")
+                provenance = rec_audit.get("provenance", "—")
+                burden = rec_audit.get("applicable_burden", "none")
+                status = rec_audit.get("attestation_status", "pending")
+                label = rec_audit.get("label", aid)
+                attestation = rec_audit.get("attestation", "")
+                basis = rec_audit.get("attestation_basis", "")
+                judicial_type = rec_audit.get("judicial_finding_type")
+
+                if use in ("contextual", "agreed_fact"):
+                    # No audit triggered — record but don't fail
+                    register_lines.append(
+                        f"\n  · {label}\n"
+                        f"      Provenance: {provenance} · "
+                        f"Use: {use} · No audit required."
+                    )
+                else:
+                    status_marker = _legend.get(status, "[?]")
+                    register_lines.append(
+                        f"\n  · {label}  {status_marker}\n"
+                        f"      Provenance: {provenance} · "
+                        f"Use: {use} · Burden: {burden}"
+                    )
+                    if judicial_type:
+                        register_lines.append(
+                            f"      Ferguson sub-flag: {judicial_type}"
+                        )
+                    if basis and basis != ATTESTATION_BASES[0]:
+                        register_lines.append(
+                            f"      Basis: {basis}"
+                        )
+                    if attestation:
+                        # Wrap long attestations
+                        att_text = attestation.replace("\n", " ").strip()
+                        if len(att_text) > 140:
+                            att_text = att_text[:137] + "..."
+                        register_lines.append(
+                            f"      Attestation: \"{att_text}\""
+                        )
+                    elif status == "pending":
+                        register_lines.append(
+                            "      [No attestation recorded — awaiting "
+                            "user input]"
+                        )
+
+                # Prior-evidence audit placeholder (Mark 9 deferred)
+                pea = rec_audit.get("prior_evidence_audit_status")
+                if pea == "not_yet_conducted":
+                    register_lines.append(
+                        "      Prior-evidence audit (Bird carve-out): "
+                        "[awaiting Mark 9 implementation]"
+                    )
+
+        st.markdown(
+            f"<div class='at'>{''.join(register_lines)}\n{'─'*60}</div>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
