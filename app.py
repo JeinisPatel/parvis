@@ -1940,6 +1940,265 @@ def _classification_chip(audit_rec: dict) -> str:
     )
 
 
+# ── §5.1.1 N1 doctrinal-state framing (Mark 8 Phase 3 — display reframe) ──
+# Per JP M8/P3 lock-in: N1 is not a probability — it is the operationalisation
+# of a doctrinal posture toward the case file's audit state. Displaying N1 as
+# a continuous percentage invites probabilistic misreading ("there's an 83%
+# chance the burden is met"). The doctrinal truth is the inverse: PARVIS
+# operates on the doctrinal assumption that burdens are met (default posture),
+# fluctuates downward only when the user records explicit "insufficient"
+# findings, and reaches the floor only on catastrophic audit failure.
+#
+# Three named doctrinal states replace the continuous percentage in user-
+# facing surfaces. The numerical value is preserved as a depth indicator
+# below the state label — Option II per JP lock-in.
+
+# Doctrinal-state thresholds. See compute_n1_prior_from_audit for the
+# audit-state inputs that map to these states.
+_N1_STATE_DEFAULT     = "default"
+_N1_STATE_PRESSURE    = "pressure"
+_N1_STATE_FAILURE     = "failure"
+
+# Display configuration per state.
+_N1_STATE_DISPLAY = {
+    _N1_STATE_DEFAULT: {
+        "label":         "Doctrinal Default",
+        "subtitle":      "Audit pressure: baseline.",
+        "color_fg":      "#3B6D11",
+        "color_bg":      "#F4F8EE",
+        "color_border":  "#C5D7AC",
+        "color_accent":  "#3B6D11",
+    },
+    _N1_STATE_PRESSURE: {
+        "label":         "Doctrinal Pressure",
+        "subtitle":      "Audit pressure: at least one input marked insufficient.",
+        "color_fg":      "#7A4F0E",
+        "color_bg":      "#FAEEDA",
+        "color_border":  "#E5CC95",
+        "color_accent":  "#BA7517",
+    },
+    _N1_STATE_FAILURE: {
+        "label":         "Doctrinal Failure",
+        "subtitle":      "Audit pressure: catastrophic — all audited inputs insufficient.",
+        "color_fg":      "#A32D2D",
+        "color_bg":      "#FCEBEB",
+        "color_border":  "#E5B5B5",
+        "color_accent":  "#A32D2D",
+    },
+}
+
+
+def _n1_doctrinal_state(audit_state: dict = None) -> str:
+    """
+    Classify the current N1 audit state into one of three doctrinal postures
+    per the Mark 8 Phase 3 framing lock-in.
+
+    Doctrinal-state thresholds (JP M8/P3 calls 1 & 2):
+      - Default:  zero audited inputs marked insufficient
+      - Pressure: at least one input marked insufficient (but not all)
+      - Failure:  ALL audited inputs marked insufficient
+
+    "Pending" attestations are neutral per Mark 8 hotfix #3 — they do not
+    contribute to the audit-failure proportion. Only "insufficient" findings
+    move N1 off the default posture.
+
+    Inputs with use ∈ {contextual, agreed_fact} or burden=none are excluded
+    from the audited-input population (they fall outside the audit's scope
+    per Gardiner's asymmetry).
+    """
+    if audit_state is None:
+        audit_state = st.session_state.get("n1_audit", {})
+
+    if not audit_state:
+        return _N1_STATE_DEFAULT
+
+    audited_count = 0
+    insufficient_count = 0
+
+    for record in audit_state.values():
+        provenance = record.get("provenance")
+        use = record.get("use")
+        burden = record.get("applicable_burden", "none")
+        status = record.get("attestation_status", "pending")
+        judicial_type = record.get("judicial_finding_type")
+
+        # Determine if this input requires a burden audit (matches the
+        # cross-product in compute_n1_prior_from_audit).
+        burden_required = False
+        if provenance == "crown" and use == "aggravating":
+            burden_required = True
+        elif provenance == "defence" and use == "mitigating":
+            burden_required = True
+        elif (provenance == "judicial"
+              and judicial_type == "found_by_sentencing_judge"
+              and use in ("aggravating", "mitigating")):
+            burden_required = True
+
+        if not burden_required:
+            continue
+
+        audited_count += 1
+        if status == "insufficient":
+            insufficient_count += 1
+
+    if audited_count == 0:
+        return _N1_STATE_DEFAULT
+    if insufficient_count == 0:
+        return _N1_STATE_DEFAULT
+    if insufficient_count == audited_count:
+        return _N1_STATE_FAILURE
+    return _N1_STATE_PRESSURE
+
+
+def _n1_audit_summary(audit_state: dict = None) -> dict:
+    """
+    Build a summary record of the N1 audit state for display purposes.
+
+    Returns a dict with:
+      state:              one of _N1_STATE_DEFAULT/_PRESSURE/_FAILURE
+      label:              display label for the state
+      subtitle:           one-line description of audit pressure
+      color_fg/bg/border/accent:  display colours per state
+      audited_count:      number of audited (burden-required) inputs
+      insufficient_count: number of those marked insufficient
+      pending_count:      number of those still pending attestation
+      satisfied_count:    number of those with attestation satisfied
+    """
+    if audit_state is None:
+        audit_state = st.session_state.get("n1_audit", {})
+
+    audited_count = 0
+    insufficient_count = 0
+    pending_count = 0
+    satisfied_count = 0
+
+    for record in audit_state.values():
+        provenance = record.get("provenance")
+        use = record.get("use")
+        status = record.get("attestation_status", "pending")
+        judicial_type = record.get("judicial_finding_type")
+
+        burden_required = False
+        if provenance == "crown" and use == "aggravating":
+            burden_required = True
+        elif provenance == "defence" and use == "mitigating":
+            burden_required = True
+        elif (provenance == "judicial"
+              and judicial_type == "found_by_sentencing_judge"
+              and use in ("aggravating", "mitigating")):
+            burden_required = True
+
+        if not burden_required:
+            continue
+
+        audited_count += 1
+        if status == "insufficient":
+            insufficient_count += 1
+        elif status == "satisfied":
+            satisfied_count += 1
+        else:
+            pending_count += 1
+
+    state = _n1_doctrinal_state(audit_state)
+    display = _N1_STATE_DISPLAY[state]
+
+    return {
+        "state":              state,
+        "label":              display["label"],
+        "subtitle":           display["subtitle"],
+        "color_fg":           display["color_fg"],
+        "color_bg":           display["color_bg"],
+        "color_border":       display["color_border"],
+        "color_accent":       display["color_accent"],
+        "audited_count":      audited_count,
+        "insufficient_count": insufficient_count,
+        "pending_count":      pending_count,
+        "satisfied_count":    satisfied_count,
+    }
+
+
+def _n1_state_chip_html(audit_state: dict = None,
+                         include_depth: bool = True,
+                         compact: bool = False) -> str:
+    """
+    Render an HTML chip showing the N1 doctrinal state.
+
+    include_depth: if True, append the live N1 posterior as a small depth
+    indicator below the state label (Option II per JP lock-in: state label
+    dominant, percentage subordinate).
+
+    compact: if True, render a single-line chip suitable for diagnostic
+    grids (Inference tab). If False, render the multi-line card-style
+    block suitable for the Doctrinal architecture / Architecture tab /
+    Report tab register.
+    """
+    summary = _n1_audit_summary(audit_state)
+    posterior = float(st.session_state.get("posteriors", {}).get(1, 0.83))
+
+    if compact:
+        # Inference-tab grid chip: single line, label + small percentage
+        return (
+            f"<div style='font-family:JetBrains Mono,monospace;"
+            f"font-size:0.62rem;font-weight:600;color:{summary['color_fg']};"
+            f"text-transform:uppercase;letter-spacing:0.04em;line-height:1.2'>"
+            f"{summary['label']}</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;"
+            f"font-size:0.78rem;color:{summary['color_accent']};"
+            f"margin-top:2px;font-weight:500'>"
+            f"{posterior*100:.1f}%</div>"
+        )
+
+    # Default multi-line card-style block.
+    detail_line = ""
+    if summary["audited_count"] > 0:
+        parts = []
+        if summary["satisfied_count"]:
+            parts.append(f"{summary['satisfied_count']} satisfied")
+        if summary["pending_count"]:
+            parts.append(f"{summary['pending_count']} pending")
+        if summary["insufficient_count"]:
+            parts.append(f"{summary['insufficient_count']} insufficient")
+        detail_line = (
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.78rem;color:#5A5A5A;margin-top:4px'>"
+            f"{summary['audited_count']} audited input(s) — "
+            f"{', '.join(parts)}.</div>"
+        )
+
+    depth_html = ""
+    if include_depth:
+        depth_html = (
+            f"<div style='display:flex;align-items:center;gap:8px;margin-top:8px'>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:0.66rem;"
+            f"color:#9E9E9E;text-transform:uppercase;letter-spacing:0.06em'>"
+            f"Audit-pressure depth</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:0.84rem;"
+            f"font-weight:600;color:{summary['color_accent']}'>"
+            f"{posterior*100:.1f}%</div>"
+            f"<div style='font-family:Fraunces,serif;font-style:italic;"
+            f"font-size:0.7rem;color:#9E9E9E'>"
+            f"(operationalisation of doctrinal posture, not a probability)</div>"
+            f"</div>"
+        )
+
+    return (
+        f"<div>"
+        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.72rem;"
+        f"font-weight:700;color:{summary['color_fg']};text-transform:uppercase;"
+        f"letter-spacing:0.06em;margin-bottom:4px'>"
+        f"Doctrinal posture</div>"
+        f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.15rem;"
+        f"font-weight:500;color:{summary['color_fg']};line-height:1.2'>"
+        f"{summary['label']}</div>"
+        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+        f"font-size:0.84rem;color:#3a3a3a;margin-top:6px;line-height:1.5'>"
+        f"{summary['subtitle']}</div>"
+        f"{detail_line}"
+        f"{depth_html}"
+        f"</div>"
+    )
+
+
 # ── Per-conviction attestation aggregators (Mark 8 Phase 2) ───────────────
 # After moving N14/N15/N18 attestations from Profile to per-conviction on
 # Criminal Record, the signal-computation helpers (_compute_n14_evidence
@@ -2358,12 +2617,31 @@ NP={1:(.50,.92),2:(.12,.73),3:(.50,.73),4:(.88,.73),
 
 def draw_dag(post,sel=None):
     fig,ax=plt.subplots(figsize=(13,9),facecolor='#fafafa')
-    ax.set_xlim(-.02,1.02);ax.set_ylim(-.08,1.02);ax.axis('off');ax.set_facecolor('#fafafa')
-    for y,h,lbl,lx in [(.83,.10,"Layer I — Substantive risk",.52),
-                        (.29,.53,"Layer II — Systemic distortion & doctrinal fidelity",.52),
-                        (-.04,.09,"Layer III — Structural output",.52)]:
+    # Mark 8 Phase 3 (Alternative A): xlim extended left to -.06 to give
+    # margin space for vertical layer labels. Headers now run vertically
+    # at the left edge of each layer rectangle rather than horizontally
+    # at the top, eliminating all node-collision risk. Pattern is a
+    # standard scientific-diagram convention (axis-style annotations).
+    ax.set_xlim(-.06,1.02);ax.set_ylim(-.08,1.02);ax.axis('off');ax.set_facecolor('#fafafa')
+    # Layer rectangles + vertical margin labels.
+    # Each label is a single rotated text block ("LAYER N\nSubtitle"),
+    # centered vertically on its rectangle at x=-.025. The earlier
+    # horizontal-header treatment created persistent overlap problems
+    # with N1's label cluster (Layer II header crossing N1's "83%"
+    # percentage label) and the N3 ellipse (long Layer II subtitle
+    # sprawling across the diagram). Vertical placement at margin
+    # solves both.
+    for y, h, title, subtitle in [
+        (.83, .10, "LAYER I",   "Substantive risk"),
+        (.29, .53, "LAYER II",  "Systemic distortion & doctrinal fidelity"),
+        (-.04, .09, "LAYER III", "Structural output"),
+    ]:
         ax.add_patch(plt.Rectangle((0,y),1.0,h,color='#f0f0f0',alpha=.55,zorder=0))
-        ax.text(lx,y+h-.015,lbl,fontsize=8,color='#bbb',fontweight='bold',va='top',ha='center',zorder=1)
+        cy = y + h/2  # vertical center of layer rectangle
+        ax.text(-.025, cy, f"{title}\n{subtitle}",
+                fontsize=7, color='#aaa', fontweight='bold',
+                va='center', ha='center', zorder=1, alpha=.9,
+                rotation=90, rotation_mode='anchor', linespacing=1.4)
     for f,t in EDGES:
         if f not in NP or t not in NP: continue
         x1,y1=NP[f];x2,y2=NP[t];hi=sel and (f==sel or t==sel)
@@ -2379,6 +2657,18 @@ def draw_dag(post,sel=None):
         "15a":.025, "15b":.025, "15c":.025, "15d":.025,
         # §5.1.18 sub-nodes — same smaller radius
         "18a":.025, "18b":.025, "18c":.025, "18d":.025}
+    # Mark 8 Phase 3 — B-prime per JP M8/P3 lock-in: N1's percentage label
+    # is rendered in a doctrinal-state colour (green Default / amber
+    # Pressure / red Failure) rather than the type-base brown. The number
+    # itself is preserved to maintain DAG topology-view consistency; the
+    # colour communicates the doctrinal posture without changing the
+    # diagram's grammar (every node still shows a percentage).
+    _n1_state_dag = _n1_doctrinal_state()
+    _n1_state_color_dag = {
+        "default":  "#3B6D11",  # green
+        "pressure": "#BA7517",  # amber
+        "failure":  "#A32D2D",  # red
+    }.get(_n1_state_dag, "#3B6D11")
     for nid,(x,y) in NP.items():
         m=NODE_META[nid];col=TC[m["type"]];p=post.get(nid,.5);iS=sel==nid
         r=NR.get(nid,.040)
@@ -2392,14 +2682,26 @@ def draw_dag(post,sel=None):
             _fs = 8 if nid < 10 else 7
         ax.text(x,y,str(nid),ha='center',va='center',fontsize=_fs,
                 fontweight='bold',color='white' if iS else col,zorder=5)
-        lbl=m["short"][:14]+("…" if len(m["short"])>14 else "")
+        # Mark 8 Phase 3 — Approach 1 readability fix: N1's "Burden of
+        # proof" label is exactly 15 chars and was being truncated to
+        # "Burden of proo" by the global 14-char cap. Per JP M8/P3
+        # lock-in, drop the truncation for N1 specifically (most-read
+        # label in the diagram, doctrinal centrality). Other 19 nodes
+        # retain the existing 14-char truncation pending a Mark 9
+        # readability pass on the diagram as a whole.
+        if nid == 1:
+            lbl = m["short"]  # render in full — "Burden of proof"
+        else:
+            lbl = m["short"][:14] + ("…" if len(m["short"]) > 14 else "")
         # Sub-nodes use tighter label spacing and slightly smaller text
         if isinstance(nid, str):
             ax.text(x,y-r-.018,lbl,ha='center',va='top',fontsize=5.5,color='#555',zorder=5)
             ax.text(x,y-r-.034,f'{p*100:.0f}%',ha='center',va='top',fontsize=5,color=col,fontweight='bold',zorder=5,alpha=.8)
         else:
             ax.text(x,y-r-.025,lbl,ha='center',va='top',fontsize=6.5,color='#555',zorder=5)
-            ax.text(x,y-r-.050,f'{p*100:.0f}%',ha='center',va='top',fontsize=6,color=col,fontweight='bold',zorder=5,alpha=.8)
+            # B-prime: N1's percentage uses doctrinal-state colour
+            _pct_color = _n1_state_color_dag if nid == 1 else col
+            ax.text(x,y-r-.050,f'{p*100:.0f}%',ha='center',va='top',fontsize=6,color=_pct_color,fontweight='bold',zorder=5,alpha=.8)
     handles=[plt.Line2D([0],[0],marker='o',color='w',markerfacecolor=c,markeredgecolor=c,
              markersize=8,label=TL[t]) for t,c in TC.items()]
     ax.legend(handles=handles,loc='upper right',fontsize=7.5,framealpha=.92,edgecolor='#ddd')
@@ -2715,12 +3017,18 @@ with TABS[0]:
                 # Surface caption depends on node identity
                 if _d["nid"] == 1:
                     _surface = (
-                        "Encodes the evidentiary admissibility thresholds — "
-                        "Crown beyond reasonable doubt for aggravating evidence "
-                        "(~83%), defence balance of probabilities for mitigating "
-                        "(~51%). Functions as a structural meta-constraint "
-                        "conditioning all other inference, not as a posterior "
-                        "over case facts."
+                        "Encodes the doctrinal admissibility posture toward "
+                        "evidentiary inputs at sentencing. Per <em>R. v. "
+                        "Gardiner</em> [1982] 2 SCR 368 and s. 724(3) "
+                        "<em>Criminal Code</em>, asymmetric burdens apply "
+                        "per evidentiary input — Crown bears BARD on "
+                        "aggravating facts, defence bears BoP on mitigating "
+                        "facts. PARVIS operates on the doctrinal assumption "
+                        "that those burdens are met (default posture) and "
+                        "fluctuates only when the user records explicit "
+                        "&ldquo;insufficient&rdquo; findings via the §RM.1 "
+                        "register. N1 is not a probability — it is the "
+                        "operationalisation of that posture."
                     )
                     _expand_label = "Formal treatment — Chapter 5 §5.1.1"
                     _formal = (
@@ -2732,12 +3040,29 @@ with TABS[0]:
                         "case of Bayesian conditional probability where the "
                         "conditional collapses to certainty. Deterministic "
                         "conditioning of this kind is orthodox within Bayesian "
-                        "network methodology. The node's posterior remains "
-                        "stable across case-specific evidence because it "
-                        "represents a precondition on belief revision rather "
-                        "than a variable within it. Law does not work in "
-                        "percentages; the values shown are best-available "
-                        "industry estimates of these doctrinal thresholds."
+                        "network methodology. <br><br>"
+                        "Per <em>Gardiner</em>, the burden of proof is "
+                        "<em>not</em> a property of the case — it is a "
+                        "property of each evidentiary input. The Crown bears "
+                        "BARD on every aggravating fact it advances; defence "
+                        "bears BoP on every mitigating fact. Both happen "
+                        "simultaneously in any contested sentencing. PARVIS's "
+                        "audit math handles this asymmetry per-input via "
+                        "differentiated weights (1.0 for aggravating-fail, "
+                        "0.6 for mitigating-fail). N1's display reports the "
+                        "doctrinal posture toward the case file's audit "
+                        "state as a whole: <strong>Default</strong> (audit "
+                        "pressure baseline; system operates on the assumption "
+                        "that thresholds are met), <strong>Pressure</strong> "
+                        "(at least one input marked insufficient by the user), "
+                        "or <strong>Failure</strong> (every audited input "
+                        "marked insufficient — the case file as constituted "
+                        "does not meet doctrinal admissibility). Numerical "
+                        "depth is shown subordinate to the posture label as "
+                        "an indicator of audit pressure, not as a probability "
+                        "claim. Law does not work in percentages; the depth "
+                        "indicator's range is best-available industry "
+                        "operationalisation, not a probability over case facts."
                     )
                 elif _d["nid"] == 5:
                     _surface = (
@@ -2798,25 +3123,76 @@ with TABS[0]:
                         "surveillance, and that conflating the two is a "
                         "structural error."
                     )
-                # Card
-                st.markdown(
-                    f"<div style='background:{_accent_bg};border:1px solid {_accent_border};"
-                    f"border-left:3px solid {_accent};border-radius:8px;padding:14px 18px;"
-                    f"margin-bottom:10px'>"
-                    f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>"
-                    f"<div style='font-family:JetBrains Mono,monospace;font-size:0.78rem;"
-                    f"font-weight:600;padding:3px 9px;border-radius:5px;color:white;"
-                    f"background:{_accent}'>N{_d['nid']}</div>"
-                    f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
-                    f"font-weight:500;color:#1a1a1a'>{_d['short']}</div>"
-                    f"<div style='margin-left:auto;font-family:JetBrains Mono,monospace;"
-                    f"font-size:0.95rem;font-weight:600;color:{_accent}'>{_d['p']*100:.1f}%</div>"
-                    f"</div>"
-                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
-                    f"font-size:0.84rem;color:#3a3a3a;line-height:1.55'>{_surface}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
+                # Card — N1 uses doctrinal-state framing (Option II per JP M8/P3
+                # lock-in: posture label dominant, depth indicator subordinate).
+                # N5 and N19 retain numerical posterior display (their nodes
+                # don't carry the same probabilistic-misreading risk as N1).
+                if _d["nid"] == 1:
+                    _n1_summary = _n1_audit_summary()
+                    # Override accent palette with state-driven colour
+                    _accent = _n1_summary["color_accent"]
+                    _accent_bg = _n1_summary["color_bg"]
+                    _accent_border = _n1_summary["color_border"]
+                    _state_label = _n1_summary["label"]
+                    _posterior_n1 = float(P.get(1, 0.83))
+                    st.markdown(
+                        f"<div style='background:{_accent_bg};border:1px solid {_accent_border};"
+                        f"border-left:3px solid {_accent};border-radius:8px;padding:14px 18px;"
+                        f"margin-bottom:10px'>"
+                        f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>"
+                        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.78rem;"
+                        f"font-weight:600;padding:3px 9px;border-radius:5px;color:white;"
+                        f"background:{_accent}'>N{_d['nid']}</div>"
+                        f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+                        f"font-weight:500;color:#1a1a1a'>{_d['short']}</div>"
+                        f"</div>"
+                        # Doctrinal-posture block (dominant)
+                        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.66rem;"
+                        f"font-weight:700;color:{_accent};text-transform:uppercase;"
+                        f"letter-spacing:0.08em;margin:6px 0 2px 0'>"
+                        f"Doctrinal posture</div>"
+                        f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.4rem;"
+                        f"font-weight:500;color:{_accent};line-height:1.15;margin-bottom:8px'>"
+                        f"{_state_label}</div>"
+                        # Surface caption
+                        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                        f"font-size:0.84rem;color:#3a3a3a;line-height:1.55'>{_surface}</div>"
+                        # Subordinate depth indicator
+                        f"<div style='display:flex;align-items:baseline;gap:8px;margin-top:10px;"
+                        f"padding-top:8px;border-top:1px dashed {_accent_border}'>"
+                        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.62rem;"
+                        f"color:#9E9E9E;text-transform:uppercase;letter-spacing:0.06em'>"
+                        f"Audit-pressure depth</div>"
+                        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.78rem;"
+                        f"font-weight:600;color:{_accent}'>{_posterior_n1*100:.1f}%</div>"
+                        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                        f"font-size:0.7rem;color:#9E9E9E'>"
+                        f"operationalisation, not a probability</div>"
+                        f"</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    # N5 / N19 retain existing percentage display (their nodes
+                    # don't carry the doctrinal-state framing N1 requires).
+                    st.markdown(
+                        f"<div style='background:{_accent_bg};border:1px solid {_accent_border};"
+                        f"border-left:3px solid {_accent};border-radius:8px;padding:14px 18px;"
+                        f"margin-bottom:10px'>"
+                        f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>"
+                        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.78rem;"
+                        f"font-weight:600;padding:3px 9px;border-radius:5px;color:white;"
+                        f"background:{_accent}'>N{_d['nid']}</div>"
+                        f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.05rem;"
+                        f"font-weight:500;color:#1a1a1a'>{_d['short']}</div>"
+                        f"<div style='margin-left:auto;font-family:JetBrains Mono,monospace;"
+                        f"font-size:0.95rem;font-weight:600;color:{_accent}'>{_d['p']*100:.1f}%</div>"
+                        f"</div>"
+                        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                        f"font-size:0.84rem;color:#3a3a3a;line-height:1.55'>{_surface}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
                 with st.expander(_expand_label, expanded=False):
                     st.markdown(
                         f"<div style='font-family:Fraunces,serif;font-size:0.86rem;"
@@ -3471,13 +3847,70 @@ with TABS[1]:
     with cr:
         if sel:
             m=NODE_META[sel];col=TC[m["type"]];p=P.get(sel,.5)
-            st.markdown(f"""<div style="background:{col}18;border:1px solid {col}55;border-radius:12px;padding:1rem">
-            <div style="font-size:.68rem;color:{col};font-weight:700">{TL[m['type']]}</div>
-            <div style="font-size:1rem;font-weight:700;margin-top:4px">N{sel}: {m['name']}</div>
-            <div style="font-size:2rem;font-weight:700;font-family:monospace;color:{col};margin:8px 0">{p*100:.1f}%</div>
-            <div style="height:5px;background:#eee;border-radius:3px">
-              <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:3px"></div>
-            </div></div>""",unsafe_allow_html=True)
+            if sel == 1:
+                # Mark 8 Phase 3 — N1 inspect panel uses doctrinal-state
+                # framing per JP M8/P3 lock-in. State label dominant,
+                # numerical depth subordinate, with audit-summary detail.
+                _n1_summary_inspect = _n1_audit_summary()
+                _n1_accent = _n1_summary_inspect["color_accent"]
+                _n1_bg = _n1_summary_inspect["color_bg"]
+                _n1_border = _n1_summary_inspect["color_border"]
+                _n1_label = _n1_summary_inspect["label"]
+                _n1_audited = _n1_summary_inspect["audited_count"]
+                _n1_insuf = _n1_summary_inspect["insufficient_count"]
+                _n1_pend = _n1_summary_inspect["pending_count"]
+                _n1_sat = _n1_summary_inspect["satisfied_count"]
+                _detail_parts = []
+                if _n1_sat: _detail_parts.append(f"{_n1_sat} satisfied")
+                if _n1_pend: _detail_parts.append(f"{_n1_pend} pending")
+                if _n1_insuf: _detail_parts.append(f"{_n1_insuf} insufficient")
+                _detail_block = ""
+                if _n1_audited:
+                    _detail_block = (
+                        f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                        f"font-size:.78rem;color:#5A5A5A;margin-top:8px'>"
+                        f"{_n1_audited} audited input(s) — "
+                        f"{', '.join(_detail_parts)}.</div>"
+                    )
+                st.markdown(
+                    f"<div style='background:{_n1_bg};border:1px solid {_n1_border};"
+                    f"border-left:3px solid {_n1_accent};border-radius:12px;padding:1rem'>"
+                    f"<div style='font-size:.68rem;color:{_n1_accent};font-weight:700'>"
+                    f"{TL[m['type']]}</div>"
+                    f"<div style='font-size:1rem;font-weight:700;margin-top:4px'>"
+                    f"N{sel}: {m['name']}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:.62rem;"
+                    f"color:{_n1_accent};text-transform:uppercase;letter-spacing:.08em;"
+                    f"font-weight:700;margin:12px 0 2px 0'>Doctrinal posture</div>"
+                    f"<div style='font-family:Fraunces,Georgia,serif;font-size:1.5rem;"
+                    f"font-weight:500;color:{_n1_accent};line-height:1.15'>{_n1_label}</div>"
+                    f"{_detail_block}"
+                    f"<div style='display:flex;align-items:baseline;gap:8px;margin-top:10px;"
+                    f"padding-top:8px;border-top:1px dashed {_n1_border}'>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:.6rem;"
+                    f"color:#9E9E9E;text-transform:uppercase;letter-spacing:.06em'>"
+                    f"Audit-pressure depth</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:.86rem;"
+                    f"font-weight:600;color:{_n1_accent}'>{p*100:.1f}%</div>"
+                    f"</div>"
+                    f"<div style='height:4px;background:#eee;border-radius:2px;margin-top:6px'>"
+                    f"<div style='width:{p*100:.0f}%;height:100%;background:{_n1_accent};"
+                    f"border-radius:2px'></div></div>"
+                    f"<div style='font-family:Fraunces,serif;font-style:italic;"
+                    f"font-size:.7rem;color:#9E9E9E;margin-top:6px;line-height:1.4'>"
+                    f"Operationalisation of doctrinal posture toward case-file audit "
+                    f"state — not a probability over case facts.</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(f"""<div style="background:{col}18;border:1px solid {col}55;border-radius:12px;padding:1rem">
+                <div style="font-size:.68rem;color:{col};font-weight:700">{TL[m['type']]}</div>
+                <div style="font-size:1rem;font-weight:700;margin-top:4px">N{sel}: {m['name']}</div>
+                <div style="font-size:2rem;font-weight:700;font-family:monospace;color:{col};margin:8px 0">{p*100:.1f}%</div>
+                <div style="height:5px;background:#eee;border-radius:3px">
+                  <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:3px"></div>
+                </div></div>""",unsafe_allow_html=True)
         else:
             st.markdown("<div class='sh'>Node types</div>",unsafe_allow_html=True)
             for t,c in TC.items(): st.markdown(f"<span style='color:{c}'>●</span>&nbsp;{TL[t]}",unsafe_allow_html=True)
@@ -4979,13 +5412,41 @@ with TABS[8]:
     for i,nid in enumerate(n for n in range(1,21) if n!=20):
         m=NODE_META[nid];col=TC[m["type"]];p=P.get(nid,.5)
         with cols4[i%4]:
-            st.markdown(f"""<div style="background:{col}18;border:1px solid {col}33;border-radius:8px;
-            padding:.55rem .7rem;margin-bottom:.4rem">
-            <div style="font-size:.65rem;color:{col};font-weight:700">N{nid} — {m['short']}</div>
-            <div style="font-size:1.1rem;font-weight:700;font-family:monospace;color:{col}">{p*100:.1f}%</div>
-            <div style="height:4px;background:#eee;border-radius:2px;margin-top:3px">
-              <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:2px"></div>
-            </div></div>""",unsafe_allow_html=True)
+            if nid == 1:
+                # Mark 8 Phase 3 — N1 grid chip uses compact doctrinal-state
+                # framing per JP M8/P3 lock-in (Option II, full consistency).
+                _n1_grid = _n1_audit_summary()
+                _n1_grid_accent = _n1_grid["color_accent"]
+                _n1_grid_bg = _n1_grid["color_bg"]
+                _n1_grid_border = _n1_grid["color_border"]
+                _n1_grid_label = _n1_grid["label"]
+                st.markdown(
+                    f"<div style='background:{_n1_grid_bg};border:1px solid {_n1_grid_border};"
+                    f"border-left:2px solid {_n1_grid_accent};border-radius:8px;"
+                    f"padding:.55rem .7rem;margin-bottom:.4rem'>"
+                    f"<div style='font-size:.65rem;color:{_n1_grid_accent};"
+                    f"font-weight:700'>N{nid} — {m['short']}</div>"
+                    f"<div style='font-family:Fraunces,Georgia,serif;font-size:.92rem;"
+                    f"font-weight:500;color:{_n1_grid_accent};line-height:1.15;"
+                    f"margin-top:2px'>{_n1_grid_label}</div>"
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:.7rem;"
+                    f"color:{_n1_grid_accent};margin-top:2px'>"
+                    f"<span style='font-size:.58rem;color:#9E9E9E;text-transform:uppercase;"
+                    f"letter-spacing:.05em;margin-right:4px'>depth</span>"
+                    f"{p*100:.1f}%</div>"
+                    f"<div style='height:4px;background:#eee;border-radius:2px;margin-top:3px'>"
+                    f"<div style='width:{p*100:.0f}%;height:100%;background:{_n1_grid_accent};"
+                    f"border-radius:2px'></div></div></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(f"""<div style="background:{col}18;border:1px solid {col}33;border-radius:8px;
+                padding:.55rem .7rem;margin-bottom:.4rem">
+                <div style="font-size:.65rem;color:{col};font-weight:700">N{nid} — {m['short']}</div>
+                <div style="font-size:1.1rem;font-weight:700;font-family:monospace;color:{col}">{p*100:.1f}%</div>
+                <div style="height:4px;background:#eee;border-radius:2px;margin-top:3px">
+                  <div style="width:{p*100:.0f}%;height:100%;background:{col};border-radius:2px"></div>
+                </div></div>""",unsafe_allow_html=True)
 
     # ── §5.1.19 N19 collider-bias methodology expander ─────────────────────
     # Sits on Inference tab (where structural-distortion content lives)
@@ -6897,7 +7358,7 @@ RISK FACTOR POSTERIORS:
 - N4 Dynamic risk: {Pa.get(4,0.167)*100:.1f}%
 
 DISTORTION CORRECTIONS (reduce effective risk weight):
-- N1 Burden of proof: {Pa.get(1,0.83)*100:.1f}%
+- N1 Burden of proof — Doctrinal posture: {_n1_audit_summary()['label']} (audit-pressure depth: {Pa.get(1,0.83)*100:.1f}%; this is an operationalisation of doctrinal posture toward the case-file audit state, NOT a probability over case facts; per Gardiner [1982] 2 SCR 368, asymmetric burdens apply per evidentiary input)
 - N5 Risk tools: {Pa.get(5,0.10)*100:.1f}%
 - N6 Ineffective counsel: {Pa.get(6,0.15)*100:.1f}%
 - N7 Bail-denial cascade: {Pa.get(7,0.40)*100:.1f}%
@@ -9868,6 +10329,7 @@ with TABS[12]:
 
     n1_audit_state = st.session_state.get("n1_audit", {})
     n1_target = compute_n1_prior_from_audit(n1_audit_state)
+    n1_summary_register = _n1_audit_summary(n1_audit_state)
     st.markdown(
         f"<div class='at' style='margin-top:.8rem'>"
         f"{'─'*60}\n  §RM.1 — BURDEN-OF-PROOF AUDIT REGISTER\n{'─'*60}\n"
@@ -9877,9 +10339,20 @@ with TABS[12]:
         f"    {N1_CITATIONS['ferguson']}\n"
         f"    {N1_CITATIONS['angelillo']}\n"
         f"    {N1_CITATIONS['lacasse']}\n\n"
-        f"  Audit-derived target P(N1=High):  {n1_target*100:.1f}%\n"
-        f"  Live N1 posterior (post-VE):      "
-        f"{Pa.get(1, 0.83)*100:.1f}%\n"
+        f"  Doctrinal posture:                "
+        f"<strong style='color:{n1_summary_register['color_accent']}'>"
+        f"{n1_summary_register['label'].upper()}</strong>\n"
+        f"  Audit-pressure depth:             "
+        f"{Pa.get(1, 0.83)*100:.1f}%   "
+        f"<span style='color:#9E9E9E;font-style:italic'>"
+        f"(operationalisation, not a probability)</span>\n"
+        f"  Audit-derived target value:       {n1_target*100:.1f}%   "
+        f"<span style='color:#9E9E9E;font-style:italic'>(internal CPT input)</span>\n"
+        f"  Audited inputs:                   "
+        f"{n1_summary_register['audited_count']} total — "
+        f"{n1_summary_register['satisfied_count']} satisfied, "
+        f"{n1_summary_register['pending_count']} pending, "
+        f"{n1_summary_register['insufficient_count']} insufficient\n"
         f"  Strict mode:                      "
         f"{'ON' if st.session_state.get('strict_mode', False) else 'off'}\n"
         f"</div>",
