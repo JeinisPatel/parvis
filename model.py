@@ -979,11 +979,25 @@ def compute_n1_prior_from_audit(audit_state: dict) -> float:
             continue
 
         total_weight += weight
-        if status != "satisfied":
-            # "pending" or "insufficient" both count as audit failure.
-            # Trust-with-transparency: PARVIS doesn't adjudicate the
-            # attestation; absence or self-flagged insufficiency is the
-            # only failure trigger.
+        if status == "insufficient":
+            # Mark 8 hotfix #3 (audit-math correctness): only "insufficient"
+            # counts as audit failure. "Pending" is administrative — it
+            # means the user has not yet recorded a basis, NOT that the
+            # burden has been assessed and found unmet. Conflating the two
+            # was producing a binary collapse: a single pending Gladue
+            # factor would pin N1 to the floor (20%), contradicting the
+            # Pattern A trust posture (defaults are trusted unless the
+            # user explicitly overrides).
+            #
+            # Doctrinal mapping per Mark 8 lock-in:
+            #   "satisfied"    → burden met (Crown BARD or defence BoP)
+            #   "insufficient" → user has reviewed and judged burden unmet
+            #   "pending"      → user has not yet attested (neutral)
+            #
+            # Trust-with-transparency: PARVIS records pending attestations
+            # in §RM.1 for adversarial review but does not penalise N1 for
+            # them. Strict mode surfaces pending attestations as a
+            # workflow prompt, not as an audit failure.
             failed_weight += weight
 
     if total_weight == 0.0:
