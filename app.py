@@ -59,6 +59,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from model import build_model, get_inference_engine, query_do_risk, NODE_META, EDGES_VE as EDGES, compute_n1_prior_from_audit
 from quantum_diagnostics import diagnose, format_report
 from bloch_sphere import draw_bloch_sphere, draw_comparison_chart
+from counterfactual_audit import render_counterfactual_audit_tab
 
 st.set_page_config(page_title="P.A.R.V.I.S — Bayesian Sentencing Network", layout="wide", initial_sidebar_state="collapsed",
     menu_items={"About":"PARVIS Xavier 7 — Research use only"})
@@ -2740,7 +2741,9 @@ except Exception as _canlii_err:
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake (Chat)",
               "📜 Criminal Record","🦅 Gladue","⚖️ SCE",
-              "🔬 Risk & Distortions","📊 Inference","📂 Documents",
+              "🔬 Risk & Distortions","📊 Inference",
+              "🔍 Counterfactual Audit",
+              "📂 Documents",
               "🔀 Scenarios","⚛️ Quantum","📄 Report"])
 
 # ── T0: Summary (Mark 8) ──────────────────────────────────────────────────────
@@ -6216,7 +6219,7 @@ with TABS[8]:
             )
 
 # ── T7: QBism + Bloch sphere ─────────────────────────────────────────────────
-with TABS[11]:
+with TABS[12]:
     # ════════════════════════════════════════════════════════════════════════
     # Quantum tab v3 — diagnostic-only redesign (Mark 8 build)
     # Per Appendix Q §AQ.4: this layer does not alter the VE posterior
@@ -7132,7 +7135,22 @@ with TABS[11]:
                 st.markdown(st.session_state.qbism_plain)
 
 # ── T8: Document analysis ─────────────────────────────────────────────────────
+# ── T9: Counterfactual Audit (Mark 8) ─────────────────────────────────────────
+# Per the Counterfactual Audit Panel Specification (May 2026):
+# This tab examines how the current Bayesian assessment depends on its
+# operative assumptions. It does not recommend an alternative outcome — it
+# identifies the conditions under which the law would justify a different
+# conclusion. Twelve doctrinally-anchored conditions span four clusters
+# (Doctrinal Application, Risk Tool Validity, Record Integrity, Procedural
+# Sequencing) — Tetrad-grounded; not a "Gladue-as-discount" tool.
+# Reads st.session_state.posteriors as input; writes only to its own
+# st.session_state.cf_audit slice — does not modify the baseline.
+# ──────────────────────────────────────────────────────────────────────────────
 with TABS[9]:
+    render_counterfactual_audit_tab()
+
+
+with TABS[10]:
     st.markdown("### Document analysis")
     st.caption("Upload legal documents for Tetrad-grounded analysis. The LLM provides guidance — **you retain full discretion**.")
     st.info("**Supported:** Gladue reports · IRCA reports · PCL-R/Static-99R assessments · Prior decisions · Transcripts · Bail records · Trauma assessments · Ineffective assistance records")
@@ -10649,7 +10667,7 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
 
 
 # ── T10: Scenarios — side-by-side comparison ─────────────────────────────────
-with TABS[10]:
+with TABS[11]:
     st.markdown("### Scenario comparison")
     st.caption("Save the current profile as a named scenario and compare up to four profiles side by side. Shows how distortion corrections shift DO designation risk.")
 
@@ -10794,7 +10812,7 @@ with TABS[10]:
 
 
 # ── T9: Audit report ──────────────────────────────────────────────────────────
-with TABS[12]:
+with TABS[13]:
     st.markdown("### Audit report")
     st.caption("Full inference documentation — exportable for legal review and viva presentation.")
     Pa=st.session_state.posteriors;da=Pa[20];bla,bca,_=rb(da)
