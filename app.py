@@ -8126,6 +8126,22 @@ with TABS[3]:
   padding:3px 12px; border-radius:20px;
 }
 
+/* Mark 8 push eight — N1 chip (audit register) sits beside the Node 20 pill
+   in the Intake header. Different visual register: JetBrains Mono, smaller
+   typesize, left-border accent in doctrinal-state colour. Reads as
+   constraint, not output. */
+.parvis-chat-chips {
+  margin-left:auto; display:flex; gap:8px; align-items:center;
+}
+.parvis-chat-chips .parvis-node20-pill { margin-left:0; }
+.parvis-n1-chip {
+  font-family:'JetBrains Mono', monospace;
+  font-size:.66rem; font-weight:600;
+  padding:3px 10px; border-radius:20px;
+  text-transform:uppercase; letter-spacing:0.04em;
+  white-space:nowrap;
+}
+
 /* ── Message rows ── */
 [data-testid="stChatMessage"] {
   padding: .25rem 0 !important;
@@ -8199,13 +8215,31 @@ with TABS[3]:
             f'Node 20 &nbsp;{P[20]*100:.1f}% &nbsp;{bl}'
             f'</div>'
         )
+
+    # Mark 8 push eight — N1 doctrinal-state chip. Audit register, sits left
+    # of the Node 20 pill. Uses _N1_STATE_DISPLAY palette via _n1_audit_summary.
+    _n1s = _n1_audit_summary()
+    _n1_p_intake = float(P.get(1, 0.83))
+    _n1_chip_html = (
+        f'<div class="parvis-n1-chip" '
+        f'style="background:{_n1s["color_bg"]};'
+        f'color:{_n1s["color_fg"]};'
+        f'border:1px solid {_n1s["color_border"]};'
+        f'border-left:3px solid {_n1s["color_accent"]}">'
+        f'N1 · {_n1s["label"]} · {_n1_p_intake*100:.0f}%'
+        f'</div>'
+    )
+    _chips_html = (
+        f'<div class="parvis-chat-chips">{_n1_chip_html}{_pill_html}</div>'
+    )
+
     st.markdown(f"""
 <div class="parvis-chat-header">
   <div>
     <div class="parvis-chat-title">💬 Intake (Chat)</div>
     <div class="parvis-chat-subtitle">Context-aware · {len(st.session_state.chat_history)//2} exchange(s) · Bayesian network live</div>
   </div>
-  {_pill_html}
+  {_chips_html}
 </div>""", unsafe_allow_html=True)
 
     # ── API settings (compact bar) ────────────────────────────────────────────
@@ -8287,6 +8321,11 @@ GLADUE FACTORS ACTIVE ({len(cG)}): {', '.join([f['l'] for f in cG]) if cG else '
 MORRIS/ELLIS SCE ({len(cS)}): {', '.join([f['l'] for f in cS]) if cS else 'None selected'}
 Connection strength: {st.session_state.conn} | Framework: {st.session_state.scefw.upper()}
 
+AUDIT STATE (N1 burden-of-proof audit, per Gardiner [1982] 2 SCR 368):
+- Doctrinal posture: {_n1_audit_summary()['label']}
+- Audited inputs: {_n1_audit_summary()['audited_count']} (satisfied: {_n1_audit_summary()['satisfied_count']}; pending: {_n1_audit_summary()['pending_count']}; insufficient: {_n1_audit_summary()['insufficient_count']})
+- Per Lifchus [1997] 3 SCR 320, BARD is a doctrinal posture, not a numeric threshold. The audit state above reflects whether each Crown-aggravating, defence-mitigating, or judicially-found input has had its burden discharged on the record. PARVIS does not, and structurally cannot, recommend designation at any posterior value.
+
 CRIMINAL RECORD ({len(cr)} conviction(s)):"""
         if cr:
             for e in cr:
@@ -8308,6 +8347,278 @@ YOUR ROLE:
 
 IMPORTANT: You model DESIGNATION RISK, not intrinsic dangerousness. Always maintain this framing."""
         return ctx
+
+    # ── §5.1.1 N1 burden-of-proof audit — chat-applied evidence ───────────────
+    # Mark 8 push eight: closes the audit hole identified during recon. Chat-
+    # applied evidence (which routes to profile_ev, outside the form-tab
+    # audit map) gets an N1 audit record on Apply (see chat_apply_ button
+    # below). This panel is where the user completes that audit: classifies
+    # provenance and use, and (if Crown-aggravating or defence-mitigating)
+    # supplies the attestation per Gardiner [1982] 2 SCR 368.
+    _intake_audit_recs = {
+        aid: rec
+        for aid, rec in (st.session_state.get("n1_audit") or {}).items()
+        if isinstance(aid, str) and aid.startswith("intake:")
+        and rec.get("tab") == "intake"
+    }
+    if _intake_audit_recs:
+        _intake_pending = sum(
+            1 for r in _intake_audit_recs.values()
+            if r.get("attestation_status", "pending") == "pending"
+            and r.get("provenance") not in (None, "unspecified")
+            and r.get("use") not in (None, "unspecified")
+        )
+        _intake_unclassified = sum(
+            1 for r in _intake_audit_recs.values()
+            if r.get("provenance") in (None, "unspecified")
+            or r.get("use") in (None, "unspecified")
+        )
+        _intake_satisfied = sum(
+            1 for r in _intake_audit_recs.values()
+            if r.get("attestation_status") == "satisfied"
+        )
+        _intake_insuf = sum(
+            1 for r in _intake_audit_recs.values()
+            if r.get("attestation_status") == "insufficient"
+        )
+        _exp_label_parts = [f"{len(_intake_audit_recs)} chat-applied"]
+        if _intake_unclassified:
+            _exp_label_parts.append(f"{_intake_unclassified} need classification")
+        if _intake_pending:
+            _exp_label_parts.append(f"{_intake_pending} pending attestation")
+        if _intake_satisfied:
+            _exp_label_parts.append(f"{_intake_satisfied} satisfied")
+        if _intake_insuf:
+            _exp_label_parts.append(f"{_intake_insuf} insufficient")
+        _exp_label = (
+            f"📋  §5.1.1 N1 audit — "
+            + ", ".join(_exp_label_parts)
+        )
+        with st.expander(
+            _exp_label,
+            expanded=(_intake_unclassified > 0 or _intake_pending > 0),
+        ):
+            st.markdown(
+                "<div style='font-family:Fraunces,serif;font-style:italic;"
+                "font-size:0.86rem;color:#5A5A5A;line-height:1.55;"
+                "margin-bottom:14px'>"
+                "Chat-applied evidence routes to the profile evidence vector, "
+                "outside the form-tab audit map. This panel closes the loop: "
+                "classify each input's provenance and use; where the result "
+                "is Crown-aggravating or defence-mitigating (or judicially "
+                "found by the sentencing judge), provide the attestation "
+                "basis per <em>R. v. Gardiner</em> [1982] 2 SCR 368 + "
+                "s.&nbsp;724(3)(e) <em>Criminal Code</em>. Per <em>Lifchus</em> "
+                "[1997] 3 SCR 320, this is doctrinal posture toward the "
+                "audit record — not a probability calculation."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            _PROV_OPTS = ["unspecified", "crown", "defence", "judicial", "agreed"]
+            _PROV_LABELS = {
+                "unspecified": "— Select provenance —",
+                "crown":       "Crown-tendered",
+                "defence":     "Defence-tendered",
+                "judicial":    "Judicially found",
+                "agreed":      "Agreed fact",
+            }
+            _USE_OPTS = ["unspecified", "aggravating", "mitigating",
+                         "contextual", "agreed_fact"]
+            _USE_LABELS = {
+                "unspecified": "— Select use —",
+                "aggravating": "Aggravating",
+                "mitigating":  "Mitigating",
+                "contextual":  "Contextual (no burden)",
+                "agreed_fact": "Agreed fact (no burden)",
+            }
+            _JUD_OPTS = ["unspecified", "found_by_sentencing_judge",
+                         "found_by_trial_judge", "ferguson_implied"]
+            _JUD_LABELS = {
+                "unspecified":               "— Select finding type —",
+                "found_by_sentencing_judge": "Found by sentencing judge (own finding on record)",
+                "found_by_trial_judge":      "Found by trial judge (res judicata)",
+                "ferguson_implied":          "Necessarily implied by verdict (Ferguson)",
+            }
+
+            for _aid, _rec in _intake_audit_recs.items():
+                _label = _rec.get("label", _aid)
+                _curr_status = _rec.get("attestation_status", "pending")
+                _curr_prov = _rec.get("provenance") or "unspecified"
+                _curr_use = _rec.get("use") or "unspecified"
+                _curr_jud = _rec.get("judicial_finding_type") or "unspecified"
+
+                # Status icon for sub-header
+                _icon = (
+                    "✓" if _curr_status == "satisfied"
+                    else "✗" if _curr_status == "insufficient"
+                    else "⚙" if (_curr_prov == "unspecified"
+                                 or _curr_use == "unspecified")
+                    else "⚠"
+                )
+
+                st.markdown(
+                    f"<div style='border-top:1px dashed #D8D5CE;"
+                    f"margin-top:14px;padding-top:10px'>"
+                    f"<div style='font-family:JetBrains Mono,monospace;"
+                    f"font-size:0.7rem;color:#185FA5;font-weight:700;"
+                    f"text-transform:uppercase;letter-spacing:0.04em'>"
+                    f"{_icon}  {_label}</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+                _cc1, _cc2 = st.columns(2)
+                with _cc1:
+                    _new_prov = st.selectbox(
+                        "Provenance",
+                        _PROV_OPTS,
+                        index=_PROV_OPTS.index(_curr_prov),
+                        format_func=lambda v: _PROV_LABELS[v],
+                        key=f"intake_audit_prov_{_aid}",
+                    )
+                with _cc2:
+                    _new_use = st.selectbox(
+                        "Use at sentencing",
+                        _USE_OPTS,
+                        index=_USE_OPTS.index(_curr_use),
+                        format_func=lambda v: _USE_LABELS[v],
+                        key=f"intake_audit_use_{_aid}",
+                    )
+
+                # Judicial finding sub-classification (only when relevant)
+                _new_jud = _curr_jud
+                if _new_prov == "judicial":
+                    _new_jud = st.selectbox(
+                        "Judicial finding type",
+                        _JUD_OPTS,
+                        index=_JUD_OPTS.index(_curr_jud)
+                            if _curr_jud in _JUD_OPTS else 0,
+                        format_func=lambda v: _JUD_LABELS[v],
+                        key=f"intake_audit_jud_{_aid}",
+                    )
+
+                # Persist classification changes & recompute applicable burden
+                _class_changed = (
+                    _new_prov != _curr_prov
+                    or _new_use != _curr_use
+                    or _new_jud != _curr_jud
+                )
+                if _class_changed:
+                    _rec["provenance"] = (
+                        None if _new_prov == "unspecified" else _new_prov
+                    )
+                    _rec["use"] = (
+                        None if _new_use == "unspecified" else _new_use
+                    )
+                    _rec["judicial_finding_type"] = (
+                        None if _new_jud == "unspecified" else _new_jud
+                    )
+                    _rec["applicable_burden"] = _applicable_burden(
+                        _rec["provenance"],
+                        _rec["use"],
+                        _rec["judicial_finding_type"],
+                    )
+                    _rec["is_default_classified"] = False
+                    st.session_state.n1_audit[_aid] = _rec
+                    st.rerun()
+
+                # Determine if a burden audit is required given the
+                # current classification (mirrors _n1_doctrinal_state)
+                _burden_required = False
+                if _new_prov == "crown" and _new_use == "aggravating":
+                    _burden_required = True
+                elif _new_prov == "defence" and _new_use == "mitigating":
+                    _burden_required = True
+                elif (_new_prov == "judicial"
+                      and _new_jud == "found_by_sentencing_judge"
+                      and _new_use in ("aggravating", "mitigating")):
+                    _burden_required = True
+
+                if _burden_required:
+                    _burden_label = _rec.get("applicable_burden", "BARD")
+                    st.markdown(
+                        f"<div style='background:#FFF7E8;border-left:3px "
+                        f"solid #BA7517;padding:10px 14px;margin:10px 0;"
+                        f"border-radius:4px;font-size:0.84rem;color:#3A3A3A;"
+                        f"line-height:1.55'>"
+                        f"<strong style='color:#7A4F0E'>{_burden_label} "
+                        f"audit required.</strong> "
+                        f"Per <em style='font-family:Fraunces,serif'>"
+                        f"R. v. Gardiner</em> [1982] 2 SCR 368 + s.&nbsp;"
+                        f"724(3)(e) <em>Criminal Code</em>: record the basis "
+                        f"on which {_burden_label} is claimed, or mark the "
+                        f"attestation insufficient."
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    _basis_default = _rec.get(
+                        "attestation_basis", ATTESTATION_BASES[0]
+                    )
+                    if _basis_default not in ATTESTATION_BASES:
+                        _basis_default = ATTESTATION_BASES[0]
+                    _new_basis = st.selectbox(
+                        "Basis on which the burden is claimed",
+                        ATTESTATION_BASES,
+                        index=ATTESTATION_BASES.index(_basis_default),
+                        key=f"intake_audit_basis_{_aid}",
+                    )
+                    _new_att = st.text_area(
+                        "Attestation detail (free text — recorded in §RM.1)",
+                        value=_rec.get("attestation", ""),
+                        height=70,
+                        key=f"intake_audit_text_{_aid}",
+                        placeholder=(
+                            "e.g. 'Admitted by accused at para 14 of plea "
+                            "allocution; transcript appended.'"
+                        ),
+                    )
+
+                    _status_opts = ["pending", "satisfied", "insufficient"]
+                    _status_lbls = {
+                        "pending":      "⚠ Pending — attestation incomplete",
+                        "satisfied":    "✓ Satisfied — burden met on the record",
+                        "insufficient": "✗ Insufficient — burden not met",
+                    }
+                    _curr_status_safe = (
+                        _curr_status if _curr_status in _status_opts
+                        else "pending"
+                    )
+                    _new_status = st.radio(
+                        "Audit status",
+                        _status_opts,
+                        index=_status_opts.index(_curr_status_safe),
+                        format_func=lambda s: _status_lbls[s],
+                        key=f"intake_audit_status_{_aid}",
+                    )
+
+                    _att_changed = (
+                        _new_basis != _basis_default
+                        or _new_att != _rec.get("attestation", "")
+                        or _new_status != _curr_status_safe
+                    )
+                    if _att_changed:
+                        _rec["attestation_basis"] = _new_basis
+                        _rec["attestation"] = _new_att
+                        _rec["attestation_status"] = _new_status
+                        st.session_state.n1_audit[_aid] = _rec
+                        # No rerun — let normal cycle propagate (avoids
+                        # text_area keystroke thrash)
+                else:
+                    # Non-burden classification — no attestation required
+                    if (_new_prov != "unspecified"
+                        and _new_use != "unspecified"):
+                        st.markdown(
+                            "<div style='font-family:Fraunces,serif;"
+                            "font-style:italic;font-size:0.78rem;"
+                            "color:#5A5A5A;margin:6px 0 4px 0;"
+                            "line-height:1.45'>"
+                            "No burden audit required for this classification "
+                            "(input falls outside the Gardiner asymmetry — "
+                            "contextual or agreed fact)."
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
 
     # ── Chat history display ──────────────────────────────────────────────────
     # Welcome message when no conversation yet
@@ -8374,9 +8685,26 @@ Or ask a question:
                         if st.button(f"✅ Apply", key=f"chat_apply_{msg_id}_{pi}_{nid}"):
                             st.session_state.profile_ev[nid] = float(val)
                             run_inf()
+                            # ── Mark 8 push eight — N1 audit hook for chat-applied evidence.
+                            # Per Gardiner [1982] 2 SCR 368, evidentiary inputs require
+                            # provenance/use classification and (where Crown-aggravating
+                            # or defence-mitigating) attestation. Intake has no default
+                            # classification per _TAB_DEFAULT_CLASSIFICATION — always
+                            # prompt — so the audit record is seeded as needs-classification
+                            # and surfaced in the §5.1.1 audit panel below the chat.
+                            audit_id = f"intake:N{nid}:{msg_id}:{pi}"
+                            audit_label = (
+                                f"Chat-applied — N{nid} ({nm}) set to {val*100:.0f}%"
+                            )
+                            _ensure_audit_record(audit_id, "intake", audit_label)
                             st.session_state.chat_history.append({
                                 "role": "assistant",
-                                "content": f"✅ Applied — N{nid} ({nm}) set to **{val*100:.0f}%**. Node 20 updated to **{st.session_state.posteriors[20]*100:.1f}%**.",
+                                "content": (
+                                    f"✅ Applied — N{nid} ({nm}) set to **{val*100:.0f}%**. "
+                                    f"Node 20 updated to **{st.session_state.posteriors[20]*100:.1f}%**.\n\n"
+                                    f"*N1 audit pending — classify provenance and attest in "
+                                    f"the §5.1.1 audit panel below.*"
+                                ),
                                 "proposals": []
                             })
                             st.rerun()
