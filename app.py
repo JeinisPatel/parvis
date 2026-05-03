@@ -356,17 +356,30 @@ N7_MULTIPLIERS = {
 # tri-state ordinal grade; per §RM.6, that grade additively boosts N7's
 # per-conviction bail-denial signal before threshold logic.
 
-# The four indicator keys; UI checkboxes set these on each conviction.
-# Adverse direction noted in inline comment.
+# The four legacy indicator keys plus one GDB-threshold flag.
+# UI checkboxes set these on each conviction. Adverse direction noted in
+# inline comment. The GDB threshold flag (n6_gdb_threshold_met) reflects
+# the user's constitutional judgment under R v GDB 2000 SCC 22 paras 26-29
+# that BOTH stages of the IAC test (deficient performance AND prejudice)
+# are made out. When set, this overrides the count-based grade and forces
+# Low confidence directly — reflecting that GDB IAC is a serious
+# constitutional finding.
 N6_INDICATORS = (
-    "n6_no_sce",           # adverse: SCE not submitted
-    "n6_inadequate_counsel",   # adverse: counsel culturally inadequate
-    "n6_judicial_criticism",   # adverse: judicial criticism of representation present
-    "n6_disproportionate",     # adverse: procedural outcome disproportionate
+    "n6_no_sce",           # adverse: SCE not submitted (GDB stage 1: deficient performance)
+    "n6_inadequate_counsel",   # adverse: counsel culturally inadequate (GDB stage 1)
+    "n6_judicial_criticism",   # adverse: judicial criticism of representation (GDB stages 1+2)
+    "n6_disproportionate",     # adverse: procedural outcome disproportionate (GDB stage 2: prejudice)
 )
+
+# Optional fifth flag — user's constitutional judgment. Not in N6_INDICATORS
+# tuple because it is not counted; it is checked separately and overrides.
+N6_GDB_THRESHOLD_KEY = "n6_gdb_threshold_met"
 
 # Threshold scheme per §RM.6.3 (JP 2026-04-28: option (c)).
 # 0 adverse  -> High;  1, 2, or 3 adverse -> Moderate;  4 adverse -> Low.
+# When n6_gdb_threshold_met is set, grade goes directly to Low regardless
+# of count — reflects GDB IAC as a serious constitutional finding under
+# Mark 8 IAC upgrade (May 2026).
 N6_GRADE_BY_COUNT = {0: "High", 1: "Moderate", 2: "Moderate", 3: "Moderate", 4: "Low"}
 
 # Additive boost to N7's per-conviction bail-denial signal per §RM.6.4.
@@ -389,7 +402,16 @@ def _n6_grade_for_conviction(conviction):
     Return the N6 confidence grade for a conviction per §RM.6.3.
     Grade depends only on this conviction's own indicators (no propagation
     per §RM.6.6: different counsel, different files).
+
+    Mark 8 IAC upgrade: if the user has set n6_gdb_threshold_met (their
+    constitutional judgment under R v GDB 2000 SCC 22 that both stages
+    of the IAC test are made out), grade goes directly to Low — overriding
+    the count-based scheme. This reflects the doctrinal reality that GDB
+    IAC is a serious constitutional finding, not a graduated indicator.
     """
+    adj = conviction.get("adj", {}) or {}
+    if bool(adj.get(N6_GDB_THRESHOLD_KEY, False)):
+        return "Low"
     return N6_GRADE_BY_COUNT[_n6_count_adverse(conviction)]
 
 
@@ -8784,21 +8806,41 @@ with TABS[4]:
                 help="R v Boutilier [2017] SCC 64 — set affirmatively where this conviction is sufficiently remote that age-burnout attenuation applies")
 
         # ── N6 (Ineffective Assistance of Counsel) indicators per §5.1.6 §3 ──
-        # Four binary indicators aggregate per §RM.6.3 to a confidence grade
-        # (High / Moderate / Low) which conditions the N7 cascade signal.
+        # Mark 8 IAC upgrade (May 2026): four legacy indicators are retained
+        # but reorganised into the two doctrinal stages of R v GDB 2000 SCC 22
+        # paras 26-29: deficient performance (stage 1) and prejudice (stage 2).
+        # A fifth flag captures the user's constitutional judgment that the
+        # GDB threshold is made out — when set, grade goes directly to Low
+        # regardless of indicator count. The four indicators continue to
+        # aggregate per §RM.6.3 when the GDB flag is unset, preserving the
+        # existing graded architecture.
         st.markdown(
             "<div style='margin-top:14px;margin-bottom:6px'>"
             "<span style='font-family:Fraunces,Georgia,serif;font-size:0.95rem;"
             "font-weight:500;color:#1A1A1A'>Representation quality indicators (N6)</span>"
             "<span style='font-family:Fraunces,serif;font-style:italic;font-size:0.78rem;"
-            "color:#707070;margin-left:8px'>Ch 5 §5.1.6 · Appendix RM §RM.6</span>"
+            "color:#707070;margin-left:8px'>Ch 5 §5.1.6 · Appendix RM §RM.6 · "
+            "<i>R v GDB</i> 2000 SCC 22 paras 26-29</span>"
             "<div style='font-family:Fraunces,serif;font-style:italic;font-size:0.78rem;"
             "color:#707070;margin-top:3px;line-height:1.5'>"
+            "Indicators are organised by the two stages of the <i>GDB</i> IAC test. "
             "Check each indicator that is adverse for this conviction. Any adverse "
             "indicator drops confidence to <em>Moderate</em>; all four adverse drops "
-            "to <em>Low</em>. Confidence grade conditions the N7 bail-denial cascade "
-            "signal additively (+0.00 / +0.10 / +0.20)."
+            "to <em>Low</em>. The <i>GDB</i> threshold flag below — when set — overrides "
+            "the count-based grade and forces <em>Low</em> directly. Grade conditions "
+            "the N7 bail-denial cascade signal additively (+0.00 / +0.10 / +0.20)."
             "</div></div>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Stage 1: Deficient performance ───────────────────────────────────
+        st.markdown(
+            "<div style='border-left:3px solid #BA7517;padding:4px 0 4px 10px;"
+            "margin:8px 0 4px 0;font-size:0.82rem;font-weight:600;color:#BA7517;"
+            "font-family:Fraunces,serif'>Stage 1 — Deficient performance "
+            "<span style='font-style:italic;font-weight:400;color:#888'>"
+            "(GDB para 27: counsel fell below standard of competent representation)"
+            "</span></div>",
             unsafe_allow_html=True,
         )
         cn1, cn2 = st.columns(2)
@@ -8808,26 +8850,81 @@ with TABS[4]:
                 value=False,
                 key="cr_adj_n6_no_sce",
                 help="§5.1.6 §3.i — adverse where Gladue, IRCA, or equivalent systemic "
-                     "context evidence was not meaningfully advanced at the original proceeding")
+                     "context evidence was not meaningfully advanced at the original proceeding. "
+                     "Maps to GDB stage 1: counsel failure to advance available arguments.")
+        with cn2:
             adj_n6_inadequate_counsel = st.checkbox(
                 "Counsel culturally inadequate",
                 value=False,
                 key="cr_adj_n6_inadequate_counsel",
                 help="§5.1.6 §3.ii — adverse where counsel did not demonstrate familiarity "
-                     "with applicable social context doctrine and its evidentiary use")
-        with cn2:
-            adj_n6_judicial_criticism = st.checkbox(
-                "Judicial criticism of representation",
-                value=False,
-                key="cr_adj_n6_judicial_criticism",
-                help="§5.1.6 §3.iii — adverse where the original court expressed concern, "
-                     "criticism, or reservation regarding the quality of advocacy")
-            adj_n6_disproportionate = st.checkbox(
-                "Procedural outcome disproportionate",
-                value=False,
-                key="cr_adj_n6_disproportionate",
-                help="§5.1.6 §3.iv — adverse where the procedural outcome was markedly "
-                     "disproportionate relative to offence gravity and comparator cases")
+                     "with applicable social context doctrine and its evidentiary use. "
+                     "Maps to GDB stage 1: counsel below standard of competent representation.")
+
+        # ── Stages 1+2: Mixed evidence ───────────────────────────────────────
+        st.markdown(
+            "<div style='border-left:3px solid #534AB7;padding:4px 0 4px 10px;"
+            "margin:8px 0 4px 0;font-size:0.82rem;font-weight:600;color:#534AB7;"
+            "font-family:Fraunces,serif'>Stages 1+2 — Mixed evidence "
+            "<span style='font-style:italic;font-weight:400;color:#888'>"
+            "(judicial criticism evidences both deficient performance and prejudice)"
+            "</span></div>",
+            unsafe_allow_html=True,
+        )
+        adj_n6_judicial_criticism = st.checkbox(
+            "Judicial criticism of representation",
+            value=False,
+            key="cr_adj_n6_judicial_criticism",
+            help="§5.1.6 §3.iii — adverse where the original court expressed concern, "
+                 "criticism, or reservation regarding the quality of advocacy. "
+                 "Judicial criticism on the record evidences both deficient performance "
+                 "(stage 1) and likely prejudice (stage 2).")
+
+        # ── Stage 2: Prejudice ───────────────────────────────────────────────
+        st.markdown(
+            "<div style='border-left:3px solid #A32D2D;padding:4px 0 4px 10px;"
+            "margin:8px 0 4px 0;font-size:0.82rem;font-weight:600;color:#A32D2D;"
+            "font-family:Fraunces,serif'>Stage 2 — Prejudice "
+            "<span style='font-style:italic;font-weight:400;color:#888'>"
+            "(GDB para 28: deficient performance caused a miscarriage of justice)"
+            "</span></div>",
+            unsafe_allow_html=True,
+        )
+        adj_n6_disproportionate = st.checkbox(
+            "Procedural outcome disproportionate",
+            value=False,
+            key="cr_adj_n6_disproportionate",
+            help="§5.1.6 §3.iv — adverse where the procedural outcome was markedly "
+                 "disproportionate relative to offence gravity and comparator cases. "
+                 "Maps to GDB stage 2: outcome-based prejudice — the result might have "
+                 "been different with competent counsel.")
+
+        # ── GDB constitutional threshold ─────────────────────────────────────
+        st.markdown(
+            "<div style='border:1px solid #A32D2D;border-radius:6px;"
+            "background:#FBF4F4;padding:10px 14px;margin:14px 0 6px 0'>"
+            "<div style='font-family:Fraunces,serif;font-size:0.88rem;"
+            "font-weight:600;color:#A32D2D;margin-bottom:4px'>"
+            "Constitutional finding under <i>GDB</i></div>"
+            "<div style='font-family:Fraunces,serif;font-style:italic;font-size:0.78rem;"
+            "color:#444;line-height:1.5;margin-bottom:6px'>"
+            "Set this flag only where, in your judgment, the combination of adverse "
+            "indicators meets the constitutional <i>GDB</i> threshold — that is, "
+            "<b>both</b> deficient performance (stage 1) <b>and</b> prejudice (stage 2) "
+            "are made out. When set, N6 confidence drops directly to <em>Low</em>, "
+            "which materially strengthens the N7 cascade signal."
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
+        adj_n6_gdb_threshold_met = st.checkbox(
+            "GDB IAC threshold made out (deficient performance + prejudice)",
+            value=False,
+            key="cr_adj_n6_gdb_threshold_met",
+            help="R v GDB 2000 SCC 22 paras 26-29 — set affirmatively only where "
+                 "you assess that both stages of the constitutional IAC test are "
+                 "established on the evidence. Sub-threshold concerns about counsel "
+                 "competence remain captured by the four indicators above. This flag "
+                 "is for the constitutional finding itself.")
 
         # Sentence type modifier — CSO/probation/discharge suggests limited dangerousness
         _sent_modifier = {
@@ -8859,12 +8956,62 @@ with TABS[4]:
             agg_boost = min(agg_boost + _drug_boost.get(cr_drugs_type, 0.06), 1.40)
 
         # Compute calibrated weight for this entry
+        # ── Gardiner ceiling (R v Gardiner [1982] 2 SCR 368) ─────────────────
+        # cal_weight measures how much of the conviction's nominal evidentiary
+        # weight survives production-condition and reliability scrutiny under
+        # the Tetrad. Per Gardiner, aggravators proved at sentencing are at
+        # 100% (proof beyond a reasonable doubt) — there is no probative space
+        # above that threshold. cal_weight is therefore clipped to [0.05, 1.0].
+        # Aggravators continue to carry forward through the seriousness tier
+        # (_ser_map) which is multiplied by cal_weight in the Boutilier
+        # pattern analysis (see lines computing seriousness * cal_weight).
+        # The agg_boost variable is retained on the conviction record for
+        # provenance/display but is NOT applied to cal_weight to avoid
+        # double-counting aggravators (once in _ser_map, once in agg_boost).
+
+        # ── N6 (IAC) standalone effect on cal_weight — Mark 8 push 1.5 ───────
+        # N6 is doctrinally bivalent. It conditions N7 (bail-denial cascade)
+        # additively per §RM.6.6 — preserved unchanged in the existing
+        # _n6_grade_for_conviction → _n6_boost_for_conviction pipeline.
+        # It also operates *in its own right* on the conviction's evidentiary
+        # weight: per R v GDB 2000 SCC 22, IAC compromises the conviction as
+        # a record of culpable conduct independent of any bail-denial
+        # coercion. The five flags therefore also produce a discount on
+        # cal_weight, with the magnitude attenuated when bail-denial is
+        # active to avoid double-counting the production-condition concern
+        # that the N7 cascade already captures.
+        #
+        # Calibration:
+        #   - 0.05 per sub-threshold indicator (max 0.20 for all four)
+        #   - 0.20 additional discount for the GDB constitutional flag
+        #   - max combined: 0.40 (all four + GDB, no bail-denial)
+        #   - attenuation: halved (×0.5) when bail-denial fully active,
+        #     scaling linearly with adj_bail to preserve §RM.6.6 protection.
+        #   - GDB flag stands alone: it produces its 0.20 discount even
+        #     without sub-threshold indicators, reflecting that the
+        #     constitutional finding may rest on grounds the four
+        #     indicators do not capture (e.g. Wong-style failure to
+        #     advise on plea).
+        n6_indicator_count = sum([
+            bool(adj_n6_no_sce),
+            bool(adj_n6_inadequate_counsel),
+            bool(adj_n6_judicial_criticism),
+            bool(adj_n6_disproportionate),
+        ])
+        n6_discount_strength = (
+            0.05 * n6_indicator_count
+            + 0.20 * (1.0 if adj_n6_gdb_threshold_met else 0.0)
+        )
+        n6_discount_attenuation = 1.0 - 0.5 * adj_bail
+        n6_factor = 1.0 - n6_discount_strength * n6_discount_attenuation
+
         raw_wt = 1.0
         cal_wt = float(np.clip(
-            raw_wt * sent_mod * agg_boost *
+            raw_wt * sent_mod *
             (1 - 0.55*adj_bail) * (1 - 0.40*adj_ewert) *
             (1 - 0.35*adj_police) * (1 - 0.30*adj_gladue) *
-            (1 - 0.25*adj_mm) * (1 - 0.45*adj_time), 0.05, 1.15))
+            (1 - 0.25*adj_mm) * (1 - 0.45*adj_time) *
+            n6_factor, 0.05, 1.0))
         pct_ret = cal_wt * 100
 
         col_ret = "#3B6D11" if pct_ret >= 70 else "#BA7517" if pct_ret >= 40 else "#A32D2D"
@@ -8925,6 +9072,8 @@ with TABS[4]:
                         "n6_inadequate_counsel":  adj_n6_inadequate_counsel,
                         "n6_judicial_criticism":  adj_n6_judicial_criticism,
                         "n6_disproportionate":    adj_n6_disproportionate,
+                        # Mark 8 IAC upgrade — GDB constitutional threshold flag
+                        "n6_gdb_threshold_met":   adj_n6_gdb_threshold_met,
                     },
                     "raw_weight":  1.0,
                     "cal_weight":  cal_wt,
