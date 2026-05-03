@@ -348,6 +348,137 @@ NODE_DOCTRINE = {
         "recent_dev": [
             "Growing recognition that cultural competence is part of the standard of professional judgment",
         ],
+        # Mark 8 push two — GDB analytical scaffold for document analyser.
+        # When IAC-relevant documents (transcripts, sentencing reasons,
+        # post-conviction review materials) are uploaded, the analyser uses
+        # this scaffold to systematically extract evidence and produce
+        # structured GDB findings.
+        "gdb_analytical_scaffold": {
+            "purpose": "Map document evidence onto the four sub-threshold IAC "
+                       "indicators and the GDB constitutional threshold. The "
+                       "user retains final discretion; the analyser proposes.",
+            "stage_one_deficient_performance": {
+                "test": "R v GDB 2000 SCC 22 paras 26-27: counsel's conduct fell "
+                        "below the standard of competent representation in the "
+                        "circumstances, considering the difficulty of the case "
+                        "and the resources available.",
+                "indicators_to_extract": [
+                    {
+                        "name": "n6_no_sce",
+                        "label": "SCE not submitted",
+                        "evidence_to_look_for": [
+                            "Sentencing reasons silent on Indigenous status, "
+                            "racialised background, or social context",
+                            "No Gladue or IRCA report referenced in the record",
+                            "Defence submissions on sentence omit systemic factors "
+                            "(s.718.2(e), Gladue, Ipeelee, Morris)",
+                            "Court notes counsel provided no contextual material",
+                        ],
+                        "evidentiary_threshold": "Set true where the record "
+                            "affirmatively shows SCE was not advanced. Do not "
+                            "set true merely because the document does not mention "
+                            "SCE — absence of evidence is not evidence of absence.",
+                    },
+                    {
+                        "name": "n6_inadequate_counsel",
+                        "label": "Counsel culturally inadequate",
+                        "evidence_to_look_for": [
+                            "Counsel's submissions reveal unfamiliarity with "
+                            "applicable doctrine (Gladue/Ipeelee/Morris/Ewert)",
+                            "Counsel fails to challenge culturally invalid "
+                            "actuarial evidence per Ewert paras 47, 67",
+                            "Counsel fails to advise on plea consequences for "
+                            "Indigenous accused (s.12 Canada Evidence Act)",
+                            "Counsel submissions misstate the legal standard "
+                            "for systemic factor consideration",
+                        ],
+                        "evidentiary_threshold": "Set true where the document "
+                            "shows specific instances of counsel falling below "
+                            "the culturally competent representation standard.",
+                    },
+                ],
+            },
+            "stage_one_two_mixed": {
+                "test": "Judicial criticism on the record evidences both "
+                        "deficient performance (stage 1) and likely prejudice "
+                        "(stage 2).",
+                "indicators_to_extract": [
+                    {
+                        "name": "n6_judicial_criticism",
+                        "label": "Judicial criticism of representation",
+                        "evidence_to_look_for": [
+                            "Sentencing judge expresses concern about quality "
+                            "of advocacy on the record",
+                            "Appellate court notes deficient representation in "
+                            "reasons",
+                            "Trial judge raises competence concerns sua sponte",
+                            "Judicial comments on counsel's failure to make "
+                            "obvious available arguments",
+                        ],
+                        "evidentiary_threshold": "Set true where the document "
+                            "contains explicit judicial expression of concern "
+                            "about counsel's representation. Implicit criticism "
+                            "does not meet this threshold.",
+                    },
+                ],
+            },
+            "stage_two_prejudice": {
+                "test": "R v GDB 2000 SCC 22 para 28: there is a reasonable "
+                        "probability that, but for counsel's deficient "
+                        "performance, the result of the proceeding would have "
+                        "been different. Prejudice can be procedural (the "
+                        "trial process was unfair) or outcome-based.",
+                "indicators_to_extract": [
+                    {
+                        "name": "n6_disproportionate",
+                        "label": "Procedural outcome disproportionate",
+                        "evidence_to_look_for": [
+                            "Sentence imposed markedly outside the range for "
+                            "comparable cases (consult sentencing-range "
+                            "jurisprudence in the relevant jurisdiction)",
+                            "Disposition appears inconsistent with offence "
+                            "gravity once mitigation is properly weighted",
+                            "Plea terms suggest the accused did not understand "
+                            "the consequences",
+                            "Outcome inconsistent with what competent counsel "
+                            "would have likely achieved",
+                        ],
+                        "evidentiary_threshold": "Set true where the document "
+                            "permits a comparator-based assessment that the "
+                            "outcome falls materially outside the expected "
+                            "range. Speculative disproportion does not meet "
+                            "this threshold.",
+                    },
+                ],
+            },
+            "constitutional_threshold": {
+                "test": "R v GDB 2000 SCC 22 paras 26-29: BOTH stages must be "
+                        "made out — deficient performance AND prejudice — for "
+                        "constitutional IAC to be established. The analyser "
+                        "proposes; the user makes the constitutional finding.",
+                "flag_name": "n6_gdb_threshold_met",
+                "label": "GDB IAC threshold made out",
+                "decision_rule": "Set true ONLY where (a) the document evidence "
+                    "supports at least one stage 1 indicator (deficient "
+                    "performance), AND (b) the document evidence supports the "
+                    "stage 2 indicator (prejudice) OR the judicial-criticism "
+                    "mixed-evidence indicator captures both stages, AND (c) "
+                    "the totality of the deficient performance is grave enough "
+                    "to support a constitutional finding rather than merely "
+                    "sub-threshold inadequacy. When in doubt, leave unset and "
+                    "let the user decide.",
+                "user_discretion_note": "The constitutional finding belongs to "
+                    "the user. If the analyser sets this true and the user "
+                    "disagrees, the user unticks. If the analyser leaves it "
+                    "unset and the user assesses the evidence supports a "
+                    "stronger finding, the user ticks.",
+            },
+            "narrative_summary_format": "Produce a 2-3 sentence summary in the "
+                "doc_analysis prose output describing what GDB-relevant evidence "
+                "was found and which indicators are supported. Format: "
+                "'GDB analysis: [evidence summary]. Indicators recommended: "
+                "[list]. Constitutional threshold: [recommended/not recommended].'",
+        },
         "update_note": "Monitor for appellate decisions specifically addressing Ewert challenges as a "
                        "required component of effective assistance.",
     },
@@ -1376,6 +1507,68 @@ def build_doctrinal_prompt() -> str:
             lines.append("Recent developments:")
             for dev in doc["recent_dev"]:
                 lines.append(f"  → {dev}")
+        # Mark 8 push two — surface GDB analytical scaffold where present
+        scaffold = doc.get("gdb_analytical_scaffold")
+        if scaffold:
+            lines.append("")
+            lines.append("══ GDB ANALYTICAL SCAFFOLD ══")
+            lines.append(f"Purpose: {scaffold['purpose']}")
+            lines.append("")
+
+            # Stage one — deficient performance
+            s1 = scaffold.get("stage_one_deficient_performance", {})
+            if s1:
+                lines.append("STAGE 1 — Deficient performance")
+                lines.append(f"  Test: {s1['test']}")
+                for ind in s1.get("indicators_to_extract", []):
+                    lines.append(f"  Indicator: {ind['name']} ({ind['label']})")
+                    lines.append(f"    Evidence to look for:")
+                    for e in ind["evidence_to_look_for"]:
+                        lines.append(f"      - {e}")
+                    lines.append(f"    Threshold: {ind['evidentiary_threshold']}")
+                lines.append("")
+
+            # Stages 1 + 2 — mixed
+            sm = scaffold.get("stage_one_two_mixed", {})
+            if sm:
+                lines.append("STAGES 1+2 — Mixed evidence")
+                lines.append(f"  Test: {sm['test']}")
+                for ind in sm.get("indicators_to_extract", []):
+                    lines.append(f"  Indicator: {ind['name']} ({ind['label']})")
+                    lines.append(f"    Evidence to look for:")
+                    for e in ind["evidence_to_look_for"]:
+                        lines.append(f"      - {e}")
+                    lines.append(f"    Threshold: {ind['evidentiary_threshold']}")
+                lines.append("")
+
+            # Stage two — prejudice
+            s2 = scaffold.get("stage_two_prejudice", {})
+            if s2:
+                lines.append("STAGE 2 — Prejudice")
+                lines.append(f"  Test: {s2['test']}")
+                for ind in s2.get("indicators_to_extract", []):
+                    lines.append(f"  Indicator: {ind['name']} ({ind['label']})")
+                    lines.append(f"    Evidence to look for:")
+                    for e in ind["evidence_to_look_for"]:
+                        lines.append(f"      - {e}")
+                    lines.append(f"    Threshold: {ind['evidentiary_threshold']}")
+                lines.append("")
+
+            # Constitutional threshold
+            ct = scaffold.get("constitutional_threshold", {})
+            if ct:
+                lines.append("CONSTITUTIONAL THRESHOLD")
+                lines.append(f"  Test: {ct['test']}")
+                lines.append(f"  Flag: {ct['flag_name']} ({ct['label']})")
+                lines.append(f"  Decision rule: {ct['decision_rule']}")
+                lines.append(f"  User discretion: {ct['user_discretion_note']}")
+                lines.append("")
+
+            if scaffold.get("narrative_summary_format"):
+                lines.append(f"Narrative format: {scaffold['narrative_summary_format']}")
+
+            lines.append("══ END GDB SCAFFOLD ══")
+
         if doc.get("update_note"):
             lines.append(f"UPDATE NOTE: {doc['update_note']}")
         lines.append("")

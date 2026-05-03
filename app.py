@@ -9693,9 +9693,14 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
                                         f"1. BAIL-DENIAL / COERCIVE PLEA (R v Antic [2017] SCC 27): Was this conviction "
                                         f"preceded by extended pre-trial detention? Any evidence of plea pressure? "
                                         f"Quote the relevant passage if present.\n"
-                                        f"2. INEFFECTIVE COUNSEL (R v GDB [2000] 1 SCR 520): Any indication of "
-                                        f"inadequate legal representation? Missed Gladue submissions? Failure to "
-                                        f"challenge tool evidence?\n"
+                                        f"2. INEFFECTIVE COUNSEL — STRUCTURED GDB ANALYSIS (R v GDB 2000 SCC 22 paras 26-29): "
+                                        f"Apply the GDB ANALYTICAL SCAFFOLD from the system prompt. For each of the four "
+                                        f"sub-threshold indicators (n6_no_sce, n6_inadequate_counsel, n6_judicial_criticism, "
+                                        f"n6_disproportionate), determine whether the document evidence supports setting the "
+                                        f"flag, applying the evidentiary thresholds in the scaffold. Then assess whether the "
+                                        f"GDB constitutional threshold (deficient performance + prejudice) is made out. "
+                                        f"Quote relevant passages. When in doubt, leave flags unset and note the user's "
+                                        f"discretion. The user retains final discretion on the constitutional finding.\n"
                                         f"3. GLADUE MISAPPLICATION (Morris 2021 ONCA 680 para 97): Was a Gladue report "
                                         f"filed? Was it engaged substantively or cited and ignored? Connection/causation "
                                         f"error present?\n"
@@ -9714,6 +9719,12 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
                                         f"  police_adj: [0.0-1.0]\n"
                                         f"  mm_adj: [0.0-1.0]\n"
                                         f"  time_adj: [0.0-1.0]\n"
+                                        f"  n6_no_sce: [true/false]\n"
+                                        f"  n6_inadequate_counsel: [true/false]\n"
+                                        f"  n6_judicial_criticism: [true/false]\n"
+                                        f"  n6_disproportionate: [true/false]\n"
+                                        f"  n6_gdb_threshold_met: [true/false]\n"
+                                        f"  n6_evidence_summary: [one sentence describing GDB-relevant evidence found]\n"
                                         f"  overall: [KEEP / REDUCE / SIGNIFICANT REDUCTION]\n"
                                         f"  rationale: [one sentence]"
                                     )
@@ -9734,6 +9745,17 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
                                         m = re.search(rf"{field}:\s*([0-9.]+)", result)
                                         if m:
                                             recs[field] = float(np.clip(float(m.group(1)), 0.0, 1.0))
+                                    # Mark 8 push two — parse the five IAC indicator flags
+                                    for n6_field in ["n6_no_sce","n6_inadequate_counsel",
+                                                     "n6_judicial_criticism","n6_disproportionate",
+                                                     "n6_gdb_threshold_met"]:
+                                        m = re.search(rf"{n6_field}:\s*(true|false)", result, re.IGNORECASE)
+                                        if m:
+                                            recs[n6_field] = m.group(1).lower() == "true"
+                                    # Capture the GDB evidence summary as a free-text field
+                                    summary_m = re.search(r"n6_evidence_summary:\s*(.+)", result)
+                                    if summary_m:
+                                        recs["n6_evidence_summary"] = summary_m.group(1).strip().rstrip('.')
                                     overall_m = re.search(r"overall:\s*(KEEP|REDUCE|SIGNIFICANT REDUCTION)", result, re.IGNORECASE)
                                     recs["overall"] = overall_m.group(1).upper() if overall_m else "REVIEW"
                                     st.session_state.criminal_record[i]["doc_recs"] = recs
@@ -9790,8 +9812,74 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
                                         f"font-size:.65rem;color:{diff_col}'>{diff_str}</div>"
                                         f"</div>", unsafe_allow_html=True)
 
+                            # ── IAC recommendations from GDB analytical scaffold ─
+                            # Mark 8 push two — show the analyser's IAC findings if
+                            # any of the five GDB-scaffold flags are present in doc_recs.
+                            iac_keys = ["n6_no_sce","n6_inadequate_counsel",
+                                        "n6_judicial_criticism","n6_disproportionate",
+                                        "n6_gdb_threshold_met"]
+                            iac_present = any(k in doc_recs for k in iac_keys)
+                            if iac_present:
+                                st.markdown(
+                                    "<div style='font-size:.66rem;text-transform:uppercase;"
+                                    "letter-spacing:0.14em;color:#707070;font-weight:600;"
+                                    "margin-top:.8rem;margin-bottom:.4rem'>"
+                                    "Suggested IAC indicators (GDB analytical scaffold)</div>",
+                                    unsafe_allow_html=True,
+                                )
+                                if doc_recs.get("n6_evidence_summary"):
+                                    st.markdown(
+                                        f"<div style='font-family:Fraunces,serif;"
+                                        f"font-style:italic;font-size:0.78rem;color:#555;"
+                                        f"line-height:1.5;margin-bottom:8px;padding:8px 12px;"
+                                        f"background:#FBF9F4;border-left:3px solid #BA7517;"
+                                        f"border-radius:3px'>"
+                                        f"<i>Analyser evidence summary:</i> "
+                                        f"{doc_recs['n6_evidence_summary']}.</div>",
+                                        unsafe_allow_html=True,
+                                    )
+                                iac_labels_map = [
+                                    ("n6_no_sce", "SCE not submitted", "Stage 1"),
+                                    ("n6_inadequate_counsel", "Counsel culturally inadequate", "Stage 1"),
+                                    ("n6_judicial_criticism", "Judicial criticism", "Stages 1+2"),
+                                    ("n6_disproportionate", "Outcome disproportionate", "Stage 2"),
+                                    ("n6_gdb_threshold_met", "GDB threshold made out", "Constitutional"),
+                                ]
+                                iac_cols = st.columns(5)
+                                for ii, (key, lbl, stage) in enumerate(iac_labels_map):
+                                    val = doc_recs.get(key)
+                                    cur = bool(e["adj"].get(key, False))
+                                    if val is True:
+                                        sug_text = "Recommend: SET"
+                                        sug_col = "#A32D2D" if not cur else "#888"
+                                    elif val is False:
+                                        sug_text = "Recommend: leave"
+                                        sug_col = "#3B6D11" if not cur else "#888"
+                                    else:
+                                        sug_text = "(no rec.)"
+                                        sug_col = "#BBB"
+                                    cur_text = "currently SET" if cur else "currently unset"
+                                    iac_cols[ii].markdown(
+                                        f"<div style='text-align:center;padding:6px 4px'>"
+                                        f"<div style='font-size:.62rem;color:#707070;"
+                                        f"text-transform:uppercase;letter-spacing:0.06em;"
+                                        f"font-weight:600'>{stage}</div>"
+                                        f"<div style='font-family:Fraunces,serif;"
+                                        f"font-size:.78rem;color:#1A1A1A;line-height:1.3;"
+                                        f"margin-top:2px'>{lbl}</div>"
+                                        f"<div style='font-family:JetBrains Mono,monospace;"
+                                        f"font-size:.68rem;color:{sug_col};margin-top:4px;"
+                                        f"font-weight:600'>{sug_text}</div>"
+                                        f"<div style='font-family:JetBrains Mono,monospace;"
+                                        f"font-size:.62rem;color:#999;margin-top:1px'>"
+                                        f"{cur_text}</div>"
+                                        f"</div>",
+                                        unsafe_allow_html=True,
+                                    )
+
                             # One-click apply
                             if st.button(f"Apply recommended adjustments", key=f"cr_apply_{i}"):
+                                # Apply distortion sliders
                                 for field in adj_labels:
                                     key_name = f"{field}_adj"
                                     if key_name in doc_recs:
@@ -9802,12 +9890,31 @@ The boost reflects §5.1.7 §2: "Bail denial combined with ineffective counsel m
                                                   "police" if field=="police" else \
                                                   "mm" if field=="mm" else "time"
                                         st.session_state.criminal_record[i]["adj"][adj_key] = doc_recs[key_name]
-                                # Recompute calibrated weight for this entry
+                                # Mark 8 push two — apply IAC indicator recommendations
+                                for iac_key in iac_keys:
+                                    if iac_key in doc_recs:
+                                        st.session_state.criminal_record[i]["adj"][iac_key] = bool(doc_recs[iac_key])
+                                # Recompute calibrated weight using the current full formula
+                                # (Mark 8 push 1.5 — includes N6 standalone discount with
+                                # bail-denial attenuation per §RM.6.6 protection).
                                 adj_u = st.session_state.criminal_record[i]["adj"]
+                                _n6_count = sum([
+                                    bool(adj_u.get("n6_no_sce", False)),
+                                    bool(adj_u.get("n6_inadequate_counsel", False)),
+                                    bool(adj_u.get("n6_judicial_criticism", False)),
+                                    bool(adj_u.get("n6_disproportionate", False)),
+                                ])
+                                _n6_strength = (
+                                    0.05 * _n6_count
+                                    + 0.20 * (1.0 if adj_u.get("n6_gdb_threshold_met", False) else 0.0)
+                                )
+                                _n6_attenuation = 1.0 - 0.5 * adj_u.get("bail", 0.0)
+                                _n6_factor = 1.0 - _n6_strength * _n6_attenuation
                                 new_cal = float(np.clip(
                                     1.0 * (1-0.55*adj_u["bail"]) * (1-0.40*adj_u["ewert"]) *
                                     (1-0.35*adj_u["police"]) * (1-0.30*adj_u["gladue"]) *
-                                    (1-0.25*adj_u["mm"]) * (1-0.45*adj_u["time"]), 0.05, 1.0))
+                                    (1-0.25*adj_u["mm"]) * (1-0.45*adj_u["time"]) *
+                                    _n6_factor, 0.05, 1.0))
                                 st.session_state.criminal_record[i]["cal_weight"] = new_cal
                                 _cr_feed_nodes()
                                 st.rerun()
