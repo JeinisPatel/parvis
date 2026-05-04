@@ -250,7 +250,11 @@ def rb(p):
     return "Very high","#A32D2D","#FCEBEB"
 
 def dobar(p, label="DO designation risk", show_cr=False):
-    bl,bc,bg = rb(p)
+    # Mark 8 push ten — band-by-default. Decimal subordinate when toggle ON,
+    # absent when toggle OFF. Same Lifchus rationale as Summary/Intake/spine
+    # readouts. See N20_BANDS_RATIONALE_HTML on Architecture tab.
+    band_lbl, bc, bg = band_for_n20(p)
+    show_num = show_numeric_posteriors()
     # Build criminal record contribution badge if requested
     cr_badge = ""
     if show_cr and "criminal_record" in st.session_state:
@@ -271,15 +275,34 @@ def dobar(p, label="DO designation risk", show_cr=False):
                 f"{f'  ·  <span style="color:#555">{esc_icon} {esc_pat.title()} pattern (Boutilier)</span>' if esc_pat else ''}"
                 f"</div>"
             )
+    # Left column: band-led readout. Decimal renders subordinate only when
+    # toggle ON. Right column: progress bar + label + cr badge (unchanged).
+    if show_num:
+        left_col = (
+            f'<div style="text-align:center;min-width:160px">'
+            f'<div style="font-size:.7rem;color:{bc};margin-bottom:2px">Node 20</div>'
+            f'<div style="font-family:Fraunces,Georgia,serif;font-size:1rem;'
+            f'font-weight:500;color:{bc};line-height:1.2">{band_lbl}</div>'
+            f'<div style="font-family:monospace;font-size:1.2rem;'
+            f'font-weight:600;color:{bc};opacity:0.7;margin-top:4px">{p*100:.1f}%</div>'
+            f'</div>'
+        )
+    else:
+        left_col = (
+            f'<div style="text-align:center;min-width:160px">'
+            f'<div style="font-size:.7rem;color:{bc};margin-bottom:4px">Node 20</div>'
+            f'<div style="font-family:Fraunces,Georgia,serif;font-size:1.05rem;'
+            f'font-weight:500;color:{bc};line-height:1.25">{band_lbl}</div>'
+            f'<div style="font-family:Fraunces,serif;font-style:italic;'
+            f'font-size:.66rem;color:{bc};opacity:0.7;margin-top:4px">'
+            f'doctrinal posture</div>'
+            f'</div>'
+        )
     return f"""<div style="background:{bg};border:1px solid {bc}44;border-radius:12px;
     padding:.8rem 1.2rem;margin-bottom:1rem;display:flex;align-items:center;gap:1.5rem">
-    <div style="text-align:center;min-width:80px">
-      <div style="font-size:.7rem;color:{bc};margin-bottom:2px">Node 20</div>
-      <div style="font-size:2rem;font-weight:700;font-family:monospace;color:{bc}">{p*100:.1f}%</div>
-      <div style="font-size:.8rem;font-weight:600;color:{bc}">{bl}</div>
-    </div>
+    {left_col}
     <div style="flex:1">
-      <div style="font-size:.82rem;font-weight:500;margin-bottom:6px">{label} — posterior probability</div>
+      <div style="font-size:.82rem;font-weight:500;margin-bottom:6px">{label}</div>
       <div style="height:5px;background:rgba(0,0,0,.08);border-radius:3px">
         <div style="width:{p*100:.0f}%;height:100%;background:{bc};border-radius:3px"></div>
       </div>
@@ -295,6 +318,72 @@ def _summary_band(p):
     if p < .70: return "Elevated", "#BA7517", "#FAEEDA"
     if p < .85: return "High",     "#A32D2D", "#FCEBEB"
     return "Very high", "#A32D2D", "#FCEBEB"
+
+
+# ── N20 qualitative bands (Mark 8 push ten — Lifchus register) ───────────────
+# Per Lifchus [1997] 3 SCR 320, BARD must not be quantified as a numeric
+# likelihood. Decimal posteriors invite the threshold reading the thesis
+# rejects. Bands restore the doctrinal register: "substantially supports DO"
+# names what the architecture is reading without quantifying it.
+#
+# Cuts: asymmetric around 0.5 by design — equivocal occupies a wider band
+# (.42–.58) because either side of equivocal must be a substantive reading
+# to warrant the qualitative label. Borderline values stay equivocal rather
+# than tipping into "weakly supports" prematurely.
+def band_for_n20(p):
+    """
+    Return (band_label, fg_color, bg_color) for the N20 posterior.
+    fg/bg colours mirror the rb() palette to preserve visual continuity
+    with the rest of the app — green for contraindicates, amber for
+    equivocal, red for supports.
+    """
+    if p < .15:  return "Strongly contraindicates DO",     "#3B6D11", "#EAF3DE"
+    if p < .30:  return "Substantially contraindicates DO","#3B6D11", "#EAF3DE"
+    if p < .42:  return "Weakly contraindicates DO",       "#3B6D11", "#EAF3DE"
+    if p < .58:  return "Equivocal",                       "#BA7517", "#FAEEDA"
+    if p < .70:  return "Weakly supports DO",              "#BA7517", "#FAEEDA"
+    if p < .85:  return "Substantially supports DO",       "#A32D2D", "#FCEBEB"
+    return "Strongly supports DO",                         "#A32D2D", "#FCEBEB"
+
+
+def show_numeric_posteriors() -> bool:
+    """
+    True iff the user has toggled on numeric posteriors (Architecture tab).
+    Default False — the rhetorical commitment is that the doctrinal default
+    is qualitative.
+    """
+    return bool(st.session_state.get("show_numeric_posteriors", False))
+
+
+# Canonical doctrinal-rationale write-up. Surfaces next to the toggle in the
+# Architecture tab; one-line cross-references appear on Summary and Intake
+# pointing readers here for the full argument.
+N20_BANDS_RATIONALE_HTML = """
+<div style='background:#F7F5F0;border-left:3px solid #BA7517;
+border-radius:4px;padding:14px 18px;margin:10px 0;
+font-family:Fraunces,Georgia,serif;font-size:.86rem;
+line-height:1.6;color:#3A3A3A'>
+<div style='font-family:JetBrains Mono,monospace;font-size:.66rem;
+font-weight:700;color:#7A4F0E;text-transform:uppercase;
+letter-spacing:.08em;margin-bottom:8px'>Why posteriors render as bands, not decimals</div>
+<p style='margin:0 0 10px 0;font-style:italic'>
+Beyond a reasonable doubt is a doctrinal posture, not a probability cut-off.
+<em>Lifchus</em> [1997] 3 SCR 320 holds that BARD must not be quantified as a
+numeric likelihood; trial judges who attempt to do so commit reversible error.
+The same constraint conditions PARVIS: a posterior of 0.91 displayed as
+&ldquo;91%&rdquo; invites the very category error the thesis rejects, even
+where italic disclaimers note the value is not a probability over case facts.
+Rendering posteriors as bands &mdash; <em>substantially supports DO</em>,
+<em>equivocal</em>, <em>weakly contraindicates DO</em> &mdash; restores the
+doctrinal register and refuses the threshold reading.
+</p>
+<p style='margin:0;font-style:italic;color:#5A5A5A'>
+Numeric posteriors remain available for analyst-facing work (thesis tables,
+audit verification, debugging) via the toggle below. The default is
+qualitative because the doctrinal default is qualitative.
+</p>
+</div>
+"""
 
 def _top_drivers(P, k=5):
     """
@@ -3141,7 +3230,8 @@ def render_dag_spine_svg(post):
             f'font-size="13" fill="#9E9E9E">Awaiting case data</text>'
         )
     else:
-        bl, bc, bg = rb(p20)
+        # Mark 8 push ten — band-by-default. Decimal exposed via toggle.
+        band_lbl, bc, bg = band_for_n20(p20)
         out.append(
             f'<rect x="{rd_x}" y="{rd_y}" width="{rd_w}" height="{rd_h}" rx="6" '
             f'fill="white" stroke="{bc}66" stroke-width="1"/>'
@@ -3151,17 +3241,32 @@ def render_dag_spine_svg(post):
             f'font-family="JetBrains Mono,monospace" font-size="7" font-weight="700" '
             f'fill="#888" letter-spacing="0.06em">N20 · DESIGNATION RISK</text>'
         )
-        out.append(
-            f'<text x="{rd_x+10}" y="{rd_y+36}" '
-            f'font-family="Fraunces,Georgia,serif" font-size="14" '
-            f'font-weight="600" fill="{bc}">{p20*100:.1f}%  {bl}</text>'
-        )
-        out.append(
-            f'<text x="{rd_x+10}" y="{rd_y+54}" '
-            f'font-family="Fraunces,serif" font-style="italic" '
-            f'font-size="7.5" fill="#888">'
-            f'doctrinal posture — not a probability</text>'
-        )
+        if show_numeric_posteriors():
+            out.append(
+                f'<text x="{rd_x+10}" y="{rd_y+34}" '
+                f'font-family="Fraunces,Georgia,serif" font-size="11" '
+                f'font-weight="600" fill="{bc}">{band_lbl}</text>'
+            )
+            out.append(
+                f'<text x="{rd_x+10}" y="{rd_y+50}" '
+                f'font-family="JetBrains Mono,monospace" font-size="9" '
+                f'font-weight="500" fill="{bc}" opacity="0.85">'
+                f'{p20*100:.1f}% · numeric posterior</text>'
+            )
+        else:
+            # Wrap longer band labels onto two lines if needed
+            font_size = 11 if len(band_lbl) > 22 else 13
+            out.append(
+                f'<text x="{rd_x+10}" y="{rd_y+34}" '
+                f'font-family="Fraunces,Georgia,serif" font-size="{font_size}" '
+                f'font-weight="600" fill="{bc}">{band_lbl}</text>'
+            )
+            out.append(
+                f'<text x="{rd_x+10}" y="{rd_y+54}" '
+                f'font-family="Fraunces,serif" font-style="italic" '
+                f'font-size="7.5" fill="#888">'
+                f'doctrinal posture — not a probability</text>'
+            )
 
     out.append('</svg>')
     return "".join(out)
@@ -3539,13 +3644,24 @@ with TABS[0]:
         "<div style=\"font-family:Fraunces,Georgia,serif;font-style:italic;font-size:0.95rem;color:#707070;margin-top:6px\">Awaiting case data</div>"
         "<div style=\"font-size:0.68rem;color:#9E9E9E;opacity:0.85;margin-top:10px;line-height:1.4\">Enter case profile, criminal record, or Gladue / SCE evidence to begin.</div>"
         "</div>") if _empty else (
+        # Mark 8 push ten — band-by-default. Decimal under toggle. Cross-
+        # reference points readers to the canonical Architecture-tab rationale.
         f"<div style=\"background:{_band_bg};border:1px solid {_band_fg}33;border-radius:14px;padding:18px 22px;text-align:center\">"
         f"<div style=\"font-size:0.66rem;text-transform:uppercase;letter-spacing:0.14em;color:{_band_fg};font-weight:700;margin-bottom:6px\">"
         "DO Designation Risk</div>"
-        f"<div style=\"font-family:monospace;font-size:3rem;font-weight:600;color:{_band_fg};line-height:1\">"
-        f"{P[20]*100:.1f}<span style=\"font-size:1.4rem;opacity:0.7\">%</span></div>"
-        f"<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:1rem;color:{_band_fg};margin-top:4px\">{_band_lbl}</div>"
-        f"<div style=\"font-size:0.68rem;color:{_band_fg};opacity:0.78;margin-top:8px;line-height:1.4\">pgmpy Variable Elimination · Tetrad-bound</div>"
+        + (
+            # Toggle ON — band first, decimal subordinate
+            f"<div style=\"font-family:'Fraunces',Georgia,serif;font-size:1.3rem;font-weight:500;color:{_band_fg};line-height:1.15;margin:8px 0 4px 0\">{band_for_n20(P[20])[0]}</div>"
+            f"<div style=\"font-family:monospace;font-size:1.2rem;font-weight:500;color:{_band_fg};opacity:0.75;line-height:1\">"
+            f"{P[20]*100:.1f}%</div>"
+            if show_numeric_posteriors() else
+            # Toggle OFF (default) — band only, no decimal
+            f"<div style=\"font-family:'Fraunces',Georgia,serif;font-size:1.5rem;font-weight:500;color:{_band_fg};line-height:1.2;margin:14px 0 6px 0\">{band_for_n20(P[20])[0]}</div>"
+        )
+        + f"<div style=\"font-family:'Fraunces',Georgia,serif;font-style:italic;font-size:0.82rem;color:{_band_fg};opacity:0.78;margin-top:6px\">doctrinal posture — not a probability</div>"
+        f"<div style=\"font-size:0.66rem;color:{_band_fg};opacity:0.65;margin-top:8px;line-height:1.4\">"
+        f"see Architecture tab → <em>Why posteriors render as bands</em>"
+        f"</div>"
         "</div>")}
     </div>
     """, unsafe_allow_html=True)
@@ -4475,6 +4591,18 @@ with TABS[1]:
             help="On renders the live DAG as a fixed panel on every tab. "
                  "Auto-hides on narrow viewports.",
         )
+        # Mark 8 push ten — Show numeric posteriors. Default OFF (the
+        # rhetorical commitment is that the doctrinal default is qualitative,
+        # per Lifchus). Toggle ON to expose decimals for analyst-facing work.
+        st.toggle(
+            "Show numeric posteriors",
+            value=st.session_state.get("show_numeric_posteriors", False),
+            key="show_numeric_posteriors",
+            help="Off (default) renders N20 as a qualitative band per Lifchus "
+                 "[1997] 3 SCR 320. On exposes the decimal posterior alongside "
+                 "the band — for thesis tables, audit verification, debugging.",
+        )
+        st.markdown(N20_BANDS_RATIONALE_HTML, unsafe_allow_html=True)
         if _use_svg_dag:
             components.html(render_dag_svg(P, sel), height=820, scrolling=False)
         else:
@@ -8649,7 +8777,9 @@ with TABS[3]:
     if "voice_inject"        not in st.session_state: st.session_state.voice_inject = ""
 
     # ── Header row ────────────────────────────────────────────────────────────
-    bl, bc, bg = rb(P[20])
+    # Mark 8 push ten — band-by-default. See band_for_n20() and the N20-bands
+    # rationale on the Architecture tab.
+    band_n20, bc, bg = band_for_n20(P[20])
     if _empty:
         _pill_html = (
             f'<div class="parvis-node20-pill" '
@@ -8659,11 +8789,20 @@ with TABS[3]:
             f'Node 20 &nbsp;—&nbsp; Awaiting case data'
             f'</div>'
         )
+    elif show_numeric_posteriors():
+        _pill_html = (
+            f'<div class="parvis-node20-pill" '
+            f'style="background:{bg};color:{bc};border:1px solid {bc}44">'
+            f'Node 20 &nbsp;{band_n20} &nbsp;<span style="opacity:0.7;'
+            f'font-family:JetBrains Mono,monospace;font-size:0.72rem;'
+            f'font-weight:500">{P[20]*100:.1f}%</span>'
+            f'</div>'
+        )
     else:
         _pill_html = (
             f'<div class="parvis-node20-pill" '
             f'style="background:{bg};color:{bc};border:1px solid {bc}44">'
-            f'Node 20 &nbsp;{P[20]*100:.1f}% &nbsp;{bl}'
+            f'Node 20 &nbsp;{band_n20}'
             f'</div>'
         )
 
