@@ -2949,6 +2949,434 @@ def render_dag_svg(post, sel=None):
     out.append('</g></svg>')
     return "".join(out)
 
+
+# ── DAG-as-spine vertical renderer (Mark 8 push nine) ─────────────────────────
+# Right-side, 230px-wide vertical spine. Sticky-positioned via CSS injected
+# at top-of-app. Y-coordinates carry through from NP (top → bottom = Layer I
+# → Layer III); x-coordinates compressed horizontally. N20 readout sits at the
+# bottom with qualitative-band placeholder text inside the box.
+#
+# Approach C hybrid: position:sticky inside an st.columns([wide, narrow])
+# wrapper. If sticky misbehaves, the spine still works — it just scrolls with
+# tab content rather than pinning. (See JP push-nine acceptance.)
+
+# Vertical-spine layout. Main nodes only — sub-nodes are visible in the full
+# Architecture tab DAG. At 230px width, sub-clusters can't clear each other
+# at the §5.1.14/15/17/18 spreads; the spine's job is at-a-glance live state,
+# not detailed enumeration.
+# Y-coordinates roughly mirror NP: Layer I top, Layer III bottom.
+NP_SPINE = {
+    # Layer I — top row
+    1: (0.50, 0.92), 2: (0.16, 0.83), 3: (0.50, 0.83), 4: (0.84, 0.83),
+    # Layer II — main grid (y-values spread evenly between 0.72 and 0.32)
+    5: (0.16, 0.72), 6: (0.50, 0.72), 9: (0.84, 0.72),
+    7: (0.16, 0.62), 10:(0.50, 0.62), 11:(0.84, 0.62),
+    8: (0.16, 0.52), 12:(0.50, 0.52), 13:(0.84, 0.52),
+    14:(0.16, 0.42), 15:(0.50, 0.42), 16:(0.84, 0.42),
+    17:(0.16, 0.32), 18:(0.50, 0.32), 19:(0.84, 0.32),
+    # Layer III — bottom anchor
+    20:(0.50, 0.10),
+}
+
+# Spine viewBox sized for a 230px-wide column at ~620px tall, leaving room for
+# the bottom N20 readout to render inside the spine SVG.
+# Spine viewBox sized for a 230px-wide column. Height = DAG region (530)
+# + N20 readout (60) + Bloch (200) + margins (80).
+SPINE_W, SPINE_H = 230, 620
+SPINE_DAG_H = 540  # vertical region reserved for the DAG itself
+
+def render_dag_spine_svg(post):
+    """
+    Compact right-side vertical spine rendering. Always visible (sticky)
+    across every tab. Reads the same posteriors / audit state as the full
+    Architecture-tab DAG, but renders without below-box labels and with
+    smaller node boxes calibrated for the 230px column width.
+
+    Includes an N20 readout panel at the bottom — qualitative posture line
+    plus the live decimal until push ten replaces decimals with bands.
+    """
+    def mpl_to_svg(mx, my):
+        # DAG occupies the top SPINE_DAG_H pixels; readout and Bloch sit below.
+        return (mx * (SPINE_W - 24)) + 12, ((1.0 - my) / 1.05) * (SPINE_DAG_H - 30) + 18
+
+    def box_dims(nid):
+        if isinstance(nid, str):
+            return 14, 9
+        return 22, 14
+
+    def clip_to_box(cx, cy, hw, hh, fx, fy):
+        dx, dy = cx - fx, cy - fy
+        if dx == 0 and dy == 0:
+            return cx, cy
+        tx = hw / abs(dx) if dx != 0 else float("inf")
+        ty = hh / abs(dy) if dy != 0 else float("inf")
+        t = min(tx, ty, 1.0)
+        return cx - dx * t, cy - dy * t
+
+    _n1_state = _n1_doctrinal_state()
+    _n1_pct_color = {
+        "default": "#3B6D11", "pressure": "#BA7517", "failure": "#A32D2D",
+    }.get(_n1_state, "#3B6D11")
+
+    out = [
+        f'<svg viewBox="0 0 {SPINE_W} {SPINE_H}" width="100%" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'style="background:#FBFAF7;font-family:Inter,system-ui,sans-serif;'
+        f'border:1px solid #E0DDD6;border-radius:6px">',
+        '<defs>'
+        '<marker id="sp-d" viewBox="0 0 10 10" refX="9" refY="5" '
+        'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
+        '<path d="M0,0 L10,5 L0,10 z" fill="#bbb"/></marker>'
+        '<marker id="sp-h" viewBox="0 0 10 10" refX="9" refY="5" '
+        'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
+        '<path d="M0,0 L10,5 L0,10 z" fill="#777"/></marker>'
+        '</defs>',
+    ]
+
+    # ── Header strip
+    out.append(
+        f'<rect x="6" y="4" width="{SPINE_W-12}" height="14" rx="3" '
+        f'fill="white" stroke="#E0DDD6" stroke-width="0.5"/>'
+        f'<text x="{SPINE_W/2:.0f}" y="14" text-anchor="middle" '
+        f'font-family="JetBrains Mono,monospace" font-size="7.5" '
+        f'font-weight="700" fill="#888" letter-spacing="0.06em">'
+        f'PARVIS — LIVE ARCHITECTURE</text>'
+    )
+
+    # ── Layer band labels at left margin
+    for label, my_top, my_bot in [
+        ("L1", 0.96, 0.78),
+        ("L2", 0.77, 0.27),
+        ("L3", 0.20, 0.00),
+    ]:
+        _, sy_top = mpl_to_svg(0, my_top)
+        _, sy_bot = mpl_to_svg(0, my_bot)
+        ly = (sy_top + sy_bot) / 2
+        out.append(
+            f'<rect x="2" y="{sy_top:.0f}" width="3" '
+            f'height="{sy_bot-sy_top:.0f}" rx="1" fill="#E0DDD6"/>'
+            f'<text x="3.5" y="{ly:.0f}" transform="rotate(-90 3.5 {ly:.0f})" '
+            f'text-anchor="middle" font-family="JetBrains Mono,monospace" '
+            f'font-size="6.5" font-weight="700" fill="#999" '
+            f'letter-spacing="0.06em">{label}</text>'
+        )
+
+    # ── Edges
+    for f, t in EDGES:
+        if f not in NP_SPINE or t not in NP_SPINE:
+            continue
+        x1c, y1c = mpl_to_svg(*NP_SPINE[f])
+        x2c, y2c = mpl_to_svg(*NP_SPINE[t])
+        hw_f, hh_f = box_dims(f)
+        hw_t, hh_t = box_dims(t)
+        x1, y1 = clip_to_box(x1c, y1c, hw_f, hh_f, x2c, y2c)
+        x2, y2 = clip_to_box(x2c, y2c, hw_t, hh_t, x1c, y1c)
+        out.append(
+            f'<path d="M{x1:.1f},{y1:.1f} L{x2:.1f},{y2:.1f}" '
+            f'fill="none" stroke="#bbb" stroke-width="0.5" '
+            f'marker-end="url(#sp-d)"/>'
+        )
+
+    # ── Nodes
+    for nid, (mx, my) in NP_SPINE.items():
+        m = NODE_META.get(nid, {})
+        col = TC.get(m.get("type", "constraint"), "#888")
+        p = post.get(nid, 0.5)
+        is_sub = isinstance(nid, str)
+        sx, sy = mpl_to_svg(mx, my)
+        hw, hh = box_dims(nid)
+
+        full_name = m.get("name", f"N{nid}")
+        type_label = TL.get(m.get("type", ""), "")
+        out.append(f'<g><title>N{nid}: {full_name}\n{type_label}</title>')
+
+        out.append(
+            f'<rect x="{sx-hw:.1f}" y="{sy-hh:.1f}" '
+            f'width="{hw*2}" height="{hh*2}" rx="3" '
+            f'fill="{col}22" stroke="{col}" stroke-width="0.8"/>'
+        )
+        id_fs = 8 if not is_sub else 5.5
+        out.append(
+            f'<text x="{sx:.1f}" y="{sy:.1f}" text-anchor="middle" '
+            f'dominant-baseline="central" font-size="{id_fs}" '
+            f'font-weight="700" fill="{col}">N{nid}</text>'
+        )
+
+        # Tick mark for posterior depth (main nodes only — bottom-edge fill)
+        if not is_sub:
+            tw = (hw * 2 - 4) * p
+            tcol = _n1_pct_color if nid == 1 else col
+            out.append(
+                f'<rect x="{sx-hw+2:.1f}" y="{sy+hh-2:.1f}" '
+                f'width="{tw:.2f}" height="1.6" rx="0.5" '
+                f'fill="{tcol}" opacity="0.85"/>'
+            )
+
+        out.append('</g>')
+
+    # ── N20 readout panel — sits below the DAG, inside the spine SVG.
+    # Empty-state A: when no case data has been entered, render the readout
+    # in italic muted register matching the Summary tab's "Awaiting case
+    # data" card. Once any evidence is entered, the live posterior + band
+    # take over.
+    p20 = post.get(20, 0.249)
+    is_empty = _case_is_empty()
+    rd_x, rd_w, rd_h = 8, SPINE_W - 16, 64
+    rd_y = SPINE_DAG_H + 8
+
+    if is_empty:
+        # Empty state — match the main page register
+        out.append(
+            f'<rect x="{rd_x}" y="{rd_y}" width="{rd_w}" height="{rd_h}" rx="6" '
+            f'fill="#FBFAF7" stroke="#E0DDD6" stroke-width="1"/>'
+        )
+        out.append(
+            f'<text x="{rd_x+rd_w/2:.0f}" y="{rd_y+18}" text-anchor="middle" '
+            f'font-family="JetBrains Mono,monospace" font-size="7" font-weight="700" '
+            f'fill="#999" letter-spacing="0.06em">N20 · DESIGNATION RISK</text>'
+        )
+        out.append(
+            f'<text x="{rd_x+rd_w/2:.0f}" y="{rd_y+42}" text-anchor="middle" '
+            f'font-family="Fraunces,Georgia,serif" font-style="italic" '
+            f'font-size="13" fill="#9E9E9E">Awaiting case data</text>'
+        )
+    else:
+        bl, bc, bg = rb(p20)
+        out.append(
+            f'<rect x="{rd_x}" y="{rd_y}" width="{rd_w}" height="{rd_h}" rx="6" '
+            f'fill="white" stroke="{bc}66" stroke-width="1"/>'
+        )
+        out.append(
+            f'<text x="{rd_x+10}" y="{rd_y+15}" '
+            f'font-family="JetBrains Mono,monospace" font-size="7" font-weight="700" '
+            f'fill="#888" letter-spacing="0.06em">N20 · DESIGNATION RISK</text>'
+        )
+        out.append(
+            f'<text x="{rd_x+10}" y="{rd_y+36}" '
+            f'font-family="Fraunces,Georgia,serif" font-size="14" '
+            f'font-weight="600" fill="{bc}">{p20*100:.1f}%  {bl}</text>'
+        )
+        out.append(
+            f'<text x="{rd_x+10}" y="{rd_y+54}" '
+            f'font-family="Fraunces,serif" font-style="italic" '
+            f'font-size="7.5" fill="#888">'
+            f'doctrinal posture — not a probability</text>'
+        )
+
+    out.append('</svg>')
+    return "".join(out)
+
+
+def render_bloch_spine_svg(post):
+    """
+    Standalone SVG Bloch sphere sized for the spine's expandable panel.
+    Reuses the Quantum tab's projection convention. Empty-state-aware:
+    when no case has been entered, vector renders muted grey and the
+    pre-decisional ambiguity ring is suppressed.
+    """
+    BL_W, BL_H = 230, 220
+    bl_cx, bl_cy = BL_W / 2, BL_H / 2 + 8
+    bl_R = 75
+
+    p20 = post.get(20, 0.249)
+    is_empty = _case_is_empty()
+    rw_local = sum(post.get(n, .5) for n in [2, 3, 4, 18]) / 4
+    mw_local = sum(post.get(n, .5) for n in [5, 6, 10, 12, 14]) / 5
+    p_clamped = max(-1.0, min(1.0, 1 - 2 * p20))
+    theta = math.acos(p_clamped)
+    phi = math.atan2(rw_local, mw_local)
+    ry, rx = 0.5, 0.25
+
+    def proj(x, y, z):
+        x1 = x * math.cos(ry) - z * math.sin(ry)
+        y1 = y
+        z1 = x * math.sin(ry) + z * math.cos(ry)
+        x2 = x1
+        y2 = y1 * math.cos(rx) - z1 * math.sin(rx)
+        z2 = y1 * math.sin(rx) + z1 * math.cos(rx)
+        f = 3.2
+        return (bl_cx + x2 * bl_R * f / (f + z2 + 2),
+                bl_cy - y2 * bl_R * f / (f + z2 + 2))
+
+    out = [
+        f'<svg viewBox="0 0 {BL_W} {BL_H}" width="100%" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'style="background:white;border:1px solid #E0DDD6;border-radius:6px;'
+        f'display:block">'
+    ]
+
+    # Sphere outline
+    out.append(
+        f'<circle cx="{bl_cx:.1f}" cy="{bl_cy:.1f}" r="{bl_R}" '
+        f'fill="rgba(220,225,235,0.18)" stroke="#999" stroke-width="0.8"/>'
+    )
+
+    # Equator
+    eq_pts = []
+    for a_deg in range(0, 361, 6):
+        a = math.radians(a_deg)
+        ex, ey = proj(math.cos(a), 0, math.sin(a))
+        eq_pts.append(f"{ex:.1f},{ey:.1f}")
+    out.append(
+        f'<polyline points="{" ".join(eq_pts)}" '
+        f'fill="none" stroke="#666" stroke-width="0.7" opacity="0.55"/>'
+    )
+
+    # Pole axis
+    npx, npy = proj(0, 1, 0)
+    spx, spy = proj(0, -1, 0)
+    out.append(
+        f'<line x1="{npx:.1f}" y1="{npy:.1f}" '
+        f'x2="{spx:.1f}" y2="{spy:.1f}" '
+        f'stroke="#1B2A4A" stroke-width="0.7" stroke-dasharray="3 3" opacity="0.45"/>'
+    )
+
+    # R / M terminators
+    rxp, ryp = proj(0.95, 0, 0)
+    mxp, myp = proj(-0.95, 0, 0)
+    out.append(
+        f'<text x="{rxp+3:.1f}" y="{ryp+3:.1f}" '
+        f'font-family="monospace" font-size="8" font-weight="700" '
+        f'fill="#C0392B">R</text>'
+    )
+    out.append(
+        f'<text x="{mxp-9:.1f}" y="{myp+3:.1f}" '
+        f'font-family="monospace" font-size="8" font-weight="700" '
+        f'fill="#1A6B35">M</text>'
+    )
+
+    # State vector
+    if is_empty:
+        vec_col, vec_op = "#BBBBBB", 0.55
+    else:
+        vec_col = "#C0392B" if p20 >= 0.55 else "#B8850A" if p20 >= 0.35 else "#1A6B35"
+        vec_op = 1.0
+    svx = math.sin(theta) * math.cos(phi)
+    svy = math.cos(theta)
+    svz = math.sin(theta) * math.sin(phi)
+    ovx, ovy = proj(0, 0, 0)
+    vpx, vpy = proj(svx * 0.92, svy * 0.92, svz * 0.92)
+    out.append(
+        f'<line x1="{ovx:.1f}" y1="{ovy:.1f}" '
+        f'x2="{vpx:.1f}" y2="{vpy:.1f}" '
+        f'stroke="{vec_col}" stroke-width="2.2" opacity="{vec_op}" '
+        f'stroke-linecap="round"/>'
+    )
+    ang = math.atan2(vpy - ovy, vpx - ovx)
+    ah1x = vpx - 7 * math.cos(ang - 0.4)
+    ah1y = vpy - 7 * math.sin(ang - 0.4)
+    ah2x = vpx - 7 * math.cos(ang + 0.4)
+    ah2y = vpy - 7 * math.sin(ang + 0.4)
+    out.append(
+        f'<polygon points="{vpx:.1f},{vpy:.1f} '
+        f'{ah1x:.1f},{ah1y:.1f} {ah2x:.1f},{ah2y:.1f}" '
+        f'fill="{vec_col}" opacity="{vec_op}"/>'
+    )
+    out.append(
+        f'<circle cx="{ovx:.1f}" cy="{ovy:.1f}" r="1.8" fill="#999"/>'
+    )
+
+    # Pre-decisional ambiguity ring
+    si_local = 1.0 - abs(2 * p20 - 1)
+    if si_local > 0.6 and not is_empty:
+        ring_pts = []
+        for a_deg in range(0, 361, 6):
+            a = math.radians(a_deg)
+            ex, ey = proj(math.cos(a), 0, math.sin(a))
+            ring_pts.append(f"{ex:.1f},{ey:.1f}")
+        out.append(
+            f'<polyline points="{" ".join(ring_pts)}" '
+            f'fill="none" stroke="#B8850A" stroke-width="1.5" '
+            f'stroke-dasharray="4 4" opacity="0.6"/>'
+        )
+
+    out.append('</svg>')
+    return "".join(out)
+
+
+# ── Sticky-spine CSS (Mark 8 push nine) ──────────────────────────────────────
+# Two CSS blocks because components.html creates an isolated iframe:
+# (1) Parent-level — applied via st.markdown to push main content left and
+#     reposition the components.html iframe to fixed-right.
+# (2) Iframe-internal — applied inside components.html, styles the spine's
+#     own contents (collapse handle, mini-Bloch caption).
+# Targeting the iframe by [height="900"] is brittle — if the spine height
+# changes, the selector must be updated. Acceptable for sandbox.
+SPINE_FIXED_CSS = """
+<style>
+@media (max-width: 1100px) {
+    .parvis-spine-fixed { display: none !important; }
+}
+@media (min-width: 1101px) {
+    .main .block-container,
+    section[data-testid="stMain"] .block-container {
+        max-width: calc(100% - 260px) !important;
+        margin-right: 250px !important;
+    }
+}
+.parvis-spine-fixed {
+    position: fixed;
+    top: 4rem;
+    right: 1rem;
+    width: 230px;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+/* ── Click-to-expand Bloch toggle (Mark 8 push nine.f) ─────────────────── */
+.parvis-spine-bloch-toggle {
+    margin-top: 8px;
+    border: 1px solid #E0DDD6;
+    border-radius: 6px;
+    background: #FBFAF7;
+    padding: 0;
+}
+.parvis-spine-bloch-toggle > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 8px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #888;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    user-select: none;
+    transition: color 0.15s ease;
+}
+.parvis-spine-bloch-toggle > summary:hover { color: #555; }
+.parvis-spine-bloch-toggle > summary::-webkit-details-marker { display: none; }
+.parvis-spine-bloch-toggle[open] > summary {
+    border-bottom: 1px solid #E0DDD6;
+}
+.parvis-spine-bloch-toggle[open] > summary::after { content: "  ↓"; }
+</style>
+"""
+
+def render_spine_floating():
+    """
+    Render the live DAG spine + click-to-expand Bloch sphere as a floating
+    fixed-position panel on the right edge.
+
+    The DAG + N20 readout always render. The Bloch sphere lives inside a
+    <details> element — collapsed by default, click to expand inline.
+    Pure HTML/CSS — no Streamlit rerun on toggle.
+    """
+    P_local = st.session_state.posteriors
+    spine_html = (
+        f'<div class="parvis-spine-fixed">'
+        f'{render_dag_spine_svg(P_local)}'
+        f'<details class="parvis-spine-bloch-toggle">'
+        f'<summary>QBism · belief state →</summary>'
+        f'<div style="margin-top:6px">'
+        f'{render_bloch_spine_svg(P_local)}'
+        f'</div>'
+        f'</details>'
+        f'</div>'
+    )
+    st.markdown(spine_html, unsafe_allow_html=True)
+
+
 # ── CanLII availability ───────────────────────────────────────────────────────
 try:
     from canlii_client import (
@@ -2978,6 +3406,20 @@ except Exception as _canlii_err:
     def search_with_filters(*a, **kw): return {}
     def get_tracked_updates(*a, **kw): return {}
     def flatten_search_results(*a, **kw): return []
+
+# ── DAG-as-spine (Mark 8 push nine) ──────────────────────────────────────────
+# Inject sticky/fixed CSS and render the floating spine before the tab strip.
+# The spine then sits at top:4rem on the right edge of every viewport on every
+# tab. The script reruns on every interaction, which re-renders the spine
+# with live posteriors and audit state — no per-tab wiring required.
+#
+# Toggle via session-state for users who want full-width tab content.
+if "show_dag_spine" not in st.session_state:
+    st.session_state.show_dag_spine = True
+
+if st.session_state.show_dag_spine:
+    st.markdown(SPINE_FIXED_CSS, unsafe_allow_html=True)
+    render_spine_floating()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 TABS=st.tabs(["📋 Summary","🕸️ Architecture","📋 Profile","💬 Intake (Chat)",
@@ -4023,6 +4465,15 @@ with TABS[1]:
             value=True,
             key="use_svg_dag",
             help="Off reverts to the matplotlib renderer.",
+        )
+        # Mark 8 push nine — DAG-as-spine toggle. Default on; flip off to
+        # restore full-width tab content. Spine auto-hides below 1100px viewport.
+        st.toggle(
+            "DAG spine (right-side, sticky)",
+            value=st.session_state.get("show_dag_spine", True),
+            key="show_dag_spine",
+            help="On renders the live DAG as a fixed panel on every tab. "
+                 "Auto-hides on narrow viewports.",
         )
         if _use_svg_dag:
             components.html(render_dag_svg(P, sel), height=820, scrolling=False)
